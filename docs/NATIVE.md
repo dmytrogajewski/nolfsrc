@@ -343,10 +343,13 @@ Mesa EGL vendor with `__EGL_VENDOR_LIBRARY_FILENAMES` on hybrid systems).
 The scene renderer follows the original renderer (port reference:
 `src/modern/render`) and reads its console variables each frame:
 
-- Models are lit per vertex (`model_lighting`): the world's light grid, then up
-  to `MaxModelLights` dynamic lights and the world's static lights that are not
-  `FastLightObjects`, against bind-pose normals (and a `NormalRef` node's
-  frame). `Saturate`/`ModelSaturation` scale them; `FLAG_NOLIGHT` is fullbright.
+- Models are lit per vertex (`model_lighting`): the world's light grid, moved
+  towards the global light's colour where the model sees the sky towards it
+  (`ModelApplySun`, `ModelSunVariance`; the level's `StaticSunLight` and the
+  game's time of day), then up to `MaxModelLights` dynamic lights and the
+  world's static lights that are not `FastLightObjects`, against bind-pose
+  normals (and a `NormalRef` node's frame). `Saturate`/`ModelSaturation` scale
+  them; `FLAG_NOLIGHT` is fullbright.
 - Dynamic lights reach lightmaps (`WorldLightmaps::update`, `LightSaturate`,
   solid and front-only lights), vertex-lit polygons and sprites.
 - `Saturate` doubles the lightmap and vertex colours; the global light scale
@@ -355,7 +358,11 @@ The scene renderer follows the original renderer (port reference:
 - `FogEnable`, `FogR/G/B`, `FogNearZ/FarZ`, sky fog, `FLAG_FOGDISABLE`, and
   additive/multiply objects fogging to black.
 - Blob shadows (`model_shadows`, `MaxModelShadows`, `ModelShadowAlpha`,
-  `ModelShadowOffset`) under `FLAG_SHADOW` models with `ShadowEnable`.
+  `ModelShadowOffset`) under `FLAG_SHADOW` models with `ShadowEnable`, or with
+  `ModelShadowProj` (the Shadows option's Projected, which the shipped menu
+  left out) the original's projected shadows: each such model's shape drawn
+  from its strongest light that reaches it into a shadow map
+  (`ModelShadowProjRes` texels) and laid on the world (`shadow_maps`).
 - Detail textures and world environment maps on a third unit (`DetailTextures`,
   `DetailTextureAdd`, `DetailTextureScale`, `EnvMapWorld`), from the DTX's
   `DetailTex`/`EnvMap` link; water's environment map (`EnvMapPolyGrids`).
@@ -363,8 +370,23 @@ The scene renderer follows the original renderer (port reference:
   game's `EnvMap` texture; the sky's cloud shadow (`SetGlobalPanInfo`).
 - `FarZ`, `ModelLODOffset`, `DynamicLight`, `FastLight`.
 
-Texture filtering stays trilinear (at least the original's bilinear); `SkyScale`
-and gamma are not applied.
+Texture filtering follows `Bilinear`, `Trilinear` and `Anisotropic` (the
+original's defaults: bilinear). `SkyScale` and gamma are not applied.
+
+Enhanced lighting (`EnhancedLighting`, the advanced display options' toggle; off
+by default, which keeps the original look) needs the OpenGL device's
+programmable extension (GLSL 1.20 programs and depth targets, `rdev.h`):
+
+- Models are lit per pixel (`pixel_lighting`) from the same terms -- grid
+  ambient, sun, dynamic and static lights -- with normals smoothed from the
+  skinned triangles. The strongest of the grid's lights near a model are taken
+  out of its flat ambient and given back with their direction, unless the
+  world stands between them (lights in their fixtures excepted).
+- Every solid model casts soft shadows from its `ShadowLightsPerCaster`
+  strongest lights (the sun where it sees the sky, dynamic and static lights)
+  that reach it, as deep as each light is bright where the shadow falls, for
+  the `MaxShadowCasters` nearest models, `ShadowMapRes` texels across.
+  Characters keep a fainter blob where they meet the ground.
 
 ## Import locally owned data
 

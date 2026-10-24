@@ -12,6 +12,9 @@ struct WorldRenderOptions {
     // The frame's dynamic lights on the world, ramped by LightSaturate.
     std::vector<DynamicWorldLight> lights;
     float light_saturate=1;
+    // The visible world models where they are now, for the lights on their
+    // lightmaps.
+    std::vector<LightmapPlacement> placements;
     // DetailTextures, DetailTextureAdd (added signed, else modulating),
     // DetailTextureScale and EnvMapWorld.
     bool detail_textures=true,detail_add=true,environment_maps=true,polygrid_environment=true;

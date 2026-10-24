@@ -134,6 +134,9 @@ LTRESULT NativeClient::render(HOBJECT camera,std::optional<std::span<HOBJECT con
     options.models.far_distance=std::clamp(variable("FarZ",10000),3.f,500000.f);
     options.models.max_lights=std::size_t(std::clamp(variable("MaxModelLights",4),0.f,float(ModelLighting::max_lights)));
     options.models.dynamic_lights=variable("DynamicLight",1)!=0;
+    options.filter={variable("Bilinear",1)!=0,variable("Trilinear",0)!=0,std::clamp(variable("Anisotropic",0),1.f,16.f)};
+    options.models.sun_direction=light_direction_; options.models.sun_color=light_color_;
+    options.models.apply_sun=variable("ModelApplySun",1)!=0; options.models.sun_variance=std::clamp(variable("ModelSunVariance",.05f),0.f,1.f);
     options.fast_lights=variable("FastLight",0)!=0; options.world.light_saturate=std::clamp(variable("LightSaturate",1),0.f,63.f);
     options.models.lod_offset=int(std::clamp(variable("ModelLODOffset",0),-16.f,16.f));
     auto& fog=options.models.fog;
@@ -142,6 +145,15 @@ LTRESULT NativeClient::render(HOBJECT camera,std::optional<std::span<HOBJECT con
     fog.near_z=variable("FogNearZ",0); fog.far_z=variable("FogFarZ",2000);
     fog.sky_near=variable("SkyFogNearZ",0); fog.sky_far=variable("SkyFogFarZ",2000);
     options.models.shadows={int(variable("MaxModelShadows",1)),variable("ModelShadowAlpha",230),variable("ModelShadowOffset",.05f)};
+    // Enhanced lighting is opt-in (EnhancedLighting); without it the game's
+    // detailed shadows are the original's projected ones (ModelShadowProj).
+    using ShadowMapMode=ModelRenderOptions::ShadowMapMode;
+    const bool enhanced=variable("EnhancedLighting",0)!=0;
+    const bool projected=options.models.shadows.max>0 && variable("ModelShadowProj",0)!=0;
+    options.models.shadow_maps=enhanced ? ShadowMapMode::Enhanced : projected ? ShadowMapMode::Projected : ShadowMapMode::Off;
+    options.models.shadow_resolution=int(enhanced ? variable("ShadowMapRes",512) : variable("ModelShadowProjRes",128));
+    options.models.shadow_casters=int(enhanced ? variable("MaxShadowCasters",16) : 8);
+    options.models.shadow_lights=int(enhanced ? variable("ShadowLightsPerCaster",2) : 1);
     options.models.chrome=variable("EnvMapEnable",0)!=0; options.models.chrome_all=variable("EnvMapAll",0)!=0;
     options.models.environment_scale=variable("EnvScale",1); options.models.environment_pan=variable("EnvPanSpeed",.0005f);
     { char name[]="EnvMap"; const auto handle=GetConsoleVar(name); const char* map=handle ? GetVarValueString(handle) : nullptr; options.models.environment_map=map ? map : ""; }
@@ -446,6 +458,9 @@ LTRESULT NativeClient::start_game(const StartGameRequest& request) {
         };
         events.move_sound=[this](HLTSOUND sound,const LTVector& position) { auto place=position; sounds_->SetSoundPosition(sound,&place); };
         events.stop_sound=[this](HLTSOUND sound) { sounds_->KillSound(sound); };
+        events.global_light=[this](LTVector direction,LTVector color,float scale) {
+            SetGlobalLightDir(direction); SetGlobalLightColor(color); LTVector all(scale,scale,scale); SetGlobalLightScale(&all);
+        };
         sync_=std::make_unique<ClientWorldSync>(scene_,resources_,shared_from_this(),std::move(events));
     } catch (...) { disconnect(false); throw; }
     game_mode_=request.m_Type==STARTGAME_CLIENTTCP ? STARTGAME_CLIENTTCP : request.m_Type; network_time_=0; joined_=false;

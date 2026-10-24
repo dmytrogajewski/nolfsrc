@@ -10,10 +10,11 @@ namespace nolf {
 // A dynamic light a model may receive: world space, colour 0..255.
 struct ModelLightSource { LTVector position{0,0,0}; float radius=0; LTVector color{0,0,0}; };
 // LithTech's per-vertex model lighting (src/modern/render/docs/objects.md
-// II.5): the world's light grid as ambient, then point lights brought into the
-// space of the bind-pose vertices, each weighted by the normal and by
-// 1 - d^2/r^2. Dynamic lights come first, then the world's static lights that
-// the light grid does not hold.
+// II.5): the world's light grid as ambient, moved towards the sun's colour as
+// far as a vertex faces it and the model sees the sky, then point lights
+// brought into the space of the bind-pose vertices, each weighted by the
+// normal and by 1 - d^2/r^2. Dynamic lights come first, then the world's
+// static lights that the light grid does not hold.
 class ModelLighting {
 public:
     static constexpr std::size_t max_lights=16;
@@ -26,6 +27,10 @@ public:
     // and fewer than limit lights are held.
     void add(const ModelLightSource&,LTVector position,float reach,std::size_t limit);
     void add(const WorldLight&,LTVector position,float reach,std::size_t limit);
+    // The sun: the global light's direction (from it, world space), its
+    // colour (0..255) and how much of the model sees the sky towards it.
+    void sun(LTVector direction,LTVector color,float amount);
+    bool sunlit() const { return sun_amount_>0; }
     std::size_t lights() const { return count_; }
     // One RGBA colour per vertex.
     void light(std::span<const ModelVertex>,std::vector<std::array<std::uint8_t,4>>& colors) const;
@@ -36,6 +41,8 @@ private:
     void push(LTVector world_position,float radius,LTVector color);
     LTMatrix to_model_{};
     LTVector ambient_,scale_,add_;
+    LTVector sun_direction_{0,0,0},sun_color_{0,0,0};
+    float sun_amount_=0;
     std::uint8_t alpha_;
     std::array<Light,max_lights> lights_{};
     std::size_t count_=0;

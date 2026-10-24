@@ -38,6 +38,7 @@ protected:
 	LTBOOL	m_bEnvMapWorld;
 	LTBOOL	m_bEnvMapEnable;
 	LTBOOL	m_bTripleBuffer;
+	LTBOOL	m_bP1Enhanced;
 	LTBOOL	m_bFixSparkleys;
 	LTBOOL	m_bTrilinear;
 

@@ -36,6 +36,9 @@ struct RDCaps {
     bool     bDepthClamp;           // RD_DEPTH_CLAMP works
     bool     bNearDepth;            // and rd_NearDepth with it
     int      nSamples;              // the multisampling the device got (1: none)
+    bool     bShaders;              // the programmable extension below works
+    bool     bDepthTargets;         // and rd_CreateDepthTarget with it
+    int      nShaderUnits;          // texture units a program can sample
 };
 extern RDCaps g_RDCaps;
 
@@ -205,5 +208,39 @@ void rd_Clear(uint32_t nWhat);                      // within the scissor rect w
 // Pixels from the back buffer (or the front, for screenshots), top-down
 // and tightly packed: RD_PIX_BGRA or RD_PIX_565.
 void rd_ReadPixels(int x, int y, int w, int h, RDPixels ePixels, void* pDest, bool bFront = false);
+
+// ---- the programmable extension ------------------------------------------------------
+//
+// With g_RDCaps.bShaders (the native client's OpenGL; not d3d9.ren): GLSL
+// 1.20 programs drawing with the fixed pipeline's state -- its matrix stacks,
+// colour, normal, texture coordinates and fog -- and, with bDepthTargets,
+// depth textures to draw shadow maps into. Programs and targets live as long
+// as the device that made them.
+
+// 0 when the program does not compile or link; its log goes to pLog.
+uint32_t rd_CreateProgram(const char* pVertex, const char* pFragment, char* pLog, int nLogSize);
+void rd_DeleteProgram(uint32_t nProgram);
+void rd_UseProgram(uint32_t nProgram);              // 0: the fixed pipeline
+// A uniform's location in the program, -1 when it has none.
+int  rd_Uniform(uint32_t nProgram, const char* pName);
+// The uniform setters apply to the program in use; -1 is ignored.
+void rd_Uniform1i(int nLocation, int nValue);
+void rd_Uniform1f(int nLocation, float fValue);
+void rd_Uniform3f(int nLocation, float x, float y, float z);
+void rd_Uniform4f(int nLocation, float x, float y, float z, float w);
+void rd_Uniform4fv(int nLocation, int nCount, const float* pValues);
+void rd_UniformMatrix4(int nLocation, const float* m);    // column-major
+void rd_Normal3f(float x, float y, float z);
+// Depth offset of filled polygons (glPolygonOffset); both 0 turns it off.
+void rd_PolygonOffset(float fFactor, float fUnits);
+// A w x h depth texture compared as a shadow map (sampler2DShadow: LEQUAL,
+// linear, clamped) and the target that draws into it; 0 when it cannot.
+uint32_t rd_CreateDepthTarget(int w, int h);
+void rd_DeleteDepthTarget(uint32_t nTarget);
+// Draw into the target, or with 0 back into the screen's. While a target is
+// bound, rectangles (viewport, scissor) are in its pixels.
+void rd_BindDepthTarget(uint32_t nTarget);
+// The target's depth texture, to bind on a unit with rd_BindTexture.
+uint32_t rd_DepthTargetTexture(uint32_t nTarget);
 
 #endif

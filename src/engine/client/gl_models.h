@@ -10,6 +10,8 @@ struct ModelDrawStyle {
     std::span<const std::array<std::uint8_t,4>> vertex_colors;
     // Per-vertex texture coordinates in place of the triangles' (chrome).
     std::span<const std::array<float,2>> vertex_uvs;
+    // World-space vertex normals, for a lighting program the caller has in use.
+    std::span<const LTVector> normals;
     TextureSampling sampling;
     ModelBlend blend=ModelBlend::Opaque;
     bool cull=true,wireframe=false,alpha_test=false,depth_test=true,depth_write=true;

@@ -19,6 +19,9 @@ struct LightmapTile {
     std::vector<WorldLightmapReference> layers;
 };
 struct LightmapLocation { std::size_t page=0; uint32 x=0,y=0,width=0,height=0; };
+// Where a world model's BSP is now: its index among the world's models and
+// world space into the BSP's own, which its lightmap texels are placed in.
+struct LightmapPlacement { uint16 model=0; LTMatrix to_local; };
 // A dynamic light on the world (r_DrawLight): it adds 2*colour - 255 scaled
 // by its falloff, or a solid light (FLAG_SOLIDLIGHT, FastLight) sets its
 // colour; FLAG_DONTLIGHTBACKFACING spares what faces away.
@@ -42,7 +45,8 @@ public:
     WorldLightmaps& operator=(const WorldLightmaps&)=delete;
     // Composes what the light animations changed, with these lights added to
     // the tiles they reach (those lit before get their own lightmaps back).
-    std::size_t update(std::span<const DynamicWorldLight> lights = {},float saturate=1);
+    // A placed model's tiles take the lights in its BSP's space.
+    std::size_t update(std::span<const DynamicWorldLight> lights = {},float saturate=1,std::span<const LightmapPlacement> placements = {});
     std::size_t pages() const;
     const Image& image(std::size_t page) const;
     std::uint64_t revision(std::size_t page) const;

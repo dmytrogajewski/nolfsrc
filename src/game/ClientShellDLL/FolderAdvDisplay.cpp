@@ -113,6 +113,7 @@ CFolderAdvDisplay::CFolderAdvDisplay()
 	m_bEnvMapWorld = LTFALSE;
 	m_bEnvMapEnable = LTFALSE;
 	m_bTripleBuffer = LTFALSE;
+	m_bP1Enhanced = LTFALSE;
 	m_bFixSparkleys = LTFALSE;
 	m_bTrilinear = LTFALSE;
 	// M-P1-09: texture filtering
@@ -163,7 +164,9 @@ LTBOOL CFolderAdvDisplay::Build()
 	m_pShadows = AddCycleItem(IDS_SHADOWS,IDS_HELP_SHADOWS,kHeaderWidth,kSpacerWidth,&m_nShadows);
 	m_pShadows->AddString(IDS_NONE);
 	m_pShadows->AddString(IDS_CIRCULAR);
-//	m_pShadows->AddString(IDS_PROJECTED);
+	// The shipped menu left out the projected shadows its renderer could
+	// draw; the native renderer draws them.
+	m_pShadows->AddString(IDS_PROJECTED);
 	
 	CToggleCtrl* pToggle = AddToggle(IDS_DETAILTEXTURES, IDS_HELP_DETAILTEXTURES, kTotalWidth, &m_bDetailTextures );
 	pToggle->SetOnString(IDS_ON);
@@ -194,6 +197,11 @@ LTBOOL CFolderAdvDisplay::Build()
 	pP1AA->AddString(IDS_P1_ANTIALIAS_2X);
 	pP1AA->AddString(IDS_P1_ANTIALIAS_4X);
 	pP1AA->AddString(IDS_P1_ANTIALIAS_8X);
+
+	// Enhanced lighting: per-pixel model lighting and shadow maps, opt-in.
+	pToggle = AddToggle(IDS_P1_ENHANCEDLIGHTING, IDS_P1_HELP_ENHANCEDLIGHTING, kTotalWidth, &m_bP1Enhanced );
+	pToggle->SetOnString(IDS_ON);
+	pToggle->SetOffString(IDS_OFF);
 
 	pToggle = AddToggle(IDS_TRIPLE_BUFF, IDS_HELP_TRIPLE_BUFF, kTotalWidth, &m_bTripleBuffer );
 	pToggle->SetOnString(IDS_ON);
@@ -260,6 +268,7 @@ void CFolderAdvDisplay::OnFocus(LTBOOL bFocus)
 		// M-P1-09: texture filtering
 		m_nP1Filter = m_nP1FilterShown = P1CurrentFilter();
 		m_nP1AA = m_nP1AAShown = P1CurrentAA();
+		m_bP1Enhanced = GetConsoleInt("EnhancedLighting",0) > 0;
 
 		m_nShadows = 0;
 		if (GetConsoleInt("DrawShadows",0) > 0)
@@ -285,6 +294,7 @@ void CFolderAdvDisplay::OnFocus(LTBOOL bFocus)
 		WriteConsoleInt("EnvMapWorld",m_bEnvMapWorld);
 		WriteConsoleInt("EnvMapEnable",m_bEnvMapEnable);
 		WriteConsoleInt("TripleBuffer",m_bTripleBuffer && (dwAdvancedOptions & AO_TRIPLEBUFFER));
+		WriteConsoleInt("EnhancedLighting",m_bP1Enhanced ? 1 : 0);
 		WriteConsoleInt("FixSparkleys",m_bFixSparkleys);
 		// M-P1-09: texture filtering, written only when changed (so that
 		// values the cycle has no choice for are kept)

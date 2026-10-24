@@ -127,6 +127,8 @@ static bool gl_CreateContext(void)
 }
 static void* gl_Symbol(const char* name) { return s_Context.symbol(s_Context.user, name); }
 
+static void gl_LoadProgrammable(void);
+static void gl_ReleaseProgrammable(void);
 static void gl_DestroyTarget(void)
 {
     if (s_nFBO)
@@ -231,6 +233,7 @@ bool rd_CreateDevice(void* hWnd, uint32_t nWidth, uint32_t nHeight, bool bWindow
     s_Context.swap_interval(s_Context.user, nSwapInterval);
 
     g_RDCaps.nSamples = nSamples > 1 ? gl_CreateTarget(nSamples) : 1;
+    gl_LoadProgrammable();
 
     // The state every draw starts from (r_SetStartingRenderStates).
     glDisable(GL_BLEND);
@@ -278,6 +281,7 @@ void rd_DestroyDevice(void)
     {
         for (const auto texture : s_Textures) glDeleteTextures(1,&texture);
         s_Textures.clear();
+        gl_ReleaseProgrammable();
         gl_DestroyTarget();
         glFlush();
         glFinish();
@@ -354,7 +358,8 @@ void rd_FogRange(float fStart, float fEnd)
     glFogf(GL_FOG_END, fEnd);
 }
 
-void rd_Viewport(int x, int y, int w, int h) { glViewport(x, s_nHeight - y - h, w, h); }
+static int gl_ViewHeight(void);
+void rd_Viewport(int x, int y, int w, int h) { glViewport(x, gl_ViewHeight() - y - h, w, h); }
 void rd_DepthRange(float fNear, float fFar)  { glDepthRange(fNear, fFar); }
 
 // rd_NearDepth: each batch drawn while it and depth clamping are on is
@@ -398,7 +403,7 @@ static void gl_DrawNear(void)
     glDepthRange(range[0], range[1]);
     glEnable(GL_DEPTH_CLAMP);
 }
-void rd_Scissor(int x, int y, int w, int h)  { glScissor(x, s_nHeight - y - h, w, h); }
+void rd_Scissor(int x, int y, int w, int h)  { glScissor(x, gl_ViewHeight() - y - h, w, h); }
 
 void rd_PushAttrib(uint32_t nMask)
 {
@@ -634,4 +639,249 @@ void rd_ReadPixels(int x, int y, int w, int h, RDPixels ePixels, void* pDest, bo
         memcpy(p+std::size_t(i)*nPitch,p+std::size_t(h-1-i)*nPitch,nPitch);
         memcpy(p+std::size_t(h-1-i)*nPitch,row.data(),nPitch);
     }
+}
+
+// ---- the programmable extension ------------------------------------------------------
+
+#define GL_FRAGMENT_SHADER              0x8B30
+#define GL_VERTEX_SHADER                0x8B31
+#define GL_COMPILE_STATUS               0x8B81
+#define GL_LINK_STATUS                  0x8B82
+#define GL_MAX_TEXTURE_IMAGE_UNITS      0x8872
+#define GL_DEPTH_COMPONENT24            0x81A6
+#define GL_DEPTH_ATTACHMENT             0x8D00
+#define GL_TEXTURE_COMPARE_MODE         0x884C
+#define GL_TEXTURE_COMPARE_FUNC         0x884D
+#define GL_COMPARE_R_TO_TEXTURE         0x884E
+
+typedef char GLcharQ;
+static struct {
+    GLuint (NOLF_GL_CALL* CreateShader)(GLenum);
+    void (NOLF_GL_CALL* ShaderSource)(GLuint, GLsizei, const GLcharQ* const*, const GLint*);
+    void (NOLF_GL_CALL* CompileShader)(GLuint);
+    void (NOLF_GL_CALL* GetShaderiv)(GLuint, GLenum, GLint*);
+    void (NOLF_GL_CALL* GetShaderInfoLog)(GLuint, GLsizei, GLsizei*, GLcharQ*);
+    void (NOLF_GL_CALL* DeleteShader)(GLuint);
+    GLuint (NOLF_GL_CALL* CreateProgram)(void);
+    void (NOLF_GL_CALL* AttachShader)(GLuint, GLuint);
+    void (NOLF_GL_CALL* LinkProgram)(GLuint);
+    void (NOLF_GL_CALL* GetProgramiv)(GLuint, GLenum, GLint*);
+    void (NOLF_GL_CALL* GetProgramInfoLog)(GLuint, GLsizei, GLsizei*, GLcharQ*);
+    void (NOLF_GL_CALL* DeleteProgram)(GLuint);
+    void (NOLF_GL_CALL* UseProgram)(GLuint);
+    GLint (NOLF_GL_CALL* GetUniformLocation)(GLuint, const GLcharQ*);
+    void (NOLF_GL_CALL* Uniform1i)(GLint, GLint);
+    void (NOLF_GL_CALL* Uniform1f)(GLint, GLfloat);
+    void (NOLF_GL_CALL* Uniform3f)(GLint, GLfloat, GLfloat, GLfloat);
+    void (NOLF_GL_CALL* Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
+    void (NOLF_GL_CALL* Uniform4fv)(GLint, GLsizei, const GLfloat*);
+    void (NOLF_GL_CALL* UniformMatrix4fv)(GLint, GLsizei, GLboolean, const GLfloat*);
+    void (NOLF_GL_CALL* FramebufferTexture2D)(GLenum, GLenum, GLenum, GLuint, GLint);
+} s_glsl;
+struct DepthTarget { GLuint nFramebuffer, nTexture; int w, h; };
+static std::unordered_set<GLuint> s_Programs;
+static std::vector<DepthTarget> s_Targets;      // index + 1 is the target's name
+static uint32_t s_nBoundTarget;
+
+static int gl_ViewHeight(void)
+{
+    return s_nBoundTarget && s_nBoundTarget <= s_Targets.size() ? s_Targets[s_nBoundTarget - 1].h : s_nHeight;
+}
+
+// The extension's entry points, at device creation; the capabilities say
+// what came of it.
+static void gl_LoadProgrammable(void)
+{
+    s_Programs.clear();
+    s_Targets.clear();
+    s_nBoundTarget = 0;
+#define GL_GLSL_PROC(name) (s_glsl.name = (decltype(s_glsl.name))gl_Symbol("gl" #name))
+    const bool bShaders = GL_GLSL_PROC(CreateShader) && GL_GLSL_PROC(ShaderSource) && GL_GLSL_PROC(CompileShader) &&
+        GL_GLSL_PROC(GetShaderiv) && GL_GLSL_PROC(GetShaderInfoLog) && GL_GLSL_PROC(DeleteShader) &&
+        GL_GLSL_PROC(CreateProgram) && GL_GLSL_PROC(AttachShader) && GL_GLSL_PROC(LinkProgram) &&
+        GL_GLSL_PROC(GetProgramiv) && GL_GLSL_PROC(GetProgramInfoLog) && GL_GLSL_PROC(DeleteProgram) &&
+        GL_GLSL_PROC(UseProgram) && GL_GLSL_PROC(GetUniformLocation) && GL_GLSL_PROC(Uniform1i) &&
+        GL_GLSL_PROC(Uniform1f) && GL_GLSL_PROC(Uniform3f) && GL_GLSL_PROC(Uniform4f) &&
+        GL_GLSL_PROC(Uniform4fv) && GL_GLSL_PROC(UniformMatrix4fv) && s_glActiveTexture;
+    GL_GLSL_PROC(FramebufferTexture2D);
+#undef GL_GLSL_PROC
+#define GL_FBO_PROC(name) (s_fbo.name = (decltype(s_fbo.name))gl_Symbol("gl" #name))
+    const bool bFramebuffers = GL_FBO_PROC(GenFramebuffers) && GL_FBO_PROC(DeleteFramebuffers) &&
+        GL_FBO_PROC(BindFramebuffer) && GL_FBO_PROC(CheckFramebufferStatus) && s_glsl.FramebufferTexture2D;
+#undef GL_FBO_PROC
+    g_RDCaps.bShaders = bShaders;
+    g_RDCaps.bDepthTargets = bShaders && bFramebuffers;
+    g_RDCaps.nShaderUnits = 0;
+    if (bShaders)
+    {
+        GLint nUnits = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &nUnits);
+        g_RDCaps.nShaderUnits = nUnits;
+        if (nUnits < 8)
+            g_RDCaps.bShaders = g_RDCaps.bDepthTargets = false;
+    }
+}
+
+static void gl_ReleaseProgrammable(void)
+{
+    if (s_glsl.UseProgram && g_RDCaps.bShaders)
+        s_glsl.UseProgram(0);
+    for (const auto nProgram : s_Programs)
+        s_glsl.DeleteProgram(nProgram);
+    s_Programs.clear();
+    for (auto& target : s_Targets)
+    {
+        if (target.nFramebuffer) s_fbo.DeleteFramebuffers(1, &target.nFramebuffer);
+        if (target.nTexture) glDeleteTextures(1, &target.nTexture);
+    }
+    s_Targets.clear();
+    s_nBoundTarget = 0;
+}
+
+static GLuint gl_Compile(GLenum nType, const char* pSource, char* pLog, int nLogSize)
+{
+    GLuint nShader = s_glsl.CreateShader(nType);
+    s_glsl.ShaderSource(nShader, 1, &pSource, NULL);
+    s_glsl.CompileShader(nShader);
+    GLint bOk = 0;
+    s_glsl.GetShaderiv(nShader, GL_COMPILE_STATUS, &bOk);
+    if (!bOk)
+    {
+        if (pLog && nLogSize > 0) s_glsl.GetShaderInfoLog(nShader, nLogSize, NULL, pLog);
+        s_glsl.DeleteShader(nShader);
+        return 0;
+    }
+    return nShader;
+}
+
+uint32_t rd_CreateProgram(const char* pVertex, const char* pFragment, char* pLog, int nLogSize)
+{
+    if (pLog && nLogSize > 0) pLog[0] = 0;
+    if (!s_bCurrent || !g_RDCaps.bShaders || !pVertex || !pFragment)
+        return 0;
+    GLuint nVertex = gl_Compile(GL_VERTEX_SHADER, pVertex, pLog, nLogSize);
+    if (!nVertex) return 0;
+    GLuint nFragment = gl_Compile(GL_FRAGMENT_SHADER, pFragment, pLog, nLogSize);
+    if (!nFragment) { s_glsl.DeleteShader(nVertex); return 0; }
+    GLuint nProgram = s_glsl.CreateProgram();
+    s_glsl.AttachShader(nProgram, nVertex);
+    s_glsl.AttachShader(nProgram, nFragment);
+    s_glsl.LinkProgram(nProgram);
+    s_glsl.DeleteShader(nVertex);
+    s_glsl.DeleteShader(nFragment);
+    GLint bOk = 0;
+    s_glsl.GetProgramiv(nProgram, GL_LINK_STATUS, &bOk);
+    if (!bOk)
+    {
+        if (pLog && nLogSize > 0) s_glsl.GetProgramInfoLog(nProgram, nLogSize, NULL, pLog);
+        s_glsl.DeleteProgram(nProgram);
+        return 0;
+    }
+    s_Programs.insert(nProgram);
+    return nProgram;
+}
+
+void rd_DeleteProgram(uint32_t nProgram)
+{
+    if (s_bCurrent && s_Programs.erase(nProgram))
+        s_glsl.DeleteProgram(nProgram);
+}
+
+void rd_UseProgram(uint32_t nProgram)
+{
+    if (!g_RDCaps.bShaders || (nProgram && !s_Programs.count(nProgram)))
+        return;
+    s_glsl.UseProgram(nProgram);
+}
+
+int rd_Uniform(uint32_t nProgram, const char* pName)
+{
+    if (!g_RDCaps.bShaders || !pName || !s_Programs.count(nProgram))
+        return -1;
+    return s_glsl.GetUniformLocation(nProgram, pName);
+}
+
+void rd_Uniform1i(int nLocation, int nValue) { if (nLocation >= 0 && g_RDCaps.bShaders) s_glsl.Uniform1i(nLocation, nValue); }
+void rd_Uniform1f(int nLocation, float fValue) { if (nLocation >= 0 && g_RDCaps.bShaders) s_glsl.Uniform1f(nLocation, fValue); }
+void rd_Uniform3f(int nLocation, float x, float y, float z) { if (nLocation >= 0 && g_RDCaps.bShaders) s_glsl.Uniform3f(nLocation, x, y, z); }
+void rd_Uniform4f(int nLocation, float x, float y, float z, float w) { if (nLocation >= 0 && g_RDCaps.bShaders) s_glsl.Uniform4f(nLocation, x, y, z, w); }
+void rd_Uniform4fv(int nLocation, int nCount, const float* pValues)
+{
+    if (nLocation >= 0 && nCount > 0 && pValues && g_RDCaps.bShaders) s_glsl.Uniform4fv(nLocation, nCount, pValues);
+}
+void rd_UniformMatrix4(int nLocation, const float* m) { if (nLocation >= 0 && m && g_RDCaps.bShaders) s_glsl.UniformMatrix4fv(nLocation, 1, GL_FALSE, m); }
+void rd_Normal3f(float x, float y, float z) { glNormal3f(x, y, z); }
+
+void rd_PolygonOffset(float fFactor, float fUnits)
+{
+    if (fFactor == 0.0f && fUnits == 0.0f) { glDisable(GL_POLYGON_OFFSET_FILL); return; }
+    glPolygonOffset(fFactor, fUnits);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+}
+
+uint32_t rd_CreateDepthTarget(int w, int h)
+{
+    if (!s_bCurrent || !g_RDCaps.bDepthTargets || w <= 0 || h <= 0 || w > g_RDCaps.nMaxTextureSize || h > g_RDCaps.nMaxTextureSize)
+        return 0;
+    DepthTarget target{0, 0, w, h};
+    GLint nOldTexture = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &nOldTexture);
+    glGenTextures(1, &target.nTexture);
+    glBindTexture(GL_TEXTURE_2D, target.nTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_R_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)nOldTexture);
+    s_fbo.GenFramebuffers(1, &target.nFramebuffer);
+    s_fbo.BindFramebuffer(GL_FRAMEBUFFER, target.nFramebuffer);
+    s_glsl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, target.nTexture, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    const bool bComplete = s_fbo.CheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    const uint32_t nBound = s_nBoundTarget;
+    s_fbo.BindFramebuffer(GL_FRAMEBUFFER, nBound && nBound <= s_Targets.size() ? s_Targets[nBound - 1].nFramebuffer : s_nFBO);
+    if (!bComplete)
+    {
+        s_fbo.DeleteFramebuffers(1, &target.nFramebuffer);
+        glDeleteTextures(1, &target.nTexture);
+        return 0;
+    }
+    for (std::size_t i = 0; i < s_Targets.size(); i++)
+        if (!s_Targets[i].nFramebuffer) { s_Targets[i] = target; return uint32_t(i + 1); }
+    s_Targets.push_back(target);
+    return uint32_t(s_Targets.size());
+}
+
+void rd_DeleteDepthTarget(uint32_t nTarget)
+{
+    if (!s_bCurrent || !nTarget || nTarget > s_Targets.size() || !s_Targets[nTarget - 1].nFramebuffer)
+        return;
+    if (s_nBoundTarget == nTarget)
+        rd_BindDepthTarget(0);
+    auto& target = s_Targets[nTarget - 1];
+    s_fbo.DeleteFramebuffers(1, &target.nFramebuffer);
+    glDeleteTextures(1, &target.nTexture);
+    target = DepthTarget{0, 0, 0, 0};
+}
+
+void rd_BindDepthTarget(uint32_t nTarget)
+{
+    if (!s_bCurrent || !g_RDCaps.bDepthTargets)
+        return;
+    if (nTarget && (nTarget > s_Targets.size() || !s_Targets[nTarget - 1].nFramebuffer))
+        throw std::invalid_argument("unknown depth target");
+    s_fbo.BindFramebuffer(GL_FRAMEBUFFER, nTarget ? s_Targets[nTarget - 1].nFramebuffer : s_nFBO);
+    s_nBoundTarget = nTarget;
+}
+
+uint32_t rd_DepthTargetTexture(uint32_t nTarget)
+{
+    if (!nTarget || nTarget > s_Targets.size())
+        return 0;
+    return s_Targets[nTarget - 1].nTexture;
 }

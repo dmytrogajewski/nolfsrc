@@ -20,6 +20,7 @@ struct GlTextures::State {
         std::optional<std::uint32_t> color_key;
     };
     const std::thread::id owner=std::this_thread::get_id();
+    TextureFilter filter;
     const std::size_t budget;
     std::size_t bytes=0;
     std::uint64_t generation=0,clock=0;
@@ -79,6 +80,11 @@ void GlTextures::bind_units(std::span<const TextureBinding> bindings) {
     }
     for (const auto& binding : bindings) bind_unit(binding.unit,binding.resource,binding.sampling);
 }
+void GlTextures::filter(TextureFilter value) {
+    state_->context();
+    if (!std::isfinite(value.anisotropy) || value.anisotropy<1) value.anisotropy=1;
+    state_->filter=value;
+}
 void GlTextures::bind_impl(const std::shared_ptr<const TextureResource>& resource,const std::shared_ptr<const TexturePixels>& snapshot,TextureSampling sampling,uint32 unit) {
     auto& state=*state_; state.context();
     if (!resource || !snapshot || !std::isfinite(sampling.anisotropy) || sampling.anisotropy<1 || (sampling.color_key && *sampling.color_key>0xffffff)) throw std::invalid_argument("invalid GPU texture request");
@@ -127,6 +133,8 @@ void GlTextures::bind_impl(const std::shared_ptr<const TextureResource>& resourc
         entry.resource=resource; entry.pixels=snapshot; entry.alpha=sampling.alpha;
         entry.color_key=sampling.color_key;
     }
+    sampling.linear=sampling.linear && state.filter.bilinear; sampling.trilinear=sampling.trilinear && state.filter.trilinear;
+    sampling.anisotropy=std::max(sampling.anisotropy,state.filter.anisotropy);
     const bool mips=sampling.mipmaps && levels.size()>1;
     rd_TexMaxLevel(mips ? static_cast<int>(levels.size()-1) : 0);
     rd_TexFilter(sampling.linear ? (mips ? (sampling.trilinear ? RD_LINEAR_MIPMAP_LINEAR : RD_LINEAR_MIPMAP_NEAREST) : RD_LINEAR) : (mips ? RD_NEAREST_MIPMAP_NEAREST : RD_NEAREST),sampling.linear ? RD_LINEAR : RD_NEAREST);

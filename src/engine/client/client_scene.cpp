@@ -965,9 +965,10 @@ std::vector<MoveObjectReference> ClientScene::visible(LTVector position,float ra
 LTRESULT ClientScene::update(float elapsed) {
     const auto self=state_; return self->dispatch([&]() -> LTRESULT { self->ready(); check(std::isfinite(elapsed) && elapsed>=0 && elapsed<=1,LT_INVALIDPARAMS,"invalid scene timestep");
         const auto milliseconds=self->animation_remainder+double(elapsed)*1000; const auto advance=static_cast<uint32>(milliseconds); self->animation_remainder=milliseconds-advance;
-        std::vector<MoveObjectReference> pending;
+        std::vector<MoveObjectReference> pending,parents;
         for (const auto& [object,record] : self->records) {
             if (record.info.removing) continue;
+            if (object->m_pAttachments) parents.emplace_back(object);
             if (object->m_ObjectType==OT_MODEL) pending.emplace_back(object);
             if (object->m_ObjectType==OT_SPRITE) static_cast<CObjSprite*>(object)->UpdateAnimation(advance);
         }
@@ -979,6 +980,9 @@ LTRESULT ClientScene::update(float elapsed) {
         for (const auto& object : pending) { if (!self->live()) break; if (!object.guard.unchanged()) continue;
             model_UpdateTrackers(*static_cast<ModelInstance*>(object.object),advance,State::model_key);
         }
+        // As the original client, attachments follow their parents every
+        // frame: an animation moves a socket without moving its model.
+        for (const auto& object : parents) { if (!self->live()) break; if (object.guard.unchanged()) self->follow(object.object); }
         return LT_OK; });
 }
 ILTClientPhysics& ClientScene::physics() { state_->ready(); return state_->physics_api; }

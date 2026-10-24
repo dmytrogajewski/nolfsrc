@@ -23,6 +23,12 @@ struct ModelRenderOptions {
     std::vector<ModelLightSource> lights;
     std::size_t max_lights=4;
     bool dynamic_lights=true;
+    // The global light (SetGlobalLightDir/Color, the world's StaticSunLight):
+    // models that see the sky towards it move towards its colour
+    // (ModelApplySun), their edges across it bisected to ModelSunVariance.
+    LTVector sun_direction{0,-.894427191f,-.447213595f},sun_color{0,0,0};
+    bool apply_sun=true;
+    float sun_variance=.05f;
     // Model colour scale under Saturate (ModelSaturation), and the LOD
     // distance shift in levels (ModelLODOffset).
     float saturation=1;
@@ -33,6 +39,13 @@ struct ModelRenderOptions {
     bool screen_add=true;
     FogSettings fog;
     ModelShadowSettings shadows;
+    // Shadow maps for models: the original's projected shadows
+    // (ModelShadowProj, the game's detailed shadows: each character's shape
+    // from its strongest light, ModelShadowProjRes texels across), or
+    // enhanced lighting's (EnhancedLighting: every solid model, from its
+    // shadow_lights strongest lights, as deep as each light is bright).
+    enum class ShadowMapMode { Off,Projected,Enhanced } shadow_maps=ShadowMapMode::Off;
+    int shadow_resolution=128,shadow_casters=8,shadow_lights=1;
     // Chrome: the EnvMap texture under FLAG_ENVIRONMENTMAP models
     // (EnvMapEnable; EnvMapAll for every model, alone), EnvScale, EnvPanSpeed.
     std::string environment_map;
@@ -46,7 +59,7 @@ struct ModelRenderStats {
     std::size_t models=0,pieces=0,triangles=0,culled=0,removed=0;
     bool retired=false;
 };
-struct SceneRenderOptions { ModelRenderOptions models; WorldRenderOptions world; bool draw_world=true,fast_lights=false; };
+struct SceneRenderOptions { ModelRenderOptions models; WorldRenderOptions world; TextureFilter filter; bool draw_world=true,fast_lights=false; };
 struct SpriteRenderStats { std::size_t sprites=0,triangles=0,culled=0,missing=0,removed=0; };
 struct BrushRenderStats { std::size_t objects=0,polygons=0,triangles=0,lightmapped=0,culled=0,removed=0; };
 struct EffectRenderStats { std::size_t systems=0,particles=0,lines=0,canvases=0,polygrids=0,triangles=0,culled=0,missing=0,removed=0; };

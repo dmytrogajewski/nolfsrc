@@ -94,10 +94,12 @@ void ClientWorldSync::apply(std::uint8_t packet,std::span<const std::byte> bytes
         if (scene_->portal_flags(world,portal,flags)!=LT_OK) invalid("unknown portal"); break;
     }
     case 25: light_animations(message); break;
-    case 26:
-        light_direction_=LTVector{input.f32(),input.f32(),input.f32()};
-        light_color_=LTVector{input.f32(),input.f32(),input.f32()};
-        ambient_=input.f32(); break;
+    case 26: {
+        const LTVector direction{input.f32(),input.f32(),input.f32()},color{input.f32(),input.f32(),input.f32()};
+        const auto scale=input.f32();
+        if (events_.global_light) events_.global_light(direction,color,scale);
+        break;
+    }
     default: break;   // 23/24 (file loads): nothing to apply.
     }
 }

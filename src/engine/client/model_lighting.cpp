@@ -63,6 +63,15 @@ void ModelLighting::add(const WorldLight& source,LTVector position,float reach,s
     }
     push(source.position,source.radius,color);
 }
+void ModelLighting::sun(LTVector direction,LTVector color,float amount) {
+    if (unlit_ || !finite(direction) || !finite(color) || !std::isfinite(amount) || !(amount>0)) return;
+    // Towards the sun, in the vertices' space (rotation only).
+    const auto& m=to_model_;
+    sun_direction_={-(m.m[0][0]*direction.x+m.m[0][1]*direction.y+m.m[0][2]*direction.z),
+                    -(m.m[1][0]*direction.x+m.m[1][1]*direction.y+m.m[1][2]*direction.z),
+                    -(m.m[2][0]*direction.x+m.m[2][1]*direction.y+m.m[2][2]*direction.z)};
+    sun_color_=color; sun_amount_=std::min(amount,1.f);
+}
 std::array<std::uint8_t,4> ModelLighting::flat() const {
     return {channel(ambient_.x*scale_.x+add_.x),channel(ambient_.y*scale_.y+add_.y),channel(ambient_.z*scale_.z+add_.z),alpha_};
 }
@@ -70,6 +79,10 @@ void ModelLighting::light(std::span<const ModelVertex> vertices,std::vector<std:
     colors.resize(vertices.size());
     for (std::size_t v=0;v<vertices.size();++v) {
         const auto& vertex=vertices[v]; auto color=ambient_;
+        if (sun_amount_>0) {
+            const auto facing=vertex.normal.Dot(sun_direction_)*sun_amount_;
+            if (facing>0) color+=(sun_color_-color)*facing;
+        }
         for (std::size_t i=0;i<count_;++i) {
             const auto& light=lights_[i];
             const auto facing=vertex.normal.Dot(light.direction); if (facing<=0) continue;

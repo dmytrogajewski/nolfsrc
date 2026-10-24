@@ -1,4 +1,6 @@
 #include "engine/client/scene_renderer.h"
+#include "engine/client/shadow_maps.h"
+#include "engine/client/pixel_lighting.h"
 #include "engine/server/commonmodel.h"
 #include "engine/portable/wire.h"
 #include "engine/portable/binary.h"
@@ -268,6 +270,50 @@ void world_scene() {
     require(textures->ReleaseTextureHandle(wall)==LT_OK && textures->ReleaseTextureHandle(skin)==LT_OK,"scene render texture handle release failed");
     std::cout<<"Composed native world/model depth, RGB lighting, shared texture visibility and view-model PVS bypass passed\n";
 }
+// A model between the camera and the world's wall, a light off to its left:
+// with shadow maps on, the wall right of the model darkens where its shadow
+// falls, and nothing else changes.
+void shadow_scene() {
+    if (!nolf::ShadowMaps::available()) { std::cout<<"Shadow maps: the device has no programmable extension; skipped\n"; return; }
+    Files files; auto scene=std::make_shared<nolf::ClientScene>(files.assets); auto textures=std::make_shared<nolf::ClientTextures>(files.assets);
+    nolf::SceneRenderer renderer(scene,textures,files.assets); require(scene->viewport(128,128)==LT_OK && scene->load_world("world.dat")==LT_OK,"shadow world fixture failed");
+    ObjectCreateStruct create; create.m_ObjectType=OT_CAMERA; HOBJECT camera=nullptr; require(scene->create(create,camera)==LT_OK,"shadow camera failed");
+    const auto object=model(*scene); auto* instance=static_cast<ModelInstance*>(object);
+    auto& triangle=instance->m_ModelOwner->m_Pieces[0]->m_Array10[0]; std::swap(triangle.indices[0],triangle.indices[1]);
+    require(scene->position(object,{-1,0,-1},true)==LT_OK,"shadow caster placement failed");
+    create=ObjectCreateStruct{}; create.m_ObjectType=OT_LIGHT; create.m_Flags=FLAG_VISIBLE|FLAG_ONLYLIGHTOBJECTS; create.m_Pos.Init(-6,.3f,8);
+    HOBJECT light=nullptr; require(scene->create(create,light)==LT_OK,"shadow light failed");
+    light->m_LightRadius=100; light->m_ColorR=light->m_ColorG=light->m_ColorB=255;
+    auto brightness=[](int x0,int x1) { double sum=0; for (int y=20;y<108;++y) for (int x=x0;x<x1;++x) { uint32 c=0; rd_ReadPixels(x,y,1,1,RD_PIX_BGRA,&c); sum+=(c&255)+((c>>8)&255)+((c>>16)&255); } return sum; };
+    using Mode=nolf::ModelRenderOptions::ShadowMapMode;
+    const auto frame=[&](Mode mode,bool caster) {
+        nolf::SceneRenderOptions options; options.models.shadow_maps=mode; options.models.shadows.max=0;
+        if (caster) instance->m_Flags|=FLAG_SHADOW; else instance->m_Flags&=~FLAG_SHADOW;
+        clear(); return renderer.render(camera,options);
+    };
+    frame(Mode::Off,false); const double left=brightness(0,56),right=brightness(72,128);
+    // Enhanced: every solid model casts, as deep as its light is bright.
+    instance->m_Flags&=~FLAG_NOLIGHT;
+    frame(Mode::Off,false); const double lit_left=brightness(0,56),lit_right=brightness(72,128);
+    frame(Mode::Enhanced,false);
+    require(std::abs(brightness(0,56)-lit_left)<lit_left*.02,"a shadow darkened the side away from it");
+    require(brightness(72,128)<lit_right*.99,"an enhanced shadow map did not darken the wall behind its caster");
+    // The original's projected shadows: only a model asking for one casts it.
+    instance->m_Flags|=FLAG_NOLIGHT;
+    frame(Mode::Projected,false); require(std::abs(brightness(72,128)-right)<right*.01,"a model without a shadow request cast a projected shadow");
+    const auto model_data=instance->m_ModelOwner; const auto enabled=model_data->m_Unknown0d4; const_cast<Model&>(*model_data).m_Unknown0d4=1;
+    frame(Mode::Projected,true);
+    require(std::abs(brightness(0,56)-left)<left*.02 && brightness(72,128)<right*.99,"the projected shadow did not fall on the wall behind its caster");
+    const_cast<Model&>(*model_data).m_Unknown0d4=enabled; instance->m_Flags&=~FLAG_SHADOW;
+    require(scene->remove(light)==LT_OK && scene->unload_world()==LT_OK,"shadow scene cleanup failed");
+    // Enhanced lighting's normals: unit length and turned the way the bind
+    // pose's face, whichever way the triangle is wound.
+    const auto pose=model_EvaluatePose(*instance); require(pose.has_value(),"normal fixture pose failed");
+    const auto* mesh=instance->m_ModelOwner->m_Pieces[0]->GetPieceData(0); const auto skinned=model_SkinVertices(*pose,*mesh);
+    const auto normals=nolf::model_SmoothNormals(*mesh,skinned,pose->object); require(normals.size()==skinned.size(),"normals do not match vertices");
+    for (std::size_t i=0;i<normals.size();++i) require(std::abs(normals[i].Mag()-1)<1e-3f && normals[i].Dot(mesh->vertices()[i].normal)>0,"smoothed normal is not a unit vector facing the bind pose's way");
+    std::cout<<"Projected and enhanced shadow maps darken the receiving wall behind their caster and nothing else; smoothed normals face the bind pose's way\n";
+}
 void sprite_scene() {
     Files files; auto scene=std::make_shared<nolf::ClientScene>(files.assets); auto textures=std::make_shared<nolf::ClientTextures>(files.assets);
     nolf::SceneRenderer renderer(scene,textures,files.assets); require(scene->viewport(128,128)==LT_OK,"sprite viewport failed");
@@ -447,6 +493,6 @@ int main(int argc,char** argv) {
         nolf::platform::DesktopConfig config; config.width=128; config.height=128; config.vsync=false;
         nolf::platform::Desktop desktop(config); require(rd_CreateDevice(&desktop,128,128,true,0,1),"scene device failed");
         struct Device { ~Device() { rd_DestroyDevice(); } } device;
-        std::cout<<"desktop="<<desktop.driver()<<" renderer="<<rd_Describe()<<'\n'; checks(desktop); world_scene(); sprite_scene(); brush_scene(); sky_scene(); moving_decal_scene(); effect_scene(desktop); canvas_scene(desktop); polygrid_scene(desktop); if (argc==2) sprite_corpus(argv[1],desktop); return 0;
+        std::cout<<"desktop="<<desktop.driver()<<" renderer="<<rd_Describe()<<'\n'; checks(desktop); world_scene(); shadow_scene(); sprite_scene(); brush_scene(); sky_scene(); moving_decal_scene(); effect_scene(desktop); canvas_scene(desktop); polygrid_scene(desktop); if (argc==2) sprite_corpus(argv[1],desktop); return 0;
     } catch (const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

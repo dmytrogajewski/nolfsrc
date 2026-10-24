@@ -7,9 +7,12 @@
 #include "engine/client/gl_polygrids.h"
 #include "engine/client/texture_link.h"
 #include "engine/client/client_sprites.h"
+#include "engine/client/shadow_maps.h"
+#include "engine/client/pixel_lighting.h"
 #include "engine/server/model_callback.h"
 #include "engine/server/world_state.h"
 #include "engine/server/objtypes.h"
+#include "engine/server/world_line_query.h"
 #include "rdev.h"
 #include <algorithm>
 #include <cmath>
@@ -121,6 +124,21 @@ struct SceneRenderer::State {
     uint64 world_generation=0;
     std::unique_ptr<GlWorld> world_renderer;
     struct Material { std::shared_ptr<const TextureResource> texture; bool used=false; };
+    // How much of each model sees the sun, worked out once where it was
+    // (d3d.ren keeps it on the instance) and again only for a
+    // FLAG2_DYNAMICDIRLIGHT model that has moved. An entry is the object's
+    // own while its lifetime token is.
+    struct SunCache { std::weak_ptr<bool> lifetime; LTVector position{0,0,0}; float amount=0; };
+    std::unordered_map<const LTObject*,SunCache> sun_cache;
+    std::shared_ptr<const CServerWorld> sun_world;
+    ShadowMaps shadow_maps;
+    PixelLightingProgram pixel_lighting;
+    // Whether a static light reaches a caster through the world, worked out
+    // again when the caster has moved.
+    struct LightSight { std::weak_ptr<bool> lifetime; LTVector position{0,0,0}; bool clear=false; };
+    struct SightKey { const LTObject* object; std::size_t light; bool operator==(const SightKey&) const=default; };
+    struct SightHash { std::size_t operator()(const SightKey& key) const { return std::hash<const void*>{}(key.object)^(key.light*0x9e3779b97f4a7c15ull); } };
+    std::unordered_map<SightKey,LightSight,SightHash> light_sight;
     std::unordered_map<std::string,Material> materials;
     const std::thread::id owner=std::this_thread::get_id();
     bool rendering=false,retired=false;
@@ -151,6 +169,53 @@ struct SceneRenderer::State {
     }
 };
 namespace {
+// Does a ray from a point reach a sky polygon of the drawn world first
+// (d3d.ren's segment test through the BSP)?
+bool sees_sky(const CServerWorld& world,LTVector from,LTVector ray) {
+    constexpr uint32 surface_sky=0x10;
+    for (auto* record : std::span(world.m_Worlds.GetArray(),world.m_Worlds.GetSize())) if (record->m_pWorldBsp->m_nUnknown48&0x20) {
+        auto* root=record->m_pWorldBsp->GetRoot(); if (!root) return false;
+        auto to=from+ray; LTVector hit; LTPlane plane;
+        const auto* polygon=bsp_IntersectLine(root,&from,&to,&hit,&plane);
+        return polygon && polygon->m_pOwner && polygon->m_pOwner->m_pSurface && (polygon->m_pOwner->m_pSurface->m_nFlags&surface_sky);
+    }
+    return false;
+}
+// GetDirLightAmount (d3d.ren 0x1001bae4): a ray twice the world's size
+// towards the sun. With a variance, the model's two edges across the sun are
+// tested, and where they disagree the boundary is bisected down to it.
+float sun_amount(const CServerWorld& world,LTVector position,LTVector right,float radius,LTVector direction,float variance) {
+    const auto size=(world.m_vMax-world.m_vMin).Mag();
+    const auto ray=direction*(size>1 && std::isfinite(size) ? size*-2 : -1e6f);
+    if (variance==0) return sees_sky(world,position,ray) ? 1.f : 0.f;
+    // direction.Cross(right), which in LithTech is right x direction.
+    const LTVector across{(right.y*direction.z-right.z*direction.y)*radius,(right.z*direction.x-right.x*direction.z)*radius,(right.x*direction.y-right.y*direction.x)*radius};
+    bool high=sees_sky(world,position+across,ray),low=sees_sky(world,position-across,ray);
+    if (high==low) return high ? 1.f : 0.f;
+    float step=1,upper=1,lower=-1,result=1;
+    while (step>variance && low!=high) {
+        const auto middle=(lower+upper)*.5f; const bool hit=sees_sky(world,position+across*middle,ray);
+        step*=.5f; if (!hit) result-=step;
+        if (hit==high) { upper=middle; high=hit; } else { lower=middle; low=hit; }
+    }
+    return result;
+}
+// Does a light reach a model through the drawn world? Lights sit inside
+// their fixtures and models stand on floors, so only what blocks the line
+// clear of both ends -- past the fixture, short of the model's own extent --
+// counts.
+bool light_reaches(const CServerWorld& world,LTVector light,LTVector model,float extent) {
+    for (auto* record : std::span(world.m_Worlds.GetArray(),world.m_Worlds.GetSize())) if (record->m_pWorldBsp->m_nUnknown48&0x20) {
+        auto* root=record->m_pWorldBsp->GetRoot(); if (!root) return true;
+        const auto span=model-light; const auto length=span.Mag(); if (length<=64+extent) return true;
+        auto from=light+span*(48/length),to=model-span*(extent/length);
+        LTVector hit; LTPlane plane;
+        return !bsp_IntersectLine(root,&from,&to,&hit,&plane);
+    }
+    return true;
+}
+float luminance(LTVector color) { return color.x*.299f+color.y*.587f+color.z*.114f; }
+struct DrawnMesh { const ModelPieceData* data; uint32 skin; std::vector<LTVector> positions; };
 // A visible light, for models unless it only lights the world and for the
 // world unless it only lights objects (r_DrawLight caps the world's at 40).
 void add_light(const LTObject& light,SceneRenderOptions& options) {
@@ -169,7 +234,7 @@ ModelRenderStats SceneRenderer::render_models(HOBJECT camera,std::span<HOBJECT c
     return draw_objects(camera,input,std::move(options),nullptr,nullptr,nullptr,nullptr,false,nullptr,nullptr);
 }
 SceneRenderStats SceneRenderer::render_objects(HOBJECT camera,std::span<HOBJECT const> input,SceneRenderOptions options) {
-    const auto self=state_; self->ready(); if (input.size()>65536) throw std::invalid_argument("object list exceeds render budget");
+    const auto self=state_; self->ready(); self->gpu.filter(options.filter); if (input.size()>65536) throw std::invalid_argument("object list exceeds render budget");
     std::vector<HOBJECT> objects; objects.reserve(input.size()); SceneRenderStats stats;
     for (auto object : input) {
         if (!self->scene->contains(object)) throw std::invalid_argument("object list contains a foreign object");
@@ -183,7 +248,7 @@ SceneRenderStats SceneRenderer::render_objects(HOBJECT camera,std::span<HOBJECT 
     return stats;
 }
 SceneRenderStats SceneRenderer::render(HOBJECT camera,SceneRenderOptions options) {
-    const auto self=state_; self->ready();
+    const auto self=state_; self->ready(); self->gpu.filter(options.filter);
     if (!self->scene->contains(camera) || !self->scene->camera(camera)) throw std::invalid_argument("invalid scene camera");
     std::vector<HOBJECT> models; SceneRenderStats stats;
     const auto selected=options.world.draw_all ? self->scene->snapshot() : self->scene->visible(camera->m_Pos,options.models.far_distance);
@@ -213,6 +278,9 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     if (!settings) throw std::invalid_argument("invalid scene camera");
     const auto normal=CameraView(camera->m_Pos,camera->m_Rotation,settings->rectangle,settings->fov_x,settings->fov_y,7,options.far_distance,options.horizontal_plus);
     const auto world=self->scene->world_data();
+    if (self->sun_world!=world) { self->sun_cache.clear(); self->light_sight.clear(); self->sun_world=world; }
+    if (self->sun_cache.size()>4096) std::erase_if(self->sun_cache,[](const auto& item) { return item.second.lifetime.expired(); });
+    if (self->light_sight.size()>16384) std::erase_if(self->light_sight,[](const auto& item) { return item.second.lifetime.expired(); });
     std::optional<CameraView> sky_camera; std::vector<MoveObjectReference> sky_objects;
     std::set<HOBJECT,std::less<HOBJECT>> sky_members;
     if (world && draw_world && sky_stats) {
@@ -272,7 +340,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     bool fog_sky=false,fog_on=apply_fog(options.fog,false);
     // What model shadows fall on: the drawn world, and the visible brushes.
     std::vector<ShadowReceiver> shadow_receivers;
-    if (world && options.shadows.max>0) {
+    if (world && (options.shadows.max>0 || options.shadow_maps!=ModelRenderOptions::ShadowMapMode::Off)) {
         for (auto* record : std::span(world->m_Worlds.GetArray(),world->m_Worlds.GetSize()))
             if (record->m_pWorldBsp->m_nUnknown48&0x20) shadow_receivers.push_back({record->m_pWorldBsp});
         for (const auto& entry : objects) if (entry.brush && !entry.sky && (entry.reference.object->m_Flags&FLAG_VISIBLE)) {
@@ -286,15 +354,93 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
         std::vector<uint16> portals(bsp.m_nChunks); for (uint32 i=0;i<bsp.m_nChunks;++i) portals[i]=bsp.m_pChunks[i].m_Flags;
         sprite_selection=sprite_visibility->Select(normal.position(),portals); break;
     }
+    // The world's draws take the visible brushes' placements, for the lights
+    // on their lightmaps.
+    WorldRenderOptions world_style; if (world_options) world_style=*world_options;
+    if (world && world_options && !world_style.lights.empty()) for (const auto& entry : objects) if (entry.brush && !entry.sky) {
+        const auto* brush=static_cast<const CObjWorldModel*>(entry.reference.object); if (!brush->m_pWorldBsp) continue;
+        for (uint32 i=0;i<world->m_Worlds.GetSize() && i<=0xffff;++i) if (world->m_Worlds[i]->m_pWorldBsp==brush->m_pWorldBsp) { world_style.placements.push_back({uint16(i),brush->m_Transform230}); break; }
+    }
     if (!world) { self->world_renderer.reset(); self->rendered_world.reset(); self->world_generation=0; }
     else if (world_options) {
         if (world!=self->rendered_world || world->lighting_generation()!=self->world_generation) {
             auto renderer=std::make_unique<GlWorld>(world,self->textures,self->assets,self->gpu);
             self->world_renderer=std::move(renderer); self->rendered_world=world; self->world_generation=world->lighting_generation();
         }
-        if (draw_world) *world_stats=self->world_renderer->render_static(normal,visibility,*world_options);
+        if (draw_world) *world_stats=self->world_renderer->render_static(normal,visibility,world_style);
     }
+    // Shadow maps: the solid models that cast them, drawn into their maps and
+    // onto the world once every solid model has drawn.
+    const bool enhanced=options.shadow_maps==ModelRenderOptions::ShadowMapMode::Enhanced;
+    bool mapped=false;
+    if (world && options.shadow_maps!=ModelRenderOptions::ShadowMapMode::Off) {
+        ShadowSettings settings; settings.weighted=enhanced;
+        settings.tile=std::clamp(options.shadow_resolution,32,2048);
+        settings.tiles=std::clamp(options.shadow_casters,1,64)*std::clamp(options.shadow_lights,1,4);
+        settings.strength=enhanced ? .85f : std::clamp(options.shadows.alpha,0.f,255.f)/255*.65f;
+        mapped=self->shadow_maps.begin(settings);
+    }
+    struct Caster { const LTObject* object; std::vector<DrawnMesh> meshes; LTVector center; float radius,reach,above; };
+    std::vector<Caster> casters;
+    bool shadowed=false;
+    const auto shadow_pass=[&] {
+        if (shadowed || !mapped) return; shadowed=true;
+        if (casters.empty()) return;
+        for (const auto& caster : casters) {
+            ShadowCaster shape; shape.center=caster.center; shape.radius=caster.radius; shape.reach=caster.reach;
+            for (const auto& mesh : caster.meshes) shape.meshes.push_back({mesh.data,mesh.positions});
+            // The caster's strongest lights that reach it through the world:
+            // the sun where it sees the sky, the frame's lights, the world's.
+            struct Candidate { ShadowLight light; float score; std::size_t index; bool dynamic; };
+            std::vector<Candidate> candidates;
+            if (options.apply_sun && luminance(options.sun_color)>0) {
+                const auto found=self->sun_cache.find(caster.object);
+                if (found!=self->sun_cache.end() && found->second.amount>0) {
+                    ShadowLight sun; sun.sun=true; sun.direction=options.sun_direction; sun.color=options.sun_color;
+                    candidates.push_back({sun,luminance(options.sun_color)*found->second.amount,0,true});
+                }
+            }
+            const auto point=[&](LTVector position,float radius,LTVector color,std::size_t index,bool dynamic) {
+                if (!(radius>0) || radius>4096) return;
+                const auto distance=position.Dist(caster.center); if (distance>=radius) return;
+                const auto falloff=1-distance/radius; const auto score=luminance(color)*falloff*falloff; if (score<2) return;
+                ShadowLight light; light.position=position; light.radius=radius; light.color=color;
+                candidates.push_back({light,score,index,dynamic});
+            };
+            for (const auto& light : options.lights) point(light.position,light.radius,light.color,0,true);
+            const auto& statics=world->Lights();
+            for (std::size_t i=0;i<statics.size();++i) point(statics[i].position,statics[i].radius,statics[i].color,i,false);
+            std::sort(candidates.begin(),candidates.end(),[](const Candidate& a,const Candidate& b) { return a.score>b.score; });
+            int added=0,tested=0;
+            for (const auto& candidate : candidates) {
+                if (added>=std::clamp(options.shadow_lights,1,4) || tested>=8) break;
+                if (!candidate.light.sun) {
+                    bool clear;
+                    if (candidate.dynamic) { ++tested; clear=light_reaches(*world,candidate.light.position,caster.center,caster.radius*.5f); }
+                    else {
+                        auto& sight=self->light_sight[{caster.object,candidate.index}];
+                        if (sight.lifetime.lock()!=caster.object->m_Lifetime || sight.position.Dist(caster.center)>16) {
+                            ++tested; sight={caster.object->m_Lifetime,caster.center,light_reaches(*world,candidate.light.position,caster.center,caster.radius*.5f)};
+                        }
+                        clear=sight.clear;
+                    }
+                    if (!clear) continue;
+                }
+                added+=self->shadow_maps.add(shape,candidate.light);
+            }
+            // Nothing lights it: a light straight above, as the blob shadow.
+            if (!added) {
+                ShadowLight above; above.position=caster.center+LTVector(0,caster.above,0); above.radius=caster.above*3; above.color={96,96,96};
+                self->shadow_maps.add(shape,above);
+            }
+        }
+        Frame::load(normal); rd_DepthRange(.1f,1);
+        if (g_RDCaps.bDepthClamp) rd_Disable(RD_DEPTH_CLAMP);
+        if (g_RDCaps.bNearDepth) rd_NearDepth(0,0,0,0);
+        self->shadow_maps.draw(shadow_receivers,normal.position(),fog_on && !fog_sky);
+    };
     for (const auto& entry : objects) {
+        if (!entry.sky && (entry.translucent || entry.close || entry.no_z)) shadow_pass();
         if (entry.sky!=fog_sky) { fog_sky=entry.sky; fog_on=apply_fog(options.fog,fog_sky); }
         ObjectFog object_fog(*entry.reference.object,fog_on,options.fog);
         if (self->retired) { stats.retired=true; break; }
@@ -304,7 +450,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
         rd_DepthRange(entry.sky ? 1.f : .1f,1);
         if (entry.brush) {
             if (!self->world_renderer || !world) { ++brush_stats->culled; continue; }
-            auto style=*world_options; style.time=options.time;
+            auto style=world_style; style.time=options.time;
             const auto result=entry.sky ? self->world_renderer->render_sky_brush(*static_cast<CObjWorldModel*>(entry.reference.object),base,visibility,style) :
                 self->world_renderer->render_brush(*static_cast<CObjWorldModel*>(entry.reference.object),base,visibility,style,draw_world);
             auto& report=entry.sky ? *sky_stats : *brush_stats;
@@ -449,8 +595,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             if (levels) lod_distance+=(options.lod_offset>0 ? 1 : -1)*distances[levels-1].m_f;
         }
         uint32 lod=0; for (uint32 i=0;i<distances.GetSize();++i) if (lod_distance>distances[i].m_f) lod=i+1;
-        struct Mesh { const ModelPieceData* data; uint32 skin; std::vector<LTVector> positions; };
-        std::vector<Mesh> meshes;
+        std::vector<DrawnMesh> meshes;
         LTVector center{pose->object.m[0][3],pose->object.m[1][3],pose->object.m[2][3]};
         double squared_radius=0;
         for (uint32 i=0;i<pose->model->m_Pieces.GetSize();++i) {
@@ -489,11 +634,79 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             const auto shade=world ? world->m_Shade.Sample(lighting_position) : std::array<uint8,4>{0,0,0,0};
             ModelLighting result(frame,{float(shade[2]),float(shade[1]),float(shade[0])},scale,add,object->m_ColorA);
             const auto reach=float(std::min(radius,1e6));
+            const auto& sun=options.sun_color;
+            if (world && options.apply_sun && (sun.x!=0 || sun.y!=0 || sun.z!=0) && finite(options.sun_direction)) {
+                const LTVector place=entry.close ? lighting_position : LTVector(pose->object.m[0][3],pose->object.m[1][3],pose->object.m[2][3]);
+                auto& cached=self->sun_cache[object];
+                const auto epsilon=.001f+options.sun_variance;
+                const bool moved=std::fabs(place.x-cached.position.x)>epsilon || std::fabs(place.y-cached.position.y)>epsilon || std::fabs(place.z-cached.position.z)>epsilon;
+                if (cached.lifetime.lock()!=object->m_Lifetime || ((object->m_Flags2&FLAG2_DYNAMICDIRLIGHT) && moved)) {
+                    const LTVector right=entry.close ? normal.right() : LTVector(pose->object.m[0][0],pose->object.m[1][0],pose->object.m[2][0]);
+                    cached={object->m_Lifetime,place,sun_amount(*world,place,right,object->m_Radius,options.sun_direction,std::max(options.sun_variance,0.f))};
+                }
+                result.sun(options.sun_direction,sun,cached.amount);
+            }
             for (const auto& light : options.lights) result.add(light,lighting_position,reach,options.max_lights);
             if (world) for (const auto& light : world->Lights()) if (!light.fast) result.add(light,lighting_position,reach,options.max_lights);
             return result;
         }();
+        // Enhanced lighting: the same terms per pixel, in world space, with
+        // the strongest of the grid's lights given back their direction.
+        std::optional<PixelLighting> pixel;
+        if (enhanced && !entry.close && !(hook.m_ObjectFlags&(FLAG_NOLIGHT|FLAG_MODELWIREFRAME)) && g_RDCaps.bShaders &&
+            !(options.chrome && !options.environment_map.empty() && (options.chrome_all || (hook.m_ObjectFlags&FLAG_ENVIRONMENTMAP)))) {
+            auto& p=pixel.emplace();
+            const auto shade=world ? world->m_Shade.Sample(lighting_position) : std::array<uint8,4>{0,0,0,0};
+            p.ambient={float(shade[2]),float(shade[1]),float(shade[0])};
+            p.scale=scale/255.f; p.add=add; p.alpha=object->m_ColorA/255.f;
+            if (const auto found=self->sun_cache.find(object); world && options.apply_sun && found!=self->sun_cache.end() && found->second.amount>0 && luminance(options.sun_color)>0) {
+                const auto length=options.sun_direction.Mag();
+                if (length>0) { p.to_sun=options.sun_direction/-length; p.sun_color=options.sun_color; p.sun_amount=std::min(found->second.amount,1.f); }
+            }
+            const auto reach=float(std::min(radius,1e6));
+            for (const auto& light : options.lights) {
+                if (p.lights.size()>=options.max_lights || !(light.radius>0) || light.position.Dist(lighting_position)-reach>=light.radius) continue;
+                p.lights.push_back({light.position,light.radius,light.color,false});
+            }
+            if (world) {
+                struct Grid { std::size_t index; LTVector share; float score; };
+                std::vector<Grid> grid;
+                const auto& statics=world->Lights();
+                for (std::size_t i=0;i<statics.size();++i) {
+                    const auto& light=statics[i]; if (!(light.radius>0)) continue;
+                    const auto offset=lighting_position-light.position; const auto distance=offset.Mag();
+                    if (!light.fast) {
+                        if (p.lights.size()>=PixelLighting::max_lights-4 || distance-reach>=light.radius) continue;
+                        auto color=light.color;
+                        // A spot light reaches inside its cone, from the centre's colour to the edge's.
+                        if (light.fov_cos>-1 && light.fov_cos<1 && distance!=0) {
+                            const auto cosine=light.direction.Dot(offset)/distance; if (cosine<light.fov_cos) continue;
+                            const auto t=(1-(.5f*cosine+.5f))/(1-(.5f*light.fov_cos+.5f)); color=color*(1-t)+light.outer_color*t;
+                        }
+                        p.lights.push_back({light.position,light.radius,color,false});
+                    } else if (distance<light.radius && light.radius<=4096) {
+                        const auto f=1-distance/light.radius; const auto share=light.color*(f*f);
+                        if (luminance(share)>=4) grid.push_back({i,share,luminance(share)});
+                    }
+                }
+                std::sort(grid.begin(),grid.end(),[](const Grid& a,const Grid& b) { return a.score>b.score; });
+                for (std::size_t g=0;g<grid.size() && g<4 && p.lights.size()<PixelLighting::max_lights;++g) {
+                    const auto& light=statics[grid[g].index];
+                    auto& sight=self->light_sight[{object,grid[g].index}];
+                    if (sight.lifetime.lock()!=object->m_Lifetime || sight.position.Dist(lighting_position)>16)
+                        sight={object->m_Lifetime,lighting_position,light_reaches(*world,light.position,lighting_position,float(std::min(radius,1e6))*.5f)};
+                    // Out of the flat ambient, and back with its direction
+                    // when nothing of the world stands in its way.
+                    for (unsigned c=0;c<3;++c) p.ambient[c]=std::max(p.ambient[c]-grid[g].share[c],0.f);
+                    if (sight.clear) p.lights.push_back({light.position,light.radius,light.color,true});
+                }
+            }
+        }
         std::vector<std::array<std::uint8_t,4>> vertex_colors;
+        std::vector<LTVector> vertex_normals;
+        const bool textured_model=hook.m_Flags&MHF_USETEXTURE;
+        if (pixel && !self->pixel_lighting.use(*pixel,textured_model,fog_on && !(object->m_Flags&FLAG_FOGDISABLE))) pixel.reset();
+        FixedPipeline after_pixel;
         // Chrome (DoModelDrawing): the camera's right and up rows, through
         // the NormalRef node's frame when the model has one.
         std::shared_ptr<const TextureResource> chrome;
@@ -513,7 +726,8 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             std::shared_ptr<const TextureResource> skin;
             if ((hook.m_Flags&MHF_USETEXTURE) && mesh.skin<info->skins.size()) skin=self->skin(info->skins[mesh.skin],options.time);
             ModelDrawStyle style; style.color=lighting.flat(); style.wireframe=hook.m_ObjectFlags&FLAG_MODELWIREFRAME;
-            if (lighting.lights()) { lighting.light(mesh.data->vertices(),vertex_colors); style.vertex_colors=vertex_colors; }
+            if (pixel) { vertex_normals=model_SmoothNormals(*mesh.data,mesh.positions,pose->object); style.normals=vertex_normals; }
+            else if (lighting.lights() || lighting.sunlit()) { lighting.light(mesh.data->vertices(),vertex_colors); style.vertex_colors=vertex_colors; }
             if (chrome) {
                 chrome_uvs.clear();
                 for (const auto& vertex : mesh.data->vertices())
@@ -533,11 +747,34 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             }
             report.triangles+=self->models.draw(*pose,*mesh.data,skin,visibility,style,mesh.positions); ++report.pieces; drawn=true;
         }
+        if (pixel) rd_UseProgram(0);
         if (drawn) ++report.models;
-        // The shadow, after the model, on the hook's flags.
-        if (drawn && !entry.close && !entry.sky && (hook.m_ObjectFlags&FLAG_SHADOW))
+        // The shadow, after the model, on the hook's flags: into a shadow map
+        // when they are on, else the blob.
+        const bool projected_caster=(hook.m_ObjectFlags&FLAG_SHADOW) && pose->model->m_Unknown0d4;
+        const bool caster=drawn && mapped && !entry.close && !entry.sky && !entry.translucent && radius>=4 && radius<2000 &&
+            (enhanced ? !(hook.m_ObjectFlags&FLAG_NOLIGHT) || projected_caster : projected_caster);
+        if (caster && int(casters.size())<std::clamp(options.shadow_casters,1,64)) {
+            const float above=pose->model->m_f0dc>0 ? pose->model->m_f0dc : 200.f;
+            const float reach=enhanced ? std::max(float(radius)*2,160.f) : pose->model->m_f0d8>0 ? pose->model->m_f0d8+float(radius) : 200.f;
+            // The shadow frames the drawn geometry, wherever the origin is.
+            LTVector low=center,high=center; bool first=true;
+            for (const auto& mesh : meshes) for (const auto& point : mesh.positions) {
+                if (first) { low=high=point; first=false; continue; }
+                for (unsigned axis=0;axis<3;++axis) { low[axis]=std::min(low[axis],point[axis]); high[axis]=std::max(high[axis],point[axis]); }
+            }
+            const auto middle=(low+high)*.5f; const float extent=std::max((high-low).Mag()*.5f,1.f);
+            casters.push_back({object,std::move(meshes),middle,extent,reach,above});
+            // Enhanced lighting keeps a fainter blob where a character meets
+            // the ground, which no light's map gives it.
+            if (enhanced && projected_caster) {
+                auto contact=options.shadows; contact.alpha*=.45f;
+                model_DrawShadow(*pose->model,object->m_Pos,shadow_receivers,normal.position(),contact);
+            }
+        } else if (drawn && !entry.close && !entry.sky && (hook.m_ObjectFlags&FLAG_SHADOW) && !(mapped && projected_caster))
             model_DrawShadow(*pose->model,object->m_Pos,shadow_receivers,normal.position(),options.shadows);
     }
+    if (!stats.retired) shadow_pass();
     if (world_options && !stats.retired) {
         const auto view_camera=self->scene->camera(camera);
         screen_passes(options.screen_scale,options.screen_add && view_camera ? view_camera->light_add : LTVector(0,0,0));

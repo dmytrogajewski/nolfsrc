@@ -38,5 +38,7 @@ BEGIN
     IDS_P1_FPS_120              "120 fps"
     IDS_P1_FPS_144              "144 fps"
     IDS_P1_FPS_240              "240 fps"
+    IDS_P1_ENHANCEDLIGHTING     "Enhanced lighting"
+    IDS_P1_HELP_ENHANCEDLIGHTING "Lights characters and objects per pixel with the direction of the lamps and the sun, and gives every solid object soft shadows from its strongest lights. Off keeps the original look."
     IDS_P1_TEX_ULTRA            "Ultra"
 END

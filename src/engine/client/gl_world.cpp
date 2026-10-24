@@ -232,7 +232,7 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
 void GlWorld::State::draw(std::span<const Entry> queue,const CameraView& camera,ClientTextures::Render& render,const WorldRenderOptions& options,WorldRenderStats& stats,const Style& style) {
     auto& state=*this;
     const auto transaction=render.token();
-    if (options.lightmaps && state.lighting_render!=transaction) { state.atlas->update(options.lights,options.light_saturate); state.lighting_render=transaction; }
+    if (options.lightmaps && state.lighting_render!=transaction) { state.atlas->update(options.lights,options.light_saturate,options.placements); state.lighting_render=transaction; }
     // Vertex-lit polygons take the lights in their BSP's space: a world
     // model's placement is rigid, so its inverse is its transpose.
     std::vector<DynamicWorldLight> local_lights=options.lights;

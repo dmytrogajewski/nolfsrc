@@ -219,7 +219,7 @@ LTRESULT apply(CServerMgr& manager,const SavedGame& document,uint32 parameter,ui
 LTRESULT sav_RestoreObjects(CServerMgr* manager, ILTStream* stream, uint32 parameter, uint32 flags) {
     if (!manager || !stream) return LT_INVALIDPARAMS;
     try { const auto document = nolf::save::read(*stream); return nolf::save::apply(*manager,document,parameter,flags); }
-    catch (const nolf::save::Failure& failure) { return failure.code; }
+    catch (const nolf::save::Failure& failure) { nolf::platform::log("restore",failure.what()); return failure.code; }
     catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
     catch (const std::exception& error) { nolf::platform::log("restore",error.what()); return LT_INVALIDFILE; }
 }
@@ -231,7 +231,7 @@ LTRESULT sav_RestoreFile(CServerMgr* manager, const char* filename, uint32 param
         if (!stream) return LT_ERROR;
         const auto document = [&] { std::unique_ptr<nolf::FileStream> owner(stream); return nolf::save::read(*owner); }();
         return nolf::save::apply(*manager,document,parameter,flags);
-    } catch (const nolf::save::Failure& failure) { return failure.code; }
+    } catch (const nolf::save::Failure& failure) { nolf::platform::log("restore",std::string(filename)+": "+failure.what()); return failure.code; }
       catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
       catch (const std::exception& error) { nolf::platform::log("restore",error.what()); return LT_INVALIDFILE; }
 }

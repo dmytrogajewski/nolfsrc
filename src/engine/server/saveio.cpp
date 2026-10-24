@@ -84,7 +84,7 @@ SavedGame capture(CServerMgr& manager, const ObjectList& list, uint32 parameter,
         require(links.insert(link).second && links.size() <= 65535,LT_INVALIDPARAMS,"cyclic or oversized save list");
         auto* object = link->m_hObject;
         require(object && manager.m_Unknown390.m_Allocated.contains(object),LT_INVALIDPARAMS,"foreign saved object");
-        require(ObjectCallbackGuard(*object).unchanged() && object->m_pSData && object->m_pSData->m_pClass,LT_INVALIDPARAMS,"unavailable saved object");
+        require(ObjectCallbackGuard(*object).same_data() && object->m_pSData && object->m_pSData->m_pClass,LT_INVALIDPARAMS,"unavailable saved object");
         if (always_loaded(object->m_pSData->m_pClass) || indices.contains(object)) continue;
         indices.emplace(object,static_cast<uint16>(pointers.size())); pointers.push_back(object);
         actors.push_back({object,object->m_pSData->m_pBaseClass,ObjectCallbackGuard(*object)});
@@ -112,14 +112,17 @@ SavedGame capture(CServerMgr& manager, const ObjectList& list, uint32 parameter,
     uint32 payload_bytes = 0;
     for (std::size_t i = 0; i < actors.size(); ++i) {
         const auto& actor = actors[i];
-        require(server.unchanged() && actor.guard.unchanged(),LT_ERROR,"world changed during save");
+        // A save callback may remove other listed objects (KeyFramer::Save
+        // removes its keys): removal waits for the end of the frame, so they
+        // are saved as the original saved them, and references to them as none.
+        require(server.unchanged() && actor.guard.same_data(),LT_ERROR,"world changed during save");
         // Match the original callback order: later actors can observe earlier
         // callbacks, while this actor's engine fields precede its own payload.
         result.objects.push_back(snapshot(manager,*actor.object));
         MemoryStream payload({},true,byte_budget-payload_bytes);
         SaveMessage message(payload,SaveMessageDirection::Write,&references);
         manager.m_ClassMgr.message(actor.game,MID_SAVEOBJECT,static_cast<ILTMessage*>(&message),static_cast<float>(parameter));
-        require(server.unchanged() && actor.guard.unchanged(),LT_ERROR,"saved actor removed during callback");
+        require(server.unchanged() && actor.guard.same_data(),LT_ERROR,"saved actor destroyed during callback");
         require(message.Verify() == LT_OK,LT_INVALIDFILE,"game save callback failed");
         const auto bytes = payload.data(); payload_bytes += static_cast<uint32>(bytes.size());
         result.objects[i].game_data.assign(bytes.begin(),bytes.end());
@@ -127,7 +130,7 @@ SavedGame capture(CServerMgr& manager, const ObjectList& list, uint32 parameter,
     // Attachments and links describe the graph after all save callbacks.
     for (std::size_t i = 0; i < actors.size(); ++i) {
         const auto& actor = actors[i];
-        require(server.unchanged() && actor.guard.unchanged(),LT_ERROR,"saved graph changed during callback");
+        require(server.unchanged() && actor.guard.same_data(),LT_ERROR,"saved graph changed during callback");
         auto& saved = result.objects[i];
         for (auto* attachment = actor.object->m_pAttachments; attachment; attachment = attachment->m_pNext) {
             const auto owned = manager.m_Unknown390.m_Attachments.find(attachment);
@@ -164,7 +167,7 @@ LTRESULT sav_SaveObjects(CServerMgr* manager, ILTStream* stream, ObjectList* lis
         const auto document = nolf::save::capture(*manager,*list,parameter,flags);
         const auto bytes = nolf::EncodeSavedGame(document,origin);
         return stream->Write(bytes.data(),static_cast<uint32>(bytes.size()));
-    } catch (const nolf::save::Failure& failure) { return failure.code; }
+    } catch (const nolf::save::Failure& failure) { nolf::platform::log("save",failure.what()); return failure.code; }
       catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
       catch (const std::exception& error) { nolf::platform::log("save",error.what()); return LT_INVALIDFILE; }
 }
@@ -176,7 +179,7 @@ LTRESULT sav_SaveFile(CServerMgr* manager, const char* filename, ObjectList* lis
         const auto document = nolf::save::capture(*manager,*list,parameter,flags);
         const auto bytes = nolf::EncodeSavedGame(document);
         nolf::platform::atomic_write(destination,bytes); return LT_OK;
-    } catch (const nolf::save::Failure& failure) { return failure.code; }
+    } catch (const nolf::save::Failure& failure) { nolf::platform::log("save",failure.what()); return failure.code; }
       catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
       catch (const std::exception& error) { nolf::platform::log("save",error.what()); return LT_ERROR; }
 }

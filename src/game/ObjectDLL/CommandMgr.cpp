@@ -860,3 +860,33 @@ void CMD_STRUCT::Save(HMESSAGEWRITE hWrite)
         g_pLTServer->FreeString(hstr);
 	}
 }
+#ifdef NOLFSRC_MODERN
+// ----------------------------------------------------------------------- //
+//
+//	ROUTINE:	CCommandMgr::CancelPendingOn
+//
+//	PURPOSE:	Drop pending delayed "msg <target> on" commands (a skipped
+//				cinematic's, whose later "off" will never come)
+//
+// ----------------------------------------------------------------------- //
+
+void CCommandMgr::CancelPendingOn(const char* pTarget)
+{
+	if (!pTarget || !pTarget[0]) return;
+
+	for (int i=0; i < CMDMGR_MAX_PENDING_COMMANDS; i++)
+	{
+		if (m_PendingCmds[i].aCmd[0] == CMDMGR_NULL_CHAR) continue;
+
+		ConParse parse;
+		parse.Init(m_PendingCmds[i].aCmd);
+		if (g_pLTServer->Common()->Parse(&parse) == LT_OK && parse.m_nArgs == 3 &&
+			nolf::ascii_compare(parse.m_Args[0], "msg") == 0 &&
+			nolf::ascii_compare(parse.m_Args[1], pTarget) == 0 &&
+			nolf::ascii_compare(parse.m_Args[2], "on") == 0)
+		{
+			m_PendingCmds[i].Clear();
+		}
+	}
+}
+#endif

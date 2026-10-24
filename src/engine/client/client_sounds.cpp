@@ -1,6 +1,8 @@
 #include "engine/client/client_sounds.h"
 #include "engine/server/sound_request.h"
 #include "engine/portable/string.h"
+#include <cstdlib>
+#include "platform/logging.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -115,7 +117,10 @@ struct ClientSounds::State {
         auto clip=clips->load(request.m_szSoundName);
         AudioVoiceSettings settings; settings.gain=request.m_nVolume/100.f; settings.pitch=request.m_fPitchShift;
         settings.priority=request.m_nPriority; settings.loop=(request.m_dwFlags&PLAYSOUND_LOOP)!=0;
-        settings.spatial=(request.m_dwFlags&PLAYSOUND_3D)!=0; settings.ambient=!settings.spatial && (request.m_dwFlags&PLAYSOUND_AMBIENT)!=0;
+        // A client-local sound heard from the client plays unpositioned
+        // (clientsoundmgr.cpp 0x00481806).
+        const bool local=(request.m_dwFlags&PLAYSOUND_CLIENTLOCAL) && in_client;
+        settings.spatial=!local && (request.m_dwFlags&PLAYSOUND_3D)!=0; settings.ambient=!local && !settings.spatial && (request.m_dwFlags&PLAYSOUND_AMBIENT)!=0;
         settings.retain=(request.m_dwFlags&PLAYSOUND_GETHANDLE)!=0; settings.position=request.m_vPosition;
         settings.reverb=(request.m_dwFlags&PLAYSOUND_REVERB)!=0;
         settings.outer_radius=request.m_fOuterRadius; settings.inner_radius=std::min(request.m_fInnerRadius,settings.outer_radius);
@@ -133,11 +138,20 @@ struct ClientSounds::State {
         try { const auto callbacks=events; if (callbacks.played) callbacks.played(request,sound); }
         catch (...) { erase(voice); throw; }
         if (settings.retain && mixer.status(voice)) result=sound;
+        if (trace()) platform::log("sound",std::string("play ")+request.m_szSoundName+" flags "+std::to_string(request.m_dwFlags)+(result ? " handle" : "")+(settings.loop ? " loop" : "")+
+            " at "+std::to_string(settings.position.x)+","+std::to_string(settings.position.y)+","+std::to_string(settings.position.z)+" radius "+std::to_string(settings.outer_radius)+
+            " listener "+std::to_string(pose.position.x)+","+std::to_string(pose.position.y)+","+std::to_string(pose.position.z));
         info->m_hSound=result; return LT_OK;
     }
     LTRESULT GetSoundDuration(HLTSOUND sound,LTFLOAT& duration) { duration=0; duration=static_cast<float>(get(sound).clip->duration()); return LT_OK; }
     LTRESULT IsSoundDone(HLTSOUND sound,LTBOOL& done) { done=LTTRUE; done=get(sound).done ? LTTRUE : LTFALSE; return LT_OK; }
-    LTRESULT KillSound(HLTSOUND sound) { get(sound); erase(identity(sound)); return LT_OK; }
+    // NOLF_SOUND_TRACE logs every play and stop.
+    static bool trace() { static const bool enabled=std::getenv("NOLF_SOUND_TRACE")!=nullptr; return enabled; }
+    LTRESULT KillSound(HLTSOUND sound) {
+        const auto status=get(sound);
+        if (trace()) platform::log("sound",std::string("kill ")+(status.clip ? status.clip->name() : std::string("?")));
+        erase(identity(sound)); return LT_OK;
+    }
     LTRESULT KillSoundLoop(HLTSOUND sound) { auto status=get(sound); status.settings.loop=false; mixer.settings(identity(sound),status.settings); return LT_OK; }
     LTRESULT ReleaseSoundHandle(HLTSOUND sound) {
         const auto status=get(sound); if (!status.settings.retain) return LT_ERROR;

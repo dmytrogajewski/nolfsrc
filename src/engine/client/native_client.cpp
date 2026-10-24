@@ -199,7 +199,10 @@ bool NativeClient::frame(const ClientGameModule::Shell& shell,std::span<const pl
     scene_->update(elapsed);
     shell.call([](IClientShell& game) { game.PreUpdate(); game.Update(); game.PostUpdate(); });
     finish_frame();
-    sounds_->update(elapsed); sounds_->pump(); music_->pump(); videos_->pump();
+    // The listener follows the client object, at the origin without one
+    // (clientsoundmgr.cpp 0x00480dce).
+    SoundPose listener; if (const auto object=GetClientObject()) listener={object->m_Pos,object->m_Rotation};
+    sounds_->update(elapsed,listener); sounds_->pump(); music_->pump(); videos_->pump();
     return !quit_;
 }
 void NativeClient::bind() {

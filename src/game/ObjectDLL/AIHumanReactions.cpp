@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIUtils.h"
 #include "AIHuman.h"
 #include "AISense.h"
@@ -1027,85 +1030,85 @@ void CAIHuman::DoReaction(HSTRING hstrReaction, CAISense* pAISense, LTBOOL bIndi
 	g_pLTServer->CPrint("%s doing reaction \"%s\" to %s %s", GetName(), g_pLTServer->GetStringData(hstrReaction), pAISense->GetName(), pAISense->GetOutcome() == soFalseStimulation ? "(false alarm)" : "");
 
     char* szReaction = g_pLTServer->GetStringData(hstrReaction);
-	_ASSERT(szReaction);
+	GAME_ASSERT(szReaction);
 
-	if ( !_stricmp(szReaction, c_szNoReaction) )
+	if ( !nolf::ascii_compare(szReaction, c_szNoReaction) )
 		return;
-	else if ( !_stricmp("Sound alarm", szReaction) )
+	else if ( !nolf::ascii_compare("Sound alarm", szReaction) )
 		SoundAlarm(pAISense, bIndividual);
-	else if ( !_stricmp("Get backup", szReaction) )
+	else if ( !nolf::ascii_compare("Get backup", szReaction) )
 		GetBackup(pAISense, bIndividual);
-	else if ( !_stricmp("Hit switch", szReaction) )
+	else if ( !nolf::ascii_compare("Hit switch", szReaction) )
 		HitSwitch(pAISense, bIndividual);
-	else if ( !_stricmp("Go for cover", szReaction) )
+	else if ( !nolf::ascii_compare("Go for cover", szReaction) )
 		GoForCover(pAISense, bIndividual);
-	else if ( !_stricmp("Panic", szReaction) )
+	else if ( !nolf::ascii_compare("Panic", szReaction) )
 		Panic(pAISense, bIndividual);
-	else if ( !_stricmp("Distress", szReaction) )
+	else if ( !nolf::ascii_compare("Distress", szReaction) )
 		Distress(pAISense, bIndividual);
-	else if ( !_stricmp("Surrender", szReaction) )
+	else if ( !nolf::ascii_compare("Surrender", szReaction) )
 		Surrender(pAISense, bIndividual);
-	else if ( !_stricmp("Charge", szReaction) )
+	else if ( !nolf::ascii_compare("Charge", szReaction) )
 		Charge(pAISense, bIndividual);
-	else if ( !_stricmp("Draw weapon and attack", szReaction) )
+	else if ( !nolf::ascii_compare("Draw weapon and attack", szReaction) )
 		DrawWeaponAndAttack(pAISense, bIndividual);
-	else if ( !_stricmp("Draw weapon and attack from cover", szReaction) )
+	else if ( !nolf::ascii_compare("Draw weapon and attack from cover", szReaction) )
 		DrawWeaponAndAttackFromCover(pAISense, bIndividual);
-	else if ( !_stricmp("Draw weapon and attack from vantage", szReaction) )
+	else if ( !nolf::ascii_compare("Draw weapon and attack from vantage", szReaction) )
 		DrawWeaponAndAttackFromVantage(pAISense, bIndividual);
-	else if ( !_stricmp("Attack", szReaction) )
+	else if ( !nolf::ascii_compare("Attack", szReaction) )
 		Attack(pAISense, bIndividual);
-	else if ( !_stricmp("Attack (stay)", szReaction) )
+	else if ( !nolf::ascii_compare("Attack (stay)", szReaction) )
 		AttackStay(pAISense, bIndividual);
-	else if ( !_stricmp("Attack from cover", szReaction) )
+	else if ( !nolf::ascii_compare("Attack from cover", szReaction) )
 		AttackFromCover(pAISense, bIndividual);
-	else if ( !_stricmp("Attack from cover (stay)", szReaction) )
+	else if ( !nolf::ascii_compare("Attack from cover (stay)", szReaction) )
 		AttackFromCoverStay(pAISense, bIndividual);
-	else if ( !_stricmp("Attack from cover (always retry)", szReaction) )
+	else if ( !nolf::ascii_compare("Attack from cover (always retry)", szReaction) )
 		AttackFromCoverAlwaysRetry(pAISense, bIndividual);
-	else if ( !_stricmp("Attack from cover (retry once)", szReaction) )
+	else if ( !nolf::ascii_compare("Attack from cover (retry once)", szReaction) )
 		AttackFromCoverRetryOnce(pAISense, bIndividual);
-	else if ( !_stricmp("Attack on sight", szReaction) )
+	else if ( !nolf::ascii_compare("Attack on sight", szReaction) )
 		AttackOnSight(pAISense, bIndividual);
-	else if ( !_stricmp("Attack from vantage", szReaction) )
+	else if ( !nolf::ascii_compare("Attack from vantage", szReaction) )
 		AttackFromVantage(pAISense, bIndividual);
-	else if ( !_stricmp("Call out", szReaction) )
+	else if ( !nolf::ascii_compare("Call out", szReaction) )
 		CallOut(pAISense, bIndividual);
-	else if ( !_stricmp("Shine flashlight", szReaction) )
+	else if ( !nolf::ascii_compare("Shine flashlight", szReaction) )
 		ShineFlashlight(pAISense, bIndividual);
-	else if ( !_stricmp("Look at", szReaction) )
+	else if ( !nolf::ascii_compare("Look at", szReaction) )
 		LookAt(pAISense, bIndividual);
-	else if ( !_stricmp("Become alert", szReaction) )
+	else if ( !nolf::ascii_compare("Become alert", szReaction) )
 		BecomeAlert(pAISense, bIndividual);
-	else if ( !_stricmp("Investigate and search", szReaction) )
+	else if ( !nolf::ascii_compare("Investigate and search", szReaction) )
 		InvestigateAndSearch(pAISense, bIndividual);
-	else if ( !_stricmp("Investigate and stay", szReaction) )
+	else if ( !nolf::ascii_compare("Investigate and stay", szReaction) )
 		InvestigateAndStay(pAISense, bIndividual);
-	else if ( !_stricmp("Investigate and return", szReaction) )
+	else if ( !nolf::ascii_compare("Investigate and return", szReaction) )
 		InvestigateAndReturn(pAISense, bIndividual);
-	else if ( !_stricmp("Pass out", szReaction) )
+	else if ( !nolf::ascii_compare("Pass out", szReaction) )
 		PassOut(pAISense, bIndividual);
-	else if ( !_stricmp("Training failure", szReaction) )
+	else if ( !nolf::ascii_compare("Training failure", szReaction) )
 		TrainingFailure(pAISense, bIndividual);
 
 	/*** DEPRECATED ***/
 	
-	else if ( !_stricmp(szReaction, "Check body and stay") )
+	else if ( !nolf::ascii_compare(szReaction, "Check body and stay") )
 	{
 		g_pLTServer->CPrint("Using deprecated reaction: %s", szReaction);
 		InvestigateAndStay(pAISense, bIndividual);
 	}
-	else if ( !_stricmp(szReaction, "Check body and return") )
+	else if ( !nolf::ascii_compare(szReaction, "Check body and return") )
 	{
 		g_pLTServer->CPrint("Using deprecated reaction: %s", szReaction);
 		InvestigateAndReturn(pAISense, bIndividual);
 	}
-	else if ( !_stricmp(szReaction, "Follow footprints and stay") || !_stricmp(szReaction, "Check footprints and stay") )
+	else if ( !nolf::ascii_compare(szReaction, "Follow footprints and stay") || !nolf::ascii_compare(szReaction, "Check footprints and stay") )
 	{
 		g_pLTServer->CPrint("Using deprecated reaction: %s", szReaction);
 		InvestigateAndStay(pAISense, bIndividual);
 	}
-	else if ( !_stricmp(szReaction, "Follow footprints and return") || !_stricmp(szReaction, "Check footprints and return") )
+	else if ( !nolf::ascii_compare(szReaction, "Follow footprints and return") || !nolf::ascii_compare(szReaction, "Check footprints and return") )
 	{
 		g_pLTServer->CPrint("Using deprecated reaction: %s", szReaction);
 		InvestigateAndReturn(pAISense, bIndividual);

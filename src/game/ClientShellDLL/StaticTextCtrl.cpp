@@ -2,7 +2,8 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
 #include "ltguimgr.h"
 #include "StaticTextCtrl.h"
 
@@ -174,7 +175,7 @@ int CStaticTextCtrl::GetHeight ( )
 
 void CStaticTextCtrl::CalculateSize()
 {
-	assert(m_pFont);
+	GAME_ASSERT(m_pFont);
 	if (!m_pFont || !m_hString)
 	{
 		if (!m_bFixedWidth)

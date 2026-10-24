@@ -241,8 +241,14 @@ enum HitLocation
 // first (up to) four characters of the name, and a rotation of this key by
 // the low four bits of its first character.
 #define GAME_HANDSHAKE_KEY			0xdeadface
+#ifdef NOLFSRC_NATIVE
+#include <bit>
+#include <cstdint>
+#define GAME_HANDSHAKE_ROTATE(nShift) std::rotl(std::uint32_t(GAME_HANDSHAKE_KEY), int(nShift))
+#else
 #define GAME_HANDSHAKE_ROTATE(nShift) \
 	((GAME_HANDSHAKE_KEY >> (32 - (nShift))) + (GAME_HANDSHAKE_KEY << (nShift)))
+#endif
 
 #define GAME_DISCON_BADHANDSHAKE	1 // Disconnect due to a bad handshake response
 #define GAME_DISCON_BADWEAPONS		2 // Disconnect due to a weapons.txt mismatch

@@ -11,16 +11,18 @@
 ****************************************************************************/
 
 #pragma once
+#include "ltbasetypes.h"
+#include <cstdint>
 
 
 // Includes...
 
 #ifdef GSCM_LOCAL_BUILD
-	#include "..\cengine\goaceng.h"
-	#include "gamespyserver.h"
+	#include "../gamespy/cengine/goaceng.h"
+	#include "../gamespy/gamespyclientmgr/GameSpyServer.h"
 #else
-	#include "..\gamespy\cengine\goaceng.h"
-	#include "..\gamespy\gamespyclientmgr\gamespyserver.h"
+	#include "../gamespy/cengine/goaceng.h"
+	#include "../gamespy/gamespyclientmgr/GameSpyServer.h"
 #endif
 
 
@@ -45,31 +47,31 @@ public:
 	CGameSpyClientMgr() { Clear(); }
 	~CGameSpyClientMgr() { Term(); }
 
-	BOOL				Init(const char* sGameName, const char* sSecretKey);
+	LTBOOL				Init(const char* sGameName, const char* sSecretKey);
 	void				Term();
 
-	BOOL				IsInitialized() { return(m_bInit); }
+	LTBOOL				IsInitialized() { return(m_bInit); }
 
 	int					GetNumServers();
 	int					GetState();
 	int					GetProgress() { return(m_nProgress); }
 
 	void				ClearServers();
-	BOOL				RefreshServers(BOOL bAsync = TRUE);
+	LTBOOL				RefreshServers(LTBOOL bAsync = LTTRUE);
 
 	CGameSpyServer*		GetServer(int nIndex);
 	CGameSpyServer*		GetServerFromHandle(void* pHandle);
 	CGameSpyServer*		GetFirstServer();
 	CGameSpyServer*		GetNextServer();
 
-	BOOL				ExistNewServer();
+	LTBOOL				ExistNewServer();
 
-	void				SortServersByName(BOOL bAscending = TRUE);
-	void				SortServersByPing(BOOL bAscending = TRUE);
-	void				SortServersByPlayers(BOOL bAscending = FALSE);
-	void				SortServersByMap(BOOL bAscending = TRUE);
-	void				SortServersByGameType(BOOL bAscending = TRUE);
-	void				SortServers(BOOL bAscending, char* sSortKey, GCompareMode eCompareMode);
+	void				SortServersByName(LTBOOL bAscending = LTTRUE);
+	void				SortServersByPing(LTBOOL bAscending = LTTRUE);
+	void				SortServersByPlayers(LTBOOL bAscending = LTFALSE);
+	void				SortServersByMap(LTBOOL bAscending = LTTRUE);
+	void				SortServersByGameType(LTBOOL bAscending = LTTRUE);
+	void				SortServers(LTBOOL bAscending, char* sSortKey, GCompareMode eCompareMode);
 
 	void				Update();
 
@@ -79,7 +81,7 @@ public:
 protected:
 	void				Clear();
 
-	BOOL				CreateServerList();
+	LTBOOL				CreateServerList();
 	void				FreeServerList();
 
 	CGameSpyServer*		CreateGameSpyServer(GServer pGServer);
@@ -88,13 +90,13 @@ protected:
 	// Member variables...
 
 private:
-	BOOL				m_bInit;
+	LTBOOL				m_bInit;
 	GServerList			m_pServerList;
 	char				m_sGameName[GSCM_MAX_STRING];
 	char				m_sSecretKey[GSCM_MAX_STRING];
 	int					m_nGetServerIndex;
 	int					m_nProgress;
-	BOOL				m_bNewServer;
+	LTBOOL				m_bNewServer;
 	CGameSpyServer		m_CurServer;
 };
 

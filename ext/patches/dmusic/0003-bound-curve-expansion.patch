@@ -1,0 +1,89 @@
+diff --git a/src/Performance.c b/src/Performance.c
+index 508c54c..e5c59cd 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -443,6 +443,25 @@ static float DmCurve_lerp(DmCurve* curve, float phase) {
+ 	return curve->start_value;
+ }
+ 
++// Curves are sampled at most this many times. Authored durations can be huge;
++// an instant curve only sets its end value.
++#define DmInt_CURVE_MAX_STEPS 4096U
++
++static uint32_t DmCurve_getSteps(DmCurve const* curve, uint32_t* spacing) {
++	*spacing = DmInt_CURVE_SPACING;
++	if (curve->curve_shape == DmCurveShape_INSTANT) {
++		return 1;
++	}
++
++	uint32_t steps = curve->duration / DmInt_CURVE_SPACING;
++	if (steps > DmInt_CURVE_MAX_STEPS) {
++		*spacing = curve->duration / DmInt_CURVE_MAX_STEPS;
++		steps = DmInt_CURVE_MAX_STEPS;
++	}
++
++	return steps;
++}
++
+ static DmResult
+ DmPattern_generateControlChangeCurve(DmCurve* curve, uint32_t time, uint32_t channel, DmMessageQueue* out) {
+ 	// Some MIDI control curves have invalid ranges (e.g. -22000 to 127)
+@@ -453,11 +472,14 @@ DmPattern_generateControlChangeCurve(DmCurve* curve, uint32_t time, uint32_t cha
+ 		return DmResult_SUCCESS;
+ 	}
+ 
+-	float prev = (float) curve->start_value - 1;
+-	for (uint32_t k = 0; k < (curve->duration / DmInt_CURVE_SPACING); ++k) {
+-		uint32_t offset = k * DmInt_CURVE_SPACING;
+-		float phase = (float) offset / (float) curve->duration;
+-		float value = DmCurve_lerp(curve, phase);
++	// MIDI controllers are integers: only a change of the rounded value is sent.
++	int prev = -1;
++	uint32_t spacing;
++	uint32_t steps = DmCurve_getSteps(curve, &spacing);
++	for (uint32_t k = 0; k < steps; ++k) {
++		uint32_t offset = k * spacing;
++		float phase = curve->duration == 0 ? 1.f : (float) offset / (float) curve->duration;
++		int value = (int) lroundf(DmCurve_lerp(curve, phase));
+ 
+ 		DmMessage msg;
+ 		msg.time = 0;
+@@ -465,12 +487,12 @@ DmPattern_generateControlChangeCurve(DmCurve* curve, uint32_t time, uint32_t cha
+ 		msg.type = DmMessage_CONTROL;
+ 		msg.control.control = curve->cc_data;
+ 		msg.control.channel = channel;
+-		msg.control.value = value / 127.f;
++		msg.control.value = (float) value / 127.f;
+ 		msg.control.reset = curve->flags & DmCurveFlags_RESET;
+ 		msg.control.reset_value = curve->reset_value / 127.f;
+ 
+ 		// Optimization: Don't emit a message if the value is the same as the previous one.
+-		if (msg.control.value == prev) {
++		if (value == prev) {
+ 			continue;
+ 		}
+ 
+@@ -479,7 +501,7 @@ DmPattern_generateControlChangeCurve(DmCurve* curve, uint32_t time, uint32_t cha
+ 			return rv;
+ 		}
+ 
+-		prev = msg.control.value;
++		prev = value;
+ 	}
+ 
+ 	return DmResult_SUCCESS;
+@@ -487,9 +509,11 @@ DmPattern_generateControlChangeCurve(DmCurve* curve, uint32_t time, uint32_t cha
+ 
+ static DmResult DmPattern_generatePitchBendCurve(DmCurve* curve, uint32_t time, uint32_t channel, DmMessageQueue* out) {
+ 	int prev = curve->start_value;
+-	for (uint32_t k = 0; k < (curve->duration / DmInt_CURVE_SPACING); ++k) {
+-		uint32_t offset = k * DmInt_CURVE_SPACING;
+-		float phase = (float) offset / (float) curve->duration;
++	uint32_t spacing;
++	uint32_t steps = DmCurve_getSteps(curve, &spacing);
++	for (uint32_t k = 0; k < steps; ++k) {
++		uint32_t offset = k * spacing;
++		float phase = curve->duration == 0 ? 1.f : (float) offset / (float) curve->duration;
+ 		float value = DmCurve_lerp(curve, phase);
+ 
+ 		DmMessage msg;

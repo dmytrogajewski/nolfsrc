@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "ParticleSystem.h"
 #include "iltserver.h"
 #include "SFXMsgIds.h"
@@ -149,7 +151,8 @@ uint32 ParticleSystem::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSA
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleMsg(hSender, szMsg);
 		}
 		break;
@@ -288,19 +291,19 @@ void ParticleSystem::InitialUpdate(int nInfo)
 
 void ParticleSystem::HandleMsg(HOBJECT hSender, const char* szMsg)
 {
-	if (_stricmp(szMsg, "ON") == 0 && !m_bOn)
+	if (nolf::ascii_compare(szMsg, "ON") == 0 && !m_bOn)
 	{
         uint32 dwUserFlags = USRFLG_VISIBLE;
         g_pLTServer->SetObjectUserFlags(m_hObject, dwUserFlags);
         m_bOn = LTTRUE;
 	}
-	else if (_stricmp(szMsg, "OFF") == 0 && m_bOn)
+	else if (nolf::ascii_compare(szMsg, "OFF") == 0 && m_bOn)
 	{
         uint32 dwUserFlags = 0;
         g_pLTServer->SetObjectUserFlags(m_hObject, dwUserFlags);
         m_bOn = LTFALSE;
 	}
-	else if (_stricmp(szMsg, "REMOVE") == 0)
+	else if (nolf::ascii_compare(szMsg, "REMOVE") == 0)
 	{
         g_pLTServer->RemoveObject(m_hObject);
 	}

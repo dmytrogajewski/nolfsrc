@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "InterfaceMeter.h"
 #include "GameClientShell.h"
 #include "InterfaceResMgr.h"

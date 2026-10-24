@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "HHWeaponModel.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -207,11 +208,11 @@ void CHHWeaponModel::StringKey(ArgList* pArgList)
 	char* pKey = pArgList->argv[0];
 	if (!pKey) return;
 
-	if (stricmp(pKey, WEAPON_KEY_FIRE) == 0)
+	if (nolf::ascii_compare(pKey, WEAPON_KEY_FIRE) == 0)
 	{
 		//if (m_pParent) m_pParent->Fire();
 	}
-	else if (stricmp(pKey, WEAPON_KEY_SOUND) == 0)
+	else if (nolf::ascii_compare(pKey, WEAPON_KEY_SOUND) == 0)
 	{
 		if (pArgList->argc > 1 && pArgList->argv[1])
 		{

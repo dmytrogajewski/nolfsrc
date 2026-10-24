@@ -5,12 +5,9 @@
 #if !defined(AFX_LTGUITEXTITEMCTRL_H__DDDEFA74_57D4_11D2_BDA0_0060971BDC6D__INCLUDED_)
 #define AFX_LTGUITEXTITEMCTRL_H__DDDEFA74_57D4_11D2_BDA0_0060971BDC6D__INCLUDED_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
 #include "ltguictrl.h"
-#include "stdlith.h"
+#include "dynarray.h"
 
 // This control displays a string of text which fades out upon being unselected.
 // It can contain multiple strings (see CLTGUICtrl::AddString()) which are cycled

@@ -10,7 +10,11 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "Character.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -420,7 +424,8 @@ uint32 CCharacter::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGERE
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			ProcessTriggerMsg(szMsg);
 		}
 		break;
@@ -503,6 +508,7 @@ LTBOOL CCharacter::ProcessTriggerMsg(const char* szMsg)
 	{
 		int nArgs;
 		bMore = g_pLTServer->Parse(pCommand, &g_pCommandPos, g_tokenSpace, g_pTokens, &nArgs);
+        if (!nArgs) { pCommand = g_pCommandPos; continue; }
 	
 		if ( !ProcessCommand(g_pTokens, nArgs, g_pCommandPos) )
 		{
@@ -529,7 +535,7 @@ LTBOOL CCharacter::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 {
     if (!pTokens || !pTokens[0] || nArgs < 1) return LTFALSE;
 
-	if (stricmp(TRIGGER_PLAY_SOUND, pTokens[0]) == 0 && nArgs > 1)
+	if (nolf::ascii_compare(TRIGGER_PLAY_SOUND, pTokens[0]) == 0 && nArgs > 1)
 	{
 		// Get sound name from message...
 
@@ -541,7 +547,7 @@ LTBOOL CCharacter::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
             return LTTRUE;
 		}
 	}
-	else if (stricmp(TRIGGER_TELEPORT, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_TELEPORT, pTokens[0]) == 0)
 	{
 		if ( !IsVector(pTokens[1]) )
 		{
@@ -558,48 +564,48 @@ LTBOOL CCharacter::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 			}
 		}
 	}
-	else if ( !_stricmp(pTokens[0], "REMOVE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "REMOVE") )
 	{
 		RemoveObject();
         return LTTRUE;
 	}
-	else if ( !_stricmp("ATTACH", pTokens[0]) )
+	else if ( !nolf::ascii_compare("ATTACH", pTokens[0]) )
 	{
 		m_pAttachments->Attach(pTokens[1], pTokens[2]);
 		HandleAttach();
         return LTTRUE;
 	}
-	else if ( !_stricmp("DETACH", pTokens[0]) )
+	else if ( !nolf::ascii_compare("DETACH", pTokens[0]) )
 	{
 		m_pAttachments->Detach(pTokens[1]);
 		HandleDetach();
         return LTTRUE;
 	}
-	else if ( !_stricmp("GADGET", pTokens[0]) )
+	else if ( !nolf::ascii_compare("GADGET", pTokens[0]) )
 	{
 		HandleGadget(atoi(pTokens[1]));
         return LTTRUE;
 	}
-	else if ( !_stricmp("CANDAMAGE", pTokens[0]) )
+	else if ( !nolf::ascii_compare("CANDAMAGE", pTokens[0]) )
 	{
 		m_damage.SetCanDamage(IsTrueChar(*pTokens[1]));
 		return LTTRUE;
 	}
-	else if ( !_stricmp("CROSSHAIR", pTokens[0]) )
+	else if ( !nolf::ascii_compare("CROSSHAIR", pTokens[0]) )
 	{
-		if ( !_stricmp("GOOD", pTokens[1]) )
+		if ( !nolf::ascii_compare("GOOD", pTokens[1]) )
 		{
 			m_ccCrosshair = GOOD;
 		}
-		else if ( !_stricmp("BAD", pTokens[1]) )
+		else if ( !nolf::ascii_compare("BAD", pTokens[1]) )
 		{
 			m_ccCrosshair = BAD;
 		}
-		else if ( !_stricmp("NEUTRAL", pTokens[1]) )
+		else if ( !nolf::ascii_compare("NEUTRAL", pTokens[1]) )
 		{
 			m_ccCrosshair = NEUTRAL;
 		}
-		else if ( !_stricmp("UNKNOWN", pTokens[1]) )
+		else if ( !nolf::ascii_compare("UNKNOWN", pTokens[1]) )
 		{
 			m_ccCrosshair = UNKNOWN;
 		}
@@ -918,7 +924,7 @@ void CCharacter::SendStealthToClients()
 
 void CCharacter::CreateCigarette(LTBOOL bSmoke)
 {
-	_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eCigarette));
+	GAME_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eCigarette));
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -948,7 +954,7 @@ void CCharacter::CreateCigarette(LTBOOL bSmoke)
 
 void CCharacter::DestroyCigarette()
 {
-	_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eCigarette);
+	GAME_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eCigarette);
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -978,7 +984,7 @@ void CCharacter::DestroyCigarette()
 
 void CCharacter::CreateSmokepuffs()
 {
-	_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eSmokepuffs));
+	GAME_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eSmokepuffs));
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -993,7 +999,7 @@ void CCharacter::CreateSmokepuffs()
 
 void CCharacter::DestroySmokepuffs()
 {
-	_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eSmokepuffs);
+	GAME_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eSmokepuffs);
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -1016,7 +1022,7 @@ void CCharacter::DestroySmokepuffs()
 
 void CCharacter::CreateZzz()
 {
-	_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eZzz));
+	GAME_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eZzz));
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -1031,7 +1037,7 @@ void CCharacter::CreateZzz()
 
 void CCharacter::DestroyZzz()
 {
-	_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eZzz);
+	GAME_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eZzz);
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -1054,7 +1060,7 @@ void CCharacter::DestroyZzz()
 
 void CCharacter::CreateHearts()
 {
-	_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eHearts));
+	GAME_ASSERT(!(m_byFXFlags & CHARCREATESTRUCT::eHearts));
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -1069,7 +1075,7 @@ void CCharacter::CreateHearts()
 
 void CCharacter::DestroyHearts()
 {
-	_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eHearts);
+	GAME_ASSERT(m_byFXFlags & CHARCREATESTRUCT::eHearts);
 
     HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(LTNULL, MID_SFX_MESSAGE);
 	g_pLTServer->WriteToMessageByte(hMessage, SFX_CHARACTER_ID);
@@ -1361,7 +1367,7 @@ void CCharacter::HandleModelString(ArgList* pArgList)
 	// character footstep sounds are now played on the client. see CCharacterFX
 	// if you're interested)
 
-	if (stricmp(pKey, KEY_FOOTSTEP_SOUND) == 0 && m_bOnGround || m_bBodyOnLadder)
+	if (nolf::ascii_compare(pKey, KEY_FOOTSTEP_SOUND) == 0 && m_bOnGround || m_bBodyOnLadder)
 	{
         LTBOOL bInWater = (m_bBodyInLiquid && !IsLiquid(m_eContainerCode));
 
@@ -1400,7 +1406,7 @@ void CCharacter::HandleModelString(ArgList* pArgList)
 		m_LastMoveInfo.fVolume *= m_damage.GetStealthModifier();
 
 		SURFACE* pSurf = g_pSurfaceMgr->GetSurface(m_eStandingOnSurface);
-		_ASSERT(pSurf);
+		GAME_ASSERT(pSurf);
 		if (pSurf)
 		{
 			m_LastMoveInfo.fVolume *= pSurf->fMovementNoiseModifier;
@@ -1422,7 +1428,7 @@ void CCharacter::HandleModelString(ArgList* pArgList)
 			}
 		}
 	}
-	else if (stricmp(pKey, KEY_PLAYSOUND) == 0 && pArgList->argc > 1)
+	else if (nolf::ascii_compare(pKey, KEY_PLAYSOUND) == 0 && pArgList->argc > 1)
 	{
 		// Get sound name from message...
 
@@ -1444,7 +1450,7 @@ void CCharacter::HandleModelString(ArgList* pArgList)
             PlaySound(pSoundName, fRadius, LTTRUE);
 		}
 	}
-	else if (stricmp(pKey, KEY_SET_DIMS) == 0)
+	else if (nolf::ascii_compare(pKey, KEY_SET_DIMS) == 0)
 	{
 		if (pArgList->argc < 2) return;
 
@@ -1470,7 +1476,7 @@ void CCharacter::HandleModelString(ArgList* pArgList)
 
 		SetDims(&vDims);
 	}
-	else if (stricmp(pKey, KEY_MOVE) == 0)
+	else if (nolf::ascii_compare(pKey, KEY_MOVE) == 0)
 	{
 		if (pArgList->argc < 2) return;
 
@@ -1518,7 +1524,7 @@ void CCharacter::HandleModelString(ArgList* pArgList)
 
 		g_pLTServer->MoveObject(m_hObject, &vPos);
 	}
-	else if (stricmp(pKey, KEY_COMMAND) == 0)
+	else if (nolf::ascii_compare(pKey, KEY_COMMAND) == 0)
 	{
 		LTBOOL bAddParen = LTFALSE;
 
@@ -2272,7 +2278,7 @@ void CCharacter::CreateBody()
 
 void CCharacter::SetupBody(Body* pProp)
 {
-	_ASSERT(pProp);
+	GAME_ASSERT(pProp);
 	if ( !pProp ) return;
 
 	BODYINITSTRUCT bi;
@@ -2395,7 +2401,7 @@ BodyState CCharacter::GetPriorityBodyState(BodyState bs1, BodyState bs2)
 			return bs2;
 	}
 
-	_ASSERT(bs1 == bs2);
+	GAME_ASSERT(bs1 == bs2);
 
 	return bs1;
 }
@@ -3021,7 +3027,9 @@ HOBJECT CCharacter::TransferWeapon(HOBJECT hBody)
 			if ( !pObj || !pObj->m_hObject ) return LTNULL;
 
 			HATTACHMENT hAttachment;
-			if ( LT_OK != g_pLTServer->CreateAttachment(hBody, pObj->m_hObject, (char *)apAttachmentPositions[0]->GetName(), &LTVector(0,0,0), &LTRotation(0,0,0,1), &hAttachment) )
+            LTVector offset(0,0,0);
+            LTRotation rotation(0,0,0,1);
+			if ( LT_OK != g_pLTServer->CreateAttachment(hBody, pObj->m_hObject, (char *)apAttachmentPositions[0]->GetName(), &offset, &rotation, &hAttachment) )
 			{
 				g_pLTServer->RemoveObject(pObj->m_hObject);
 				return LTNULL;

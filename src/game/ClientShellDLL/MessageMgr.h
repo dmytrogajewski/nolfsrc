@@ -18,7 +18,7 @@
 #include "iclientshell.h"
 #include "iltclient.h"
 #include "CheatDefs.h"
-#include "LTGUIMgr.h"
+#include "ltguimgr.h"
 
 // defines
 enum eMessageType

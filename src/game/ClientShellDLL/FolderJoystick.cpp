@@ -1,7 +1,7 @@
 // FolderJoystick.cpp: implementation of the CFolderJoystick class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderJoystick.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -11,7 +11,7 @@
 
 #include "InterfaceMgr.h"
 #include "GameSettings.h"
-#include "keyfixes.h"
+#include "KeyFixes.h"
 
 
 #define JOYSTICKAXISX 0

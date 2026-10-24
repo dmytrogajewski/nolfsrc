@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AI.h"
 #include "AITarget.h"
 #include "AISense.h"
@@ -119,7 +121,7 @@ void CAITarget::UpdateShootPosition(const LTVector& vShootPosition, LTFLOAT fErr
 
 void CAITarget::UpdateVisibility()
 {
-	_ASSERT(IsValid());
+	GAME_ASSERT(IsValid());
 
 	LTVector vPosition;
 	g_pLTServer->GetObjectPos(m_hObject, &vPosition);

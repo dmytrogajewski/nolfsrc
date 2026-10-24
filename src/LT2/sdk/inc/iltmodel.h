@@ -12,84 +12,84 @@
 	public:
 		
 		// Fills in hSocket with the specified socket (case insensitive).
-		virtual LTRESULT GetSocket(HOBJECT hObj, char *pSocketName, HMODELSOCKET &hSocket);
+		virtual LTRESULT GetSocket(HOBJECT hObj, char *pSocketName, HMODELSOCKET &hSocket) = 0;
 
 		// Get the specified node (case insensitive).
-		virtual LTRESULT GetNode(HOBJECT hObj, char *pNodeName, HMODELNODE &hNode);
+		virtual LTRESULT GetNode(HOBJECT hObj, char *pNodeName, HMODELNODE &hNode) = 0;
 
 		// Get the specified piece (case insensitive).
-		virtual LTRESULT GetPiece(HOBJECT hObj, char *pPieceName, HMODELPIECE &hPiece);
+		virtual LTRESULT GetPiece(HOBJECT hObj, char *pPieceName, HMODELPIECE &hPiece) = 0;
 
 		// Get the specified weight set.
-		virtual LTRESULT FindWeightSet(HOBJECT hObj, char *pSetName, HMODELWEIGHTSET &hSet);
+		virtual LTRESULT FindWeightSet(HOBJECT hObj, char *pSetName, HMODELWEIGHTSET &hSet) = 0;
 
 
 		// Hide/unhide a piece on the model (they're all unhidden by default).
 		// Only supports the first _32_ pieces in the model.
 		// SetPieceHideStatus returns LT_NOCHANGE if the piece is already hidden (not an error).
-		virtual LTRESULT GetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTBOOL &bHidden);
-		virtual LTRESULT SetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTBOOL bHidden);
+		virtual LTRESULT GetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTBOOL &bHidden) = 0;
+		virtual LTRESULT SetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTBOOL bHidden) = 0;
 
 		
 		// Get the transformation for a node on a model.
 		// If bWorldSpace is TRUE, then the transform is returned in world space.  Otherwise,
 		// the transform is local to the model (based on its position and rotation).
 		virtual LTRESULT GetNodeTransform(HOBJECT hObj, HMODELNODE hNode,
-			LTransform &transform, LTBOOL bWorldSpace);
+			LTransform &transform, LTBOOL bWorldSpace) = 0;
 
 		// Fills in pos and rot with the current transform for the socket.
 		virtual LTRESULT GetSocketTransform(HOBJECT hObj, HMODELSOCKET hSocket, 
-			LTransform &transform, LTBOOL bWorldSpace);
+			LTransform &transform, LTBOOL bWorldSpace) = 0;
 
 
 		// Get/Set the hook function for a model.  Set it to NULL to disable.
 		// NOTE: Setting this on the server doesn't do anything.
-		virtual LTRESULT GetInstanceHookFn(HOBJECT hObj, ModelInstanceHookFn &fn);
-		virtual LTRESULT SetInstanceHookFn(HOBJECT hObj, ModelInstanceHookFn fn);
+		virtual LTRESULT GetInstanceHookFn(HOBJECT hObj, ModelInstanceHookFn &fn) = 0;
+		virtual LTRESULT SetInstanceHookFn(HOBJECT hObj, ModelInstanceHookFn fn) = 0;
 
 
 
 		// Get the model's main animation tracker.
-		virtual LTRESULT GetMainTracker(HOBJECT hObj, LTAnimTracker* &pTracker);
+		virtual LTRESULT GetMainTracker(HOBJECT hObj, LTAnimTracker* &pTracker) = 0;
 
 		// Update the main anim tracker by fUpdateDelta seconds
 		// (This is useful for updating the animation on a model outside of a client update)
-		virtual LTRESULT UpdateMainTracker(HOBJECT pObj, LTFLOAT fUpdateDelta);
+		virtual LTRESULT UpdateMainTracker(HOBJECT pObj, LTFLOAT fUpdateDelta) = 0;
 
 		// Fills in flags with a combination of the MS_ flags in basedefs_de.h.
-		virtual LTRESULT GetPlaybackState(LTAnimTracker *pTracker, uint32 &flags);
+		virtual LTRESULT GetPlaybackState(LTAnimTracker *pTracker, uint32 &flags) = 0;
 
 
 		// Add/remove trackers on the model.
-		virtual LTRESULT AddTracker(HOBJECT hObj, LTAnimTracker *pTracker);
-		virtual LTRESULT RemoveTracker(HOBJECT hObj, LTAnimTracker *pTracker);
+		virtual LTRESULT AddTracker(HOBJECT hObj, LTAnimTracker *pTracker) = 0;
+		virtual LTRESULT RemoveTracker(HOBJECT hObj, LTAnimTracker *pTracker) = 0;
 
 
 		// Get/set the current animation for the tracker.
-		virtual LTRESULT GetCurAnim(LTAnimTracker *pTracker, HMODELANIM &hAnim);
-		virtual LTRESULT SetCurAnim(LTAnimTracker *pTracker, HMODELANIM hAnim);
+		virtual LTRESULT GetCurAnim(LTAnimTracker *pTracker, HMODELANIM &hAnim) = 0;
+		virtual LTRESULT SetCurAnim(LTAnimTracker *pTracker, HMODELANIM hAnim) = 0;
 
 		// Restart the current animation.
-		virtual LTRESULT ResetAnim(LTAnimTracker *pTracker);
+		virtual LTRESULT ResetAnim(LTAnimTracker *pTracker) = 0;
 
 		// Returns LT_YES if looping, LT_NO if not looping, or an error.
-		virtual LTRESULT GetLooping(LTAnimTracker *pTracker);
-		virtual LTRESULT SetLooping(LTAnimTracker *pTracker, LTBOOL bLooping);
+		virtual LTRESULT GetLooping(LTAnimTracker *pTracker) = 0;
+		virtual LTRESULT SetLooping(LTAnimTracker *pTracker, LTBOOL bLooping) = 0;
 
 		// Returns LT_YES if Playing, LT_NO if not Playing, or an error.
-		virtual LTRESULT GetPlaying(LTAnimTracker *pTracker);
-		virtual LTRESULT SetPlaying(LTAnimTracker *pTracker, LTBOOL bPlaying);
+		virtual LTRESULT GetPlaying(LTAnimTracker *pTracker) = 0;
+		virtual LTRESULT SetPlaying(LTAnimTracker *pTracker, LTBOOL bPlaying) = 0;
 
-		virtual LTRESULT GetWeightSet(LTAnimTracker *pTracker, HMODELWEIGHTSET &hSet);
-		virtual LTRESULT SetWeightSet(LTAnimTracker *pTracker, HMODELWEIGHTSET hSet);
+		virtual LTRESULT GetWeightSet(LTAnimTracker *pTracker, HMODELWEIGHTSET &hSet) = 0;
+		virtual LTRESULT SetWeightSet(LTAnimTracker *pTracker, HMODELWEIGHTSET hSet) = 0;
 
 		
 		// Gets the current animation's length (in milliseconds).
-		virtual LTRESULT GetCurAnimLength(LTAnimTracker *pTracker, uint32 &length);
+		virtual LTRESULT GetCurAnimLength(LTAnimTracker *pTracker, uint32 &length) = 0;
 		
 		// Get/Set where the model is in its animation (in milliseconds).
-		virtual LTRESULT GetCurAnimTime(LTAnimTracker *pTracker, uint32 &curTime);
-		virtual LTRESULT SetCurAnimTime(LTAnimTracker *pTracker, uint32 curTime);
+		virtual LTRESULT GetCurAnimTime(LTAnimTracker *pTracker, uint32 &curTime) = 0;
+		virtual LTRESULT SetCurAnimTime(LTAnimTracker *pTracker, uint32 curTime) = 0;
 	};
 
 

@@ -1,35 +1,15 @@
 #ifndef __WINUTIL_H
 #define __WINUTIL_H
-
-#ifndef BOOL
-	typedef int		    BOOL;
-	#define FALSE		    0
-	#define TRUE		    1
-#endif
-
-#ifndef DWORD
-	typedef unsigned long	DWORD;
-#endif
-
-class CWinUtil
-{
+#include "ltbasetypes.h"
+// Legacy game-facing facade; writable files and profile documents are native services.
+class CWinUtil {
 public:
-
-	static BOOL GetMoviesPath (char* strPath);
-	static BOOL DirExist (char* strPath);
-	static BOOL CreateDir (char* strPath);
-	static BOOL FileExist (char* strPath);
-
-	static DWORD WinGetPrivateProfileString (char* lpAppName, char* lpKeyName, char* lpDefault, char* lpReturnedString, DWORD nSize, char* lpFileName);
-	static DWORD WinWritePrivateProfileString (char* lpAppName, char* lpKeyName, char* lpString, char* lpFileName);
-
-	static void DebugOut (char* str);
-	static void DebugBreak();
-	static float GetTime();
-
-	static char* GetFocusWindow();
-
-	static void WriteToDebugFile (char *strText);
+    static LTBOOL DirExist(const char* path);
+    static LTBOOL CreateDir(const char* path);
+    static LTBOOL FileExist(const char* path);
+    static uint32 WinGetPrivateProfileString(const char* section,const char* key,const char* fallback,char* output,uint32 capacity,const char* file);
+    static LTBOOL WinWritePrivateProfileString(const char* section,const char* key,const char* value,const char* file);
+    static void DebugOut(const char*);
+    static float GetTime();
 };
-
 #endif

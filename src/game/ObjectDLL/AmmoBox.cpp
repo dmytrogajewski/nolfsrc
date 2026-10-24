@@ -10,9 +10,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AmmoBox.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "iltserver.h"
 #include "PlayerObj.h"
 #include "ObjectMsgs.h"
@@ -21,8 +24,8 @@
 #define UNUSED_STRING	"<none>"
 
 #define ADD_AMMO_PROP(num) \
-		ADD_STRINGPROP_FLAG(AmmoType##num##, UNUSED_STRING, PF_STATICLIST)\
-		ADD_LONGINTPROP(AmmoCount##num##, 0)
+		ADD_STRINGPROP_FLAG(AmmoType##num, UNUSED_STRING, PF_STATICLIST)\
+		ADD_LONGINTPROP(AmmoCount##num, 0)
 
 
 BEGIN_CLASS(AmmoBox)
@@ -122,7 +125,7 @@ void AmmoBox::ReadProp(ObjectCreateStruct *pStruct)
 		sprintf(key, "AmmoType%d", i+1);
         if (g_pLTServer->GetPropGeneric(key, &genProp) == LT_OK)
 		{
-			if (_stricmp(genProp.m_String, UNUSED_STRING) != 0)
+			if (nolf::ascii_compare(genProp.m_String, UNUSED_STRING) != 0)
 			{
 				AMMO* pAmmo = g_pWeaponMgr->GetAmmo(genProp.m_String);
 				if (pAmmo)
@@ -339,11 +342,11 @@ LTRESULT CAmmoBoxPlugin::PreHook_EditStringList(const char* szRezPath, const cha
 	{
 		sprintf(key, "AmmoType%d", index);
 
-        if (_stricmp(key, szPropName) == 0)
+        if (nolf::ascii_compare(key, szPropName) == 0)
 		{
             uint32 dwAmmoTypes = sm_ButeMgr.GetNumAmmoTypes();
 
-			_ASSERT(cMaxStrings >= dwAmmoTypes);
+			GAME_ASSERT(cMaxStrings >= dwAmmoTypes);
 			*pcStrings = 1;
 
 			// Make sure the first string is the unused slot...

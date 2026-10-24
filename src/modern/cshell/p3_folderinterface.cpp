@@ -3,7 +3,7 @@
 // FramerateLimit, M-P1-25), the frame-rate counter (M-P3-14), the cutscenes' framing
 // (M-P3-08) and the main menu's art (M-P3-10).
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
 #include "ClientRes.h"

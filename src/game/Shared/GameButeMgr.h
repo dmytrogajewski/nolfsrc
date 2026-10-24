@@ -11,7 +11,7 @@
 #ifndef __GAME_BUTE_MGR_H__
 #define __GAME_BUTE_MGR_H__
 
-#include "ButeMgr.h"
+#include "butemgr.h"
 
 void GBM_DisplayError(const char* szMsg);
 

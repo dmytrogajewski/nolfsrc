@@ -1,7 +1,8 @@
 // FolderWeaponControls.cpp: implementation of the CFolderWeaponControls class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "FolderWeaponControls.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -104,7 +105,7 @@ void CFolderWeaponControls::ReadBindings()
 		DeviceBinding* ptr = pBindings;
 		while (!bFound && ptr)
 		{
-			if (stricmp(ptr->strTriggerName,szTriggers[i])==0)
+			if (nolf::ascii_compare(ptr->strTriggerName,szTriggers[i])==0)
 			{
 				GameAction* pAction = ptr->pActionHead;
 				if (pAction && pAction->nActionCode >= kFirstCommand && pAction->nActionCode <= kLastCommand)
@@ -149,7 +150,7 @@ void CFolderWeaponControls::WriteBindings()
 		if (i < 9)
 			sprintf(str, "rangebind \"%s\" \"%s\" 0 0 \"%s\"", ptr->strDeviceName, szTriggers[i], action);
 		else
-			sprintf(str, "rangebind \"%s\" \"##11\" 0 0 \"%s\"", ptr->strDeviceName, action);
+			sprintf(str, "rangebind \"%s\" \"11\" 0 0 \"%s\"", ptr->strDeviceName, action);
 			
         g_pLTClient->RunConsoleString(str);
 	}

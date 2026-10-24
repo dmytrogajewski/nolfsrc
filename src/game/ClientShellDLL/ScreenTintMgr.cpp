@@ -10,8 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
-#include "screentintmgr.h"
+#include "Stdafx.h"
+#include "ScreenTintMgr.h"
 #include "GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
 #ifdef NOLFSRC_MODERN

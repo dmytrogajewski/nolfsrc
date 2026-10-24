@@ -15,11 +15,13 @@
 #include "Character.h"
 #include "DeathScene.h"
 #include "TemplateList.h"
+#include <memory>
 
 class CAI;
 class AI_Dog;
 class CCharacter;
 class CCharacterMgr;
+class CAIPathMgr;
 class CPlayerObj;
 class CScanner;
 class CAISense;
@@ -30,6 +32,7 @@ class CCharacterMgr
 	public : // Public methods
 
 		CCharacterMgr();
+		~CCharacterMgr();
 
 		// Methods
 
@@ -69,6 +72,10 @@ class CCharacterMgr
 		void ResetAIReactions();
 
 	private : // Private member variables
+
+		// Navigation owns engine strings and links; it must retire with the
+		// game shell while the engine interface is still available.
+		std::unique_ptr<CAIPathMgr> m_AIPathMgr;
 
 		CTList<CDeathScene*>	m_badDeathList;			// Death scene list of all BAD aligned AIs
 		CTList<CDeathScene*>	m_goodDeathList;		// Death scene list of all GOOD aligned AIs

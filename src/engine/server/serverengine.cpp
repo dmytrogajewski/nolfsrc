@@ -1,9 +1,10 @@
+#include "file_transfer.h"
 // server.dll — the se_ family: giving an object its file (reconstruction).
 // Build /O1.
 #include "serverengine.h"
 #include "commonphysics.h"
 #include "worldbsp.h"
-#include <new.h>
+#include <new>
 #include <stdio.h>
 #include <stdlib.h>
 #include "lthread.h"
@@ -30,12 +31,7 @@
 // a byte-typed view at the clear site is simply the only spelling found that
 // reproduces it, and it is what took se_RegisterModel from 193 bytes to
 // byte-identical.
-class CFileRefFlagView
-{
-public:
-	uint8 m_pad_00[0x0c];
-	uint8 m_Flags;                           // 0x0c  bit 0 = still loading
-};
+
 
 
 
@@ -141,13 +137,13 @@ public:
 	// 0x100585d8`, `push $0x100585dc`, `mov $0x100585f8,%ecx` for the
 	// embedded lock) with no `this` register — and 0x10013fa1 is the _$E
 	// that calls it and chains to the atexit registration at 0x10013fdd.
-	// `__forceinline`, as fsstream.cpp's two stream banks (0x10006d88,
+	// `NOLF_FORCE_INLINE`, as fsstream.cpp's two stream banks (0x10006d88,
 	// 0x10006df7, the same shape): plain `inline`, in class or out, leaves
 	// a ten-byte `mov ecx; jmp` initialiser and a 45-byte constructor.
 	// Twelve-byte records, thirty-two cached and thirty-two added at a time;
 	// sb_Init2 and not sb_Init because the initialiser pushes four arguments
 	// and cleans up sixteen bytes.
-	__forceinline CDepLinkBank()             // 0x10013fab (as _$E)
+	NOLF_FORCE_INLINE CDepLinkBank()             // 0x10013fab (as _$E)
 	{
 		sb_Init2(&m_Bank, 0xc, 0x20, 0x20);
 	}
@@ -409,13 +405,7 @@ LTRESULT dl_AddLink(void* pList, void* pLink)
 // Like dl_MakeLink above, the shipped address sits in the file manager's run
 // (0x1002bc12-0x1002bfcd) rather than beside the se_ family at 0x1002af75;
 // it is here because these are the files this reconstruction owns.
-ILTStream* se_OpenStream(CFileMgr* pFileMgr, void* pFile)
-{
-	char* pFilename = fs_GetFilename(pFileMgr, pFile);
 
-	return fs_OpenStreamInTree(((CFileRef*)pFile)->m_pTreeRec->m_pTree,
-	                           pFilename, 0);
-}
 
 
 // A sprite that will not load is not fatal: the engine has one of its own to
@@ -426,7 +416,7 @@ LTRESULT se_InitSprite(CServerMgr* pMgr, LTObject* pObj,
 {
 	char* pFilename = pStruct->m_Filename;
 
-	((SpriteInstance*)pObj)->m_nCurFrame = 0xffffffff;
+	static_cast<CObjSprite*>(pObj)->m_ClipPoly = 0xffffffff;
 
 	if (!se_LoadFile(&pMgr->m_FileMgr, pFilename, 0, &pObj->m_pSData->m_pModelFile))
 	{
@@ -445,17 +435,14 @@ LTRESULT se_InitSprite(CServerMgr* pMgr, LTObject* pObj,
 	return LT_OK;
 }
 
-// Letting go of a model is only a count: the model itself outlives every
-// instance of it, and something else decides when it goes.
-LTRESULT se_TermModel(CServerMgr* pMgr, LTObject* pObj)
-{
-	if (!pObj)
-		return LT_ERROR;
 
-	((ModelInstanceObj*)pObj)->m_pModel->m_CacheCount--;
-
-	return LT_OK;
+// Instances release their owned model after clearing every tracker.
+LTRESULT se_TermModel(CServerMgr*, LTObject* object) {
+    if (!object || object->m_ObjectType != OT_MODEL) return LT_INVALIDPARAMS;
+    static_cast<ModelInstance*>(object)->BindModel({},false,false);
+    return LT_OK;
 }
+
 
 // A container is a world model, and is made the same way; there is nothing
 // of its own to set up here.
@@ -541,670 +528,130 @@ LTRESULT se_InitWorldModel(CServerMgr* pMgr, LTObject* pObj,
 	RETURN_ERROR(1, "se_InitWorldModel", LT_MISSINGWORLDMODEL);
 }
 
-// Byte-identical on both images (server 0x1002b4dc, lithtech 0x0046adf0).
-// Three separate `return LT_INPROGRESS`s -- not wanted, already queued, just
-// queued -- and the synchronous load last, so the `xor eax,eax` and the
-// epilogue sit at the very end as at 0x1002b5f7.
-//
-// The whole body is one explicit if/else chain with every arm, down to the
-// queued test and the load's own error test, ending in its own return. That
-// is what puts the shared `pop eax; jmp` of LT_MISSINGFILE / LT_INPROGRESS
-// at the FIRST of them, the error (0x1002b577), with the in-progress returns
-// jumping back into it. Chaining only the outer tests left the inner ones as
-// guarded returns, and VC6 hosted the tail at the last in-progress return.
-//
-// `done` is in its own block so it shares -0x20 with `request` (frame 0x40 at
-// 0x1002b4df); at function scope the frame grows to 0x60.
-//
-// A model by name. Every model the server has loaded is in one hash keyed by
-// its filename, so the same model asked for twice is the same object with a
-// second reference rather than a second load.
-//
-// A model that is not there yet is opened, and then one of three things
-// happens: it is turned into a model right here, it is queued for the worker
-// thread, or — if the caller did not ask for either — nothing, and the answer
-// is that it is on its way. Asking twice while it is on its way does not
-// queue it twice: the queue itself is searched.
-LTRESULT se_LoadModel(CServerMgr* pMgr, char* pFilename, Model** ppModel,
-                      void** ppFile, int bWantLoad, int bLoadHere)
-{
-	LThreadMessage msg;
-	void*          hElement;
 
-	*ppModel = LTNULL;
-	*ppFile  = LTNULL;
-
-	se_FixSlashes(pFilename);
-
-	hElement = dhash_FindElement(pMgr->m_hModelHash, pFilename,
-	                             strlen(pFilename));
-
-	if (hElement)
-	{
-		*ppModel = (Model*)dhash_GetData(hElement);
-
-		return LT_OK;
-	}
-	else if (!se_LoadFile(&pMgr->m_FileMgr, pFilename, 0, ppFile))
-	{
-		RETURN_ERROR_SYM_DESC(1, "se_LoadModel", LT_MISSINGFILE, pFilename);
-	}
-	else if (!bWantLoad)
-	{
-		return LT_INPROGRESS;
-	}
-	else if (!bLoadHere)
-	{
-		if (pMgr->m_Thread.IsRequestQueued(*ppFile))
-		{
-			return LT_INPROGRESS;
-		}
-		else
-		{
-			LThreadMessage request;
-
-			request.m_Data[0] = 0;
-			request.m_Data[2] = 0;
-			request.m_Data[3] = (uint32)*ppFile;
-
-			pMgr->m_Thread.m_IncomingQueue.PostMessage(&request);
-
-			return LT_INPROGRESS;
-		}
-	}
-	else
-	{
-		LTRESULT dResult = se_LoadModelData(pMgr, pFilename, *ppFile, ppModel);
-
-		if (dResult)
-		{
-			return dResult;
-		}
-		else
-		{
-			LThreadMessage done;
-
-			done.m_Data[0] = 0;
-			done.m_Data[2] = 0;
-			done.m_Data[3] = (uint32)*ppFile;
-			done.m_Data[4] = (uint32)*ppModel;
-
-			pMgr->OnModelLoaded(&done);
-
-			return LT_OK;
-		}
-	}
+// Resolve a resident model or reserve an owned worker ticket.
+LTRESULT se_LoadModel(CServerMgr* manager, char* filename, Model** output,
+                      void** file_output, int want_load, int load_here) {
+    if (output) *output = nullptr;
+    if (file_output) *file_output = nullptr;
+    if (!manager || !filename || !output || !file_output) return LT_INVALIDPARAMS;
+    try {
+        auto key = nolf::platform::asset_key(filename);
+        if (!se_LoadFile(&manager->m_FileMgr,key.data(),0,file_output)) return LT_MISSINGFILE;
+        if (auto model = manager->m_Models.Find(key)) { *output = model.get(); return LT_OK; }
+        if (!want_load) return LT_INPROGRESS;
+        if (!load_here) {
+            if (manager->m_Models.HasPending(key)) return LT_INPROGRESS;
+            const auto ticket = manager->m_Models.Reserve(key);
+            LThreadMessage request;
+            request.m_Data[3] = reinterpret_cast<uintptr_t>(*file_output);
+            request.m_Data[5] = ticket;
+            const auto posted = manager->m_Thread.m_IncomingQueue.PostMessage(&request);
+            if (posted != LT_OK) { manager->m_Models.Discard(ticket); return posted; }
+            return LT_INPROGRESS;
+        }
+        ModelService::Ticket ticket = 0;
+        const auto status = se_LoadModelData(manager,key.data(),*file_output,output,&ticket);
+        LThreadMessage done;
+        done.m_Data[0] = status;
+        done.m_Data[3] = reinterpret_cast<uintptr_t>(*file_output);
+        done.m_Data[5] = ticket;
+        manager->OnModelLoaded(&done);
+        auto model = manager->m_Models.Find(key);
+        *output = model.get();
+        return done.m_Data[0] != LT_OK ? static_cast<LTRESULT>(done.m_Data[0]) : model ? LT_OK : LT_NOTFOUND;
+    } catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
+      catch (const std::exception& error) { dsi_ServerError("Model load failed: %s",error.what()); return LT_INVALIDMODELFILE; }
 }
 
-// LTAnimTracker::IsValid, the same inline body modelanim.cpp defines. It has
-// to be visible here: lithtech.exe (/O2) expands it in both of se_InitModel's
-// tracker loops (0x0046b020), which it can only do from an inline definition
-// in this translation unit; server.dll (/O1) still declines it at 36 bytes
-// and calls the out-of-line copy (0x1002b7e8 -> 0x100010ec). Measured:
-// lithtech se_InitModel 487 -> 537 of 541 bytes, 15 mnemonic blocks -> 2;
-// server unchanged. The original probably had this in a shared header.
-inline LTBOOL LTAnimTracker::IsValid()
-{
-	Model* pModel = m_TimeRef.m_pModel;
-
-	if (!pModel ||
-	    m_TimeRef.m_Cur.m_iAnim >= pModel->m_AnimArray.m_nElements ||
-	    m_TimeRef.m_Prev.m_iAnim >= pModel->m_AnimArray.m_nElements)
-	{
-		return LTFALSE;
-	}
-
-	return LTTRUE;
-}
-
-// NEAR (460 bytes against 460, and the same hundred and fifty instructions):
-// four instructions, one disagreement -- the shipped build loads the skin
-// slot's offset and adds the object data to it, ours loads the object data
-// and adds the offset. Both spellings of the sum, a byte-pointer sum, an
-// `int` offset (worse: 5 blocks), a `for` loop, and an index loop over
-// `(&m_pSData->m_pSkinFile)[i]` all give the same bytes.
-//
-// Giving a model object its model. Three files are involved and each has its
-// own fallback: the model itself falls back to the engine's default, and each
-// skin to the default skin. A missing skin is reported whatever the debug
-// level, unlike everything else here — a model with no texture is visible
-// enough to be worth saying out loud every time.
-//
-// The two skin slots are walked by byte offset into the object data rather
-// than by index, which is what the shipped loop counter and its 0x3c bound
-// are counting.
-//
-// What comes back decides how the trackers are set up. A model that loaded
-// here is what they are pointed at; a model still on its way leaves them on
-// the placeholder, marked so that they are redone when it arrives, and the
-// file itself is marked too. Either way the model gains a reference and the
-// instance's own tracker is pointed back at the instance.
-// 0x1002b6a4. pFileMgr is assigned AFTER pFilename, not initialised at its
-// declaration: that moves pMgr's scratch load from eax to ecx, as at
-// 0x1002b6aa (six differing instructions down to four). The remaining operand
-// order of `nOff + (uint32)pObj->m_pSData` is below what the source reaches.
-//
-// lithtech.exe (0x0046b020): with IsValid's inline body visible (above) the
-// only residual is the same sum in /O2 dress -- shipped `mov 0x188(%ebp),%edx;
-// mov %esi,%ecx; add %edx,%ecx` (0x46b0e1), nOff copied and accumulated,
-// against our `mov 0x188(%ebp),%ecx; add %esi,%ecx` (537 of 541 bytes). Every
-// spelling of the sum gives the same order on both images: nOff as uint8*,
-// `(int)`, `(uint32)(void*)`, `*(uint32*)&`, `(uint32)p + nOff`,
-// `(uint8*)p + nOff`, `nOff - -(int)p`, even `|` instead of `+`, a file-local
-// inline helper returning the slot, and an index loop over both the names and
-// `(&m_pSkinFile)[i]` (VC6 strength-reduces it to this same counter).
-//
-// Two dead parameter slots carry locals: 0xc(%ebp) the running offset (the
-// `movl $0x34` is `nOff`) and 0x10(%ebp) the filename, pObj and pStruct both
-// living in callee-saved registers from the top.
-LTRESULT se_InitModel(CServerMgr* pMgr, LTObject* pObj,
-                      ObjectCreateStruct* pStruct)
-{
-	CFileMgr*      pFileMgr;
-	ModelInstance* pInst    = (ModelInstance*)pObj;
-	LTAnimTracker* pTracker;
-	char*          pFilename;
-	char*          pSkinName;
-	Model*         pModel;
-	void*          pFile;
-	uint32         nOff;
-	LTRESULT       dResult;
-
-	pFilename = pStruct->m_Filename;
-	pFileMgr  = &pMgr->m_FileMgr;
-
-	if (!se_LoadFile(pFileMgr, pFilename, 0, &pObj->m_pSData->m_pModelFile))
-	{
-		if (g_DebugLevel >= 1)
-		{
-			dsi_ServerError("Couldn't find model file %s.  Trying models/default.abc",
-			                pFilename);
-		}
-
-		if (!se_LoadFile(pFileMgr, "models\\default.abc", 0,
-		                 &pObj->m_pSData->m_pModelFile))
-		{
-			RETURN_ERROR_SYM_DESC(1, "se_InitModel", LT_MISSINGFILE, pFilename);
-		}
-
-		pFilename = "models\\default.abc";
-	}
-
-	nOff      = 0x34;
-	pSkinName = pStruct->m_SkinNames[0];
-
-	do
-	{
-		if (*pSkinName)
-		{
-			if (!se_LoadFile(pFileMgr, pSkinName, 0,
-			                 (void**)(nOff + (uint32)pObj->m_pSData)))
-			{
-				dsi_ServerError("Couldn't find model skin %s.", pSkinName);
-
-				se_LoadFile(pFileMgr, "skins\\default.dtx", 0,
-				            (void**)(nOff + (uint32)pObj->m_pSData));
-			}
-		}
-
-		nOff      += 4;
-		pSkinName += 0x80;
-	}
-	while (nOff < 0x3c);
-
-	dResult = se_LoadModel(pMgr, pFilename, &pModel, &pFile,
-	                       pStruct->m_CreateFlags & OCS_AUTOLOAD,
-	                       pStruct->m_CreateFlags & OCS_AUTOLOAD);
-
-	if (!dResult)
-	{
-		for (pTracker = pInst->m_pTrackerList; pTracker;
-		     pTracker = pTracker->GetNext())
-		{
-			if (!pTracker->IsValid() || pTracker->GetModel() != pModel)
-				at_Init(pTracker, pModel, LTFALSE);
-		}
-	}
-	else if (dResult == LT_INPROGRESS)
-	{
-		for (pTracker = pInst->m_pTrackerList; pTracker;
-		     pTracker = pTracker->GetNext())
-		{
-			if (!pTracker->IsValid() || pTracker->GetModel() != pModel)
-			{
-				at_Init(pTracker, pMgr->m_pPlaceholderModel, LTFALSE);
-
-				pTracker->m_Flags |= 8;
-			}
-		}
-
-		((CFileRef*)pObj->m_pSData->m_pModelFile)->m_Flags |= 1;
-	}
-	else
-	{
-		return dResult;
-	}
-
-	pModel->m_CacheCount++;
-
-	pInst->m_AnimTracker.m_Flags  |= 4;
-	pInst->m_AnimTracker.m_pUser1  = pInst;
-
-	return LT_OK;
-}
-
-// Reading a model file into a Model. The model is built before the file is
-// read, so a failure anywhere below has one thing to undo, and it undoes it
-// the same way every time.
-//
-// Three separate things can be wrong and each says so differently: the file
-// would not open, the reader itself failed (and reports its own code), or the
-// child models the file names did not resolve — which is two faults, not one,
-// because a file can name a tree that is malformed and a file can name
-// children that are simply not there.
-LTRESULT se_LoadModelData(CServerMgr* pMgr, char* pFilename, void* pFile,
-                          Model** ppModel)
-{
-	CModelLoadRequest request;
-	CModelLoadContext context;
-	Model*            pModel;
-	ILTStream*        pStream;
-	LTRESULT          dResult;
-	void*             pRaw;
-
-	*ppModel = LTNULL;
-
-	// `new`, not `dalloc` plus a placement new: the shipped call goes to
-	// 0x1000d25d, which is the eleven-byte `operator new` forwarder, and so
-	// do both of se_LoadChildModel's allocations below (0x1002b0d2 and
-	// 0x1002b19a). Both spellings are byte-identical because the operand is a masked
-	// relocation; only the call targets separate them.
-	pModel = new Model((uint32*)&g_DefAlloc, (uint32*)&g_DefAlloc);
-
-	if (!pModel)
-		RETURN_ERROR(1, "se_LoadModelData", LT_OUTOFMEMORY);
-
-	se_FixSlashes(pFilename);
-
-	pStream = se_OpenStream(&pMgr->m_FileMgr, pFile);
-
-	request.m_pStream = pStream;
-
-	if (!pStream)
-	{
-		delete pModel;
-
-		if (g_DebugLevel >= 1)
-			dsi_ServerError("Couldn't open model file %s", pFilename);
-
-		RETURN_ERROR_SYM_DESC(1, "se_LoadModelData", LT_MISSINGFILE, pFilename);
-	}
-
-	dResult = pModel->Load(pStream, (IMoAllocator*)&g_DefAlloc);
-
-	if (!dResult)
-	{
-		context.m_pServerMgr = pMgr;
-		context.m_pFilename  = pFilename;
-
-		request.m_pfnLoadChild = se_LoadChildModel;
-		request.m_pContext     = &context;
-
-		dResult = pModel->LoadChildModels(&request);
-	}
-
-	request.m_pStream->Release();
-
-	if (!dResult && pModel->SetFilename(pFilename))
-	{
-		if (request.m_bTreesValid == 0)
-		{
-			delete pModel;
-
-			if (g_DebugLevel >= 1)
-			{
-				dsi_ServerError("Child model trees invalid in model %s",
-				                pFilename);
-			}
-
-			RETURN_ERROR(1, "se_LoadModelData", LT_INVALIDMODELFILE);
-		}
-
-		if (request.m_bChildrenFound == 0)
-		{
-			delete pModel;
-
-			if (g_DebugLevel >= 1)
-			{
-				dsi_ServerError("Missing one or more child models in model %s",
-				                pFilename);
-			}
-
-			RETURN_ERROR(1, "se_LoadModelData", LT_INVALIDMODELFILE);
-		}
-
-		pModel->m_FileFlags = ((CFileRef*)pFile)->m_nFileID;
-
-		*ppModel = pModel;
-
-		return LT_OK;
-	}
-
-	delete pModel;
-
-	if (g_DebugLevel >= 1)
-		dsi_ServerError("Error %d loading model %s", dResult, pFilename);
-
-	return dResult;
-}
-
-// The shell's interface, modelled far enough to reach the one slot the hook
-// below uses. servermgr.h only forward-declares IServerShell and is not a
-// file this reconstruction owns, so the shape lives here under a name of its
-// own and the call goes through a cast.
-//
-// iservershell.h's declaration order — destructor, ServerAppMessageFn,
-// OnAddClient, OnRemoveClient, OnClientEnterWorld, OnClientExitWorld,
-// PreStartWorld, PostStartWorld, OnMessage, OnObjectMessage, OnCommandOn,
-// OnCommandOff, Update, OnPlaybackFinish, CacheFiles, SRand — puts
-// FileLoadNotify at slot 16, which is exactly the 0x40 the shipped call
-// indexes, and its two parameters are the two the shipped code pushes: a
-// filename and an LTRESULT. The shell's vtable lives in the game DLL, so
-// that agreement is the only check available on the slot.
-class IShellFileNotify
-{
-public:
-	virtual ~IShellFileNotify() = 0;                      // 0x00
-	virtual LTRESULT _p01()=0; virtual LTRESULT _p02()=0;
-	virtual LTRESULT _p03()=0; virtual LTRESULT _p04()=0; virtual LTRESULT _p05()=0;
-	virtual LTRESULT _p06()=0; virtual LTRESULT _p07()=0; virtual LTRESULT _p08()=0;
-	virtual LTRESULT _p09()=0; virtual LTRESULT _p10()=0; virtual LTRESULT _p11()=0;
-	virtual LTRESULT _p12()=0; virtual LTRESULT _p13()=0; virtual LTRESULT _p14()=0;
-	virtual LTRESULT _p15()=0;
-	// 0x40 — the file, and how it went.
-	virtual LTRESULT FileLoadNotify(char* pFilename, LTRESULT status)=0;
-};
-
-// 0x10032dcd — a model that finished loading on this thread rather than on
-// the worker's, taking the very message the worker would have posted back.
-// Two of the message's words gate it and two carry the payload: the request
-// word at m_Data[2] must be zero or the message is not ours, and m_Data[0]
-// is the load's own result — zero means the model at m_Data[4] is real and
-// gets registered under the file at m_Data[3], nonzero means it is not.
-//
-// Both arms tell the game shell, and they get the name from different places
-// because on the failing path there is no model to ask: the file record's own
-// hash element is what remembers what was being loaded.
-//
-// A shell that is not there yet is skipped, and each arm tests for that
-// separately — which is what the two `test %esi,%esi` are.
-void CServerMgr::OnModelLoaded(LThreadMessage* pMsg)
-{
-	IShellFileNotify* pShell = (IShellFileNotify*)m_ClassMgr.m_pServerShell;
-	CFileRef*         pFile  = (CFileRef*)pMsg->m_Data[3];
-
-	if (pMsg->m_Data[2] == 0)
-	{
-		Model* pModel = (Model*)pMsg->m_Data[4];
-
-		if (pMsg->m_Data[0] == 0)
-		{
-			se_RegisterModel(this, pModel, pFile, 1);
-
-			if (pShell)
-				pShell->FileLoadNotify(pModel->GetFilename(), LT_OK);
-		}
-		else
-		{
-			if (pShell)
-			{
-				char* pFilename = dhash_GetKey(pFile->m_hElement, LTNULL);
-
-				pShell->FileLoadNotify(pFilename, LT_ERROR);
-			}
-		}
-	}
+LTRESULT sm_LoadModel(CServerMgr* manager, char* filename, Model** output,
+                      CFileIdentifier** file_output, int want_load, int load_here) {
+    if (!file_output) return LT_INVALIDPARAMS;
+    void* file = nullptr;
+    const auto status = se_LoadModel(manager,filename,output,&file,want_load,load_here);
+    *file_output = static_cast<CFileIdentifier*>(file);
+    return status;
 }
 
 
-// 0x1002af75 — a model going away takes itself back out of the manager's
-// hash. The link carries the eight-byte record se_LoadChildModel allocated;
-// the model's own name is the hash key, so it is read *before* the record is
-// freed and the key is then looked up and removed.
-//
-// Two things the shipped code does that a careful reader would not. It takes
-// the server manager from the global rather than from the record it was
-// stored in — the record's first word is written by se_LoadChildModel and
-// read by nothing. And a null global is simply a no-op, so a cleanup running
-// after the manager has gone leaves the record leaked.
-//
-// One shared exit serves all three ways out, which is what says the guards
-// nest rather than each returning.
-//
-// The manager local is assigned *unconditionally* and the guard is written
-// against the global itself, which looks redundant and is not: it is the one
-// spelling that reproduces the shipped bytes. VC6 commons the two reads into
-// the five-byte `mov 0x...,%eax` accumulator form, copies it into the
-// callee-saved register in the slot between the `test` and the `je`, and so
-// runs the copy on the failing path too. Written the obvious way —
-// `pMgr = g_pServerMgr; if (pMgr)` — it loads straight into the callee-saved
-// register with the six-byte encoding, one byte short and no copy at all;
-// written with both reads inside the guard it reloads the global twice and
-// comes out six bytes long.
-LTRESULT se_ModelHashCleanup(void* pArg1, CDepLink* pLink, int nArg3)
-{
-#ifdef NOLFSRC_MODERN
-	// fixed: se_ModelHashCleanup leaks its record (RETAIL_BUGS.md). The
-	// record is freed whether or not there is still a manager. The hash is
-	// still reached through the global, not the record's copy: once the
-	// manager has gone the global is null, and the copy would dangle.
-	if (nArg3 == 0)
-	{
-		CModelCleanupRec* pRec = (CModelCleanupRec*)pLink->m_pData;
-		CServerMgr*       pMgr = g_pServerMgr;
-
-		if (pMgr)
-		{
-			char* pFilename = pRec->m_pModel->GetFilename();
-			void* hElement  = dhash_FindElement(pMgr->m_hModelHash, pFilename,
-			                                    strlen(pFilename));
-
-			if (hElement)
-				dhash_Remove(pMgr->m_hModelHash, hElement);
-		}
-
-		delete pRec;
-	}
-#else
-	if (nArg3 == 0)
-	{
-		CModelCleanupRec* pRec = (CModelCleanupRec*)pLink->m_pData;
-		CServerMgr*       pMgr;
-		char*             pFilename;
-		void*             hElement;
-
-		pMgr = g_pServerMgr;
-
-		if (g_pServerMgr)
-		{
-			pFilename = pRec->m_pModel->GetFilename();
-
-			delete pRec;
-
-			hElement = dhash_FindElement(pMgr->m_hModelHash, pFilename,
-			                             strlen(pFilename));
-
-			if (hElement)
-				dhash_Remove(pMgr->m_hModelHash, hElement);
-		}
-	}
-#endif
-
-	return LT_OK;
+// Stage file identifiers and bind the complete model or pending placeholder.
+LTRESULT se_InitModel(CServerMgr* manager, LTObject* object, ObjectCreateStruct* create) {
+    if (!manager || !object || object->m_ObjectType != OT_MODEL || !object->m_pSData || !create) return LT_INVALIDPARAMS;
+    auto* instance = static_cast<ModelInstance*>(object);
+    char* filename = create->m_Filename;
+    void* model_file = nullptr;
+    std::array<void*,MAX_MODEL_TEXTURES> skins{};
+    if (!se_LoadFile(&manager->m_FileMgr,filename,0,&model_file)) {
+        filename = const_cast<char*>("models/default.abc");
+        if (!se_LoadFile(&manager->m_FileMgr,filename,0,&model_file)) return LT_MISSINGFILE;
+    }
+    for (uint32 i = 0; i < MAX_MODEL_TEXTURES; ++i) {
+        auto& file = skins[i];
+        file = nullptr;
+        if (create->m_SkinNames[i][0] && !se_LoadFile(&manager->m_FileMgr,create->m_SkinNames[i],0,&file))
+            se_LoadFile(&manager->m_FileMgr,const_cast<char*>("skins/default.dtx"),0,&file);
+    }
+    Model* model = nullptr;
+    void* file = nullptr;
+    const auto autoload = create->m_CreateFlags & OCS_AUTOLOAD;
+    const auto status = se_LoadModel(manager,filename,&model,&file,autoload,autoload);
+    if (status == LT_OK) instance->BindModel(manager->m_Models.Retain(model),false,false);
+    else if (status == LT_INPROGRESS) {
+        instance->BindModel(manager->m_PlaceholderModelOwner,true,false);
+        static_cast<CFileRef*>(model_file)->m_Flags |= 1;
+    } else return status;
+    object->m_pSData->m_pModelFile = model_file;
+    for (uint32 i = 0; i < MAX_MODEL_TEXTURES; ++i) object->m_pSData->m_SkinFiles[i] = skins[i];
+    instance->m_AnimTracker.m_Flags |= 4;
+    instance->m_AnimTracker.m_pUser1 = instance;
+    return LT_OK;
 }
 
-// 0x10052df8 and 0x10054020 — the two dependency records, as the shipped
-// .data initialises them. Each is two words in the image, the callback and
-// the parent record (0x10052dfc is zero; 0x10054028 is already the next
-// global, the per-type handler table), so CDepRecord's last two words are
-// ours and stay zero. The model-hash record's parent is the unlink record
-// (name of the first ours).
-CDepRecord g_DepUnlinkRecord =
-{
-	(LTRESULT (*)(void*, CDepLink*, int))dl_UnlinkAndFree, LTNULL
-};
 
-CDepRecord g_ModelHashCleanup =
-{
-	se_ModelHashCleanup, &g_DepUnlinkRecord
-};
+// Decode a reserved result without publishing it from the worker.
+LTRESULT se_LoadModelData(CServerMgr* manager, char* filename, void*, Model** output,
+                          ModelService::Ticket* ticket) {
+    if (output) *output = nullptr;
+    if (!manager || !filename || !output || !ticket) return LT_INVALIDPARAMS;
+    try {
+        const auto load = *ticket ? manager->m_Models.LoadReserved(*ticket) : manager->m_Models.BeginLoad(filename);
+        *ticket = load.ticket;
+        *output = load.model.get();
+        return load.status;
+    } catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
+      catch (const std::exception& error) { dsi_ServerError("Model load failed: %s",error.what()); return LT_INVALIDMODELFILE; }
+}
 
-// 0x1003df40 — stdlith's CHelpers::ExtractNames (src/lithshared/stdlith/
-// helpers.cpp), linked in statically: full path in, then path, file name,
-// title and extension out, each optional. NOT the CRT's _splitpath, whose
-// second argument is the drive — the shipped pushes put the buffer in the
-// second slot and zeros in the last three, and the callee's first strcpy
-// (from its 0x108 path buffer into argument two) is what says the second
-// slot is the path. Declared here rather than by including stdlith's
-// helpers.h, as sharedcommon.cpp does for CHelpers::UpperStrcmp.
-class CHelpers
-{
-public:
-	static int ExtractNames(const char* pFullPath, char* pPathname,
-	                        char* pFilename, char* pFiletitle, char* pExt);
-};
 
-// NEAR on server.dll (568 bytes against 575, the same 196 instructions,
-// four mnemonic blocks); SIZE-EXACT on lithtech.exe (762 against 0x0046a790's
-// 762, two blocks). What closed the gap from the old 14-block near, each
-// from the shipped bytes:
-//
-//  * `new Model(...)`, not dalloc plus placement new: both shipped calls go
-//    to the `operator new` forwarder 0x1000d25d (0x1002b0d2, 0x1002b19a),
-//    and with the new-expression VC6 lets the null result share esi with
-//    pModel's LTNULL — which fixed the whole three-way register rotation.
-//  * the directory comes from CHelpers::ExtractNames, not _splitpath (see
-//    the declaration below): the buffer is the SECOND argument.
-//  * the cleanup record is `new CModelCleanupRec(mgr, model)` with an
-//    inline constructor — the manager load before the model store at
-//    0x1002b1a3 is the constructor's argument evaluation.
-//  * guards, not nested ifs. lithtech.exe keeps every error block in line
-//    where its guard is, and says so: the missing-file block straight after
-//    the se_LoadFile test (0x0046a86b) and again after the stream test
-//    (0x0046a933), the SetFilename and se_RegisterModel failures sharing one
-//    delete-and-LT_ERROR copy (0x0046a9d8), and the dResult failure its own
-//    copy at the very end (0x0046aa41) — which is what makes that last one
-//    the `if (!dResult) {...}` body's fall-out rather than a guard.
-//
-// The residual is the same on both images and it is one thing: where VC6
-// hosts a tail it merges. Shipped keeps the merged copy at the FIRST site
-// and has the later one jump back (server: the `xor %eax,%eax` at the hash
-// hit 0x1002b06e, reached from the success tail; the missing-file block at
-// 0x1002b095, reached from the stream test; lithtech: the stream copy's
-// `jl 0x46a89f` into the se_LoadFile copy's epilogue). Ours always keeps the
-// LATER copy. Measured negatives: a backward `goto` into the first
-// missing-file copy (VC6 moves the block to the stream test anyway, 568 and
-// five blocks), `goto` into the hash hit's `return LT_OK` (no change), the
-// hash hit made the textually last `return` by inverting the test (the xor
-// is then hosted there but the whole hit block moves to the end: 577, three
-// blocks), and `return dResult` for the success tail (no change).
-//
-// One child model, named by its parent's file. The name in the file is bare,
-// so it is resolved against the parent's own directory — which is why a model
-// and its children have to live together.
-//
-// From there it is the same as loading any model, and it recurses: a child
-// with children of its own comes back through here. What is different is the
-// end, where the model is given a callback that takes it out of the manager's
-// hash again when it goes, so that nothing is left pointing at it.
-LTRESULT se_LoadChildModel(CModelLoadRequest* pReq, Model** ppModel)
-{
-	char   szDir[0x200];
-	char   szPath[0x200];
-	void*  pFile;
-	CModelLoadContext* pCtx;
-	Model* pModel = LTNULL;
-	void*  hElement;
-	CModelCleanupRec* pEntry;
-	LTRESULT dResult;
-
-	*ppModel = LTNULL;
-
-	pCtx = pReq->m_pContext;
-
-	CHelpers::ExtractNames(pCtx->m_pFilename, szDir, LTNULL, LTNULL, LTNULL);
-
-	if (szDir[0] == 0)
-		sprintf(szPath, "%s", pReq->m_pChildName);
-	else
-		sprintf(szPath, "%s\\%s", szDir, pReq->m_pChildName);
-
-	hElement = dhash_FindElement(pCtx->m_pServerMgr->m_hModelHash, szPath,
-	                             strlen(szPath));
-
-	if (hElement)
-	{
-		*ppModel = (Model*)dhash_GetData(hElement);
-
-		return LT_OK;
-	}
-
-	if (!se_LoadFile(&pCtx->m_pServerMgr->m_FileMgr, szPath, 0, &pFile))
-		RETURN_ERROR_SYM_DESC(1, "se_LoadChildModel", LT_MISSINGMODELFILE, szPath);
-
-	pModel = new Model((uint32*)&g_DefAlloc, (uint32*)&g_DefAlloc);
-
-	if (!pModel)
-		RETURN_ERROR(1, "se_LoadChildModel", LT_OUTOFMEMORY);
-
-	pReq->m_pStream = se_OpenStream(&pCtx->m_pServerMgr->m_FileMgr, pFile);
-
-	if (!pReq->m_pStream)
-		RETURN_ERROR_SYM_DESC(1, "se_LoadChildModel", LT_MISSINGMODELFILE, szPath);
-
-	dResult = pModel->Load(pReq->m_pStream, (IMoAllocator*)&g_DefAlloc);
-
-	if (!dResult)
-		dResult = pModel->LoadChildModels(pReq);
-
-	pReq->m_pStream->Release();
-
-	if (!dResult)
-	{
-		if (!pModel->SetFilename(szPath))
-		{
-			delete pModel;
-
-			RETURN_ERROR(1, "se_LoadChildModel", LT_ERROR);
-		}
-
-		pModel->m_FileFlags = ((CFileRef*)pFile)->m_nFileID;
-
-		if (se_RegisterModel(pCtx->m_pServerMgr, pModel, pFile, dResult))
-		{
-			delete pModel;
-
-			RETURN_ERROR(1, "se_LoadChildModel", LT_ERROR);
-		}
-
-		pEntry = new CModelCleanupRec(pCtx->m_pServerMgr, pModel);
-
-		// The list head is at the model's +0x14, and the shipped
-		// `lea 0x14(%esi)` says so. commonmodel.h (not ours) names the run
-		// from +0x08 to +0x13 m_Cleanups and the word at +0x14 m_pad_014,
-		// so the address is computed here rather than taken from a field
-		// whose name would be misleading.
-		dl_AddLink((uint8*)pModel + 0x14,
-		           dl_MakeLink(&g_ModelHashCleanup, pEntry));
-
-		*ppModel = pModel;
-
-		return LT_OK;
-	}
-
-	delete pModel;
-
-	RETURN_ERROR(1, "se_LoadChildModel", LT_ERROR);
+// Publish only owned load tickets. Cancelled or stale completion messages
+// cannot resurrect a model, including after service termination/restart.
+void CServerMgr::OnModelLoaded(LThreadMessage* message) {
+    ServerActivity activity(m_Lifetime);
+    if (!activity.available() || m_Terminating) return;
+    ServerCallbackGuard operation(m_Lifetime);
+    if (!message || message->m_Data[2] != 0) return;
+    auto* file = reinterpret_cast<CFileRef*>(message->m_Data[3]);
+    auto status = static_cast<LTRESULT>(message->m_Data[0]);
+    std::shared_ptr<Model> model;
+    if (message->m_Data[5]) {
+        ModelService::Completion completed;
+        try { completed = m_Models.Finish(message->m_Data[5]); }
+        catch (const std::bad_alloc&) { message->m_Data[0] = LT_INPROGRESS; return; }
+        if (!completed.accepted) return;
+        model = std::move(completed.model);
+        status = completed.status;
+    }
+    if (status == LT_OK) {
+        if (!model || !file) status = LT_INVALIDPARAMS;
+        else status = se_RegisterModel(this,model.get(),file,1);
+        if (!operation.unchanged()) return;
+    }
+    message->m_Data[0] = status;
+    if (status != LT_OK && model) m_Models.Unload(model->GetFilename());
+    if (file && m_ClassMgr.m_pServerShell) {
+        const std::string name = file->m_Name;
+        m_ClassMgr.shell([&](IServerShell& shell) { return shell.FileLoadNotify(name.c_str(),status); });
+    }
 }
 
 // THE SHARED SERVER SOURCE HAS A CLIENT-ONLY STATEMENT, and se_RegisterModel
@@ -1242,84 +689,30 @@ LTRESULT se_LoadChildModel(CModelLoadRequest* pReq, Model** ppModel)
 void cs_InheritFileFromServer(Model* pModel);      // 0x00414930 (client only)
 #endif
 
-// 0x1002b41b — a model that has finished loading joins the manager's hash
-// under its own filename, and every object that was waiting for it is
-// switched over.
-//
-// The wait works like this: se_InitModel points an object whose model is
-// still loading at the manager's placeholder and marks the object's tracker
-// with bit 3, and marks the file record with bit 0. So the flag on the file
-// is what says "somebody is waiting", and the objects to fix are the ones
-// whose engine-side data names this same file. Each one gives the placeholder
-// its reference back, takes one on the real model, and loses the marker bit;
-// then the file loses its own.
-//
-// The filename is asked of the model three times rather than kept in a local,
-// which is what the three GetFilename calls in the shipped code are.
-//
-// What comes back is whether the hash insert *failed* — nonzero on failure —
-// which is why se_LoadChildModel treats a zero as success.
-//
-// This was written up as an irreducible callee-saved rotation (ebx and edi
-// swapped, 191 of 191) and it was neither. Two source facts were missing and
-// they were one fault: the bit-0 clear had to go through the byte-wide view
-// declared at the top of this file, and the list head had to be a named local
-// assigned *before* the first link is read. With the flag clear one byte too
-// long the register pressure was different, so the head-first spelling — which
-// had been probed and rejected on its own — did nothing; with the flag fixed
-// it puts the manager in edi and the head in a fresh ebx exactly as shipped.
-// A rotation is a symptom, and probing one lever at a time can hide the
-// second.
-LTRESULT se_RegisterModel(CServerMgr* pMgr, Model* pModel, void* pFile,
-                          int nFlag)
-{
-	void*   hElement;
-	LTLink* pHead;
-	LTLink* pCur;
-	ModelInstance* pInst;
 
-	if (g_DebugLevel >= 2)
-		dsi_ServerError("(Server) loaded model: %s", pModel->GetFilename());
-
-	hElement = dhash_AddElement((CHashTable*)pMgr->m_hModelHash,
-	                            pModel->GetFilename(),
-	                            strlen(pModel->GetFilename()));
-
-	dhash_SetData(hElement, pModel);
-
-	if (nFlag)
-	{
-		if (((CFileRefFlagView*)pFile)->m_Flags & 1)
-		{
-			pHead = pMgr->ObjectListHead();
-
-			for (pCur = pHead->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-			{
-				pInst = (ModelInstance*)pCur->m_pData;
-
-				if (pInst->m_pSData->m_pModelFile == pFile)
-				{
-					pInst->m_AnimTracker.GetModel()->m_CacheCount--;
-
-					pInst->m_AnimTracker.SetModel(pModel);
-
-					pModel->m_CacheCount++;
-
-					pInst->m_AnimTracker.m_Flags &= ~8;
-				}
-			}
-
-			((CFileRefFlagView*)pFile)->m_Flags &= ~1;
-		}
-	}
-
-	// Unconditional — 0x0046add2 is the merge point both `je`s above reach.
-#ifndef LT_SERVER_BUILD
-	cs_InheritFileFromServer(pModel);
-#endif
-
-	return hElement == LTNULL;
+// Index published ownership and rebind waiting instances through native types.
+LTRESULT se_RegisterModel(CServerMgr* manager, Model* model, void* file_data, int rebind) {
+    if (!manager || !model || !file_data || !manager->m_hModelHash) return LT_INVALIDPARAMS;
+    auto owner = manager->m_Models.Retain(model);
+    if (!owner) return LT_NOTFOUND;
+    auto* file = static_cast<CFileRef*>(file_data);
+    const auto* name = model->GetFilename();
+    auto* element = dhash_FindElement(manager->m_hModelHash,name,static_cast<uint32>(strlen(name)));
+    if (!element) element = dhash_AddElement(manager->m_hModelHash,name,static_cast<uint32>(strlen(name)));
+    if (!element) return LT_OUTOFMEMORY;
+    dhash_SetData(element,model);
+    if (rebind && (file->m_Flags & 1)) {
+        auto* head = manager->ObjectListHead();
+        for (auto* link = head->m_pNext; link != head; link = link->m_pNext) {
+            auto* instance = static_cast<ModelInstance*>(link->m_pData);
+            if (instance->m_pSData && instance->m_pSData->m_pModelFile == file)
+                instance->BindModel(owner,false,true);
+        }
+        file->m_Flags &= static_cast<uint16>(~1u);
+    }
+    return LT_OK;
 }
+
 
 // 0x1002bde9 — walk the manager's mounted trees looking for a named file,
 // answering nonzero when one has it. Two out-parameters: the record of the
@@ -1332,232 +725,28 @@ LTRESULT se_RegisterModel(CServerMgr* pMgr, Model* pModel, void* pFile,
 // Defined in smgrmisc.cpp under that file's views of the two records
 // (0x1002bde9 is its placed address), so it is declared with them here and
 // the call below casts to them.
-class CFileMgrQ468;
-class CFileTreeRecQ468;
-int fs_FindFileInTreesQ468(CFileMgrQ468* pFileMgr, char* pFilename,
-                           CFileTreeRecQ468** ppTreeRec, uint32* pUnknown);
 
-// 0x1000e650 — tell one client's queue about a file. It allocates a record
-// out of the object at its first argument's +0x18, fills in the three values
-// and the flag word, and links it into one of two lists at +0x3c depending on
-// bit 0 of the flags. servermessage.cpp's xfer_AddFile, on the client's
-// file-transfer state (servermgr.h's CClientFiles, Client+0x18c).
-int xfer_AddFile(CClientFiles* pState, char* pName, uint32 nUnknown,
-                 uint32 nFileID, uint16 nFlags);
 
-// BYTE-IDENTICAL on lithtech.exe (0x0046b9d0, 303 bytes) and server.dll
-// (0x1002be8c, 246 bytes).
-//
-// The first length is a NAMED LOCAL, `nLen = strlen(pFilename)`, with the +1
-// in the call. lithtech.exe proves it: its inlined first strlen ends
-// `not %ecx; ... dec %ecx; inc %ecx` — the -1 and the +1 left unfolded,
-// which a single `strlen(pFilename) + 1` expression folds away (as the
-// second site, 0x0046ba6e, does). On server.dll the same local is what
-// moves `mov 0x8(%ebp),%edi` below the strlen call (0x1002bea6) and frees
-// the frame slot that the old 245-byte version recycled a parameter slot
-// for — the `push %ecx` and `leave` came back with it.
-//
-// nFlags is a uint16 PARAMETER, not an int narrowed at the store. On
-// server.dll the loop's Client pointer is spilled to a dead parameter slot,
-// and with an int nFlags VC6 picked ppFile's 0x14(%ebp); the shipped build
-// uses nFlags's 0x10(%ebp) (0x1002bf50, 0x1002bf64), which only the
-// sixteen-bit parameter gives. (Tried first and NOT it: pClient declared
-// first or block-scoped, no pClient local, a for loop, the call folded,
-// a uint32 nFlags, the cast dropped.) Callers push a dword 0 either way.
-//
-// 0x1002be8c — the file manager's "give me this file" entry point, and the
-// only thing that ever builds a CFileRef.
-//
-// Three answers, and callers here only test for nonzero: 1 if the file was
-// already known (the record comes straight out of the name hash), 2 if it was
-// found in a mounted tree and a record has just been made for it, and 0 if no
-// tree has it. The out-parameter is optional and is cleared first either way,
-// so a caller that ignores the result still sees null on failure.
-//
-// The name is measured twice — once for the lookup (into a local) and once
-// for the insert — and both lengths include the terminator, which is what
-// the two `inc %eax` after the strlen calls are.
-//
-// Every client is then told, because a client has to be able to name the same
-// file by the same id the server used; the id is the manager's file counter at
-// the moment the record was made.
-int se_LoadFile(CFileMgr* pFileMgr, char* pFilename, uint16 nFlags, void** ppFile)
-{
-	CFileRef*     pRef;
-	uint32        nLen;
-	CFileTreeRec* pTreeRec;
-	uint32        nUnknown;
-	void*         hElement;
-	LTLink*       pHead;
-	LTLink*       pCur;
-	Client*       pClient;
-
-	if (ppFile)
-		*ppFile = LTNULL;
-
-	nLen = strlen(pFilename);
-
-	hElement = dhash_FindElement(pFileMgr->m_hFileHash, pFilename, nLen + 1);
-
-	if (hElement)
-	{
-		pRef = (CFileRef*)dhash_GetData(hElement);
-
-		if (ppFile)
-			*ppFile = pRef;
-
-		return 1;
-	}
-
-	if (!fs_FindFileInTreesQ468((CFileMgrQ468*)pFileMgr, pFilename,
-	                            (CFileTreeRecQ468**)&pTreeRec, &nUnknown))
-		return 0;
-
-	pRef = (CFileRef*)sb_Allocate(&pFileMgr->m_Bank.m_Bank);
-
-	hElement = dhash_AddElement((CHashTable*)pFileMgr->m_hFileHash, pFilename,
-	                            strlen(pFilename) + 1);
-
-	pRef->m_Flags     = (uint16)nFlags;
-	pRef->m_pTreeRec  = pTreeRec;
-	pRef->m_Unknown04 = nUnknown;
-	pRef->m_nFileID   = pFileMgr->m_nFiles;
-
-	pFileMgr->m_nFiles++;
-
-	dhash_SetData(hElement, pRef);
-
-	pRef->m_hElement = hElement;
-
-	if (ppFile)
-		*ppFile = pRef;
-
-	pHead = &pFileMgr->m_pServerMgr->m_ClientList.m_Head;
-	pCur  = pHead->m_pNext;
-
-	while (pCur != pHead)
-	{
-		char* pName;
-
-		pClient = (Client*)pCur->m_pData;
-
-		pName = dhash_GetKey(pRef->m_hElement, LTNULL);
-
-		xfer_AddFile((CClientFiles*)pClient->m_pUnknown18C, pName,
-		             pRef->m_Unknown04, pRef->m_nFileID, pRef->m_Flags);
-
-		pCur = pCur->m_pNext;
-	}
-
-	return 2;
+// Cancel pending publication and detach instances before releasing the old model.
+LTRESULT sm_UnloadModel(CServerMgr* manager, char* filename, CFileIdentifier* file) {
+    if (!manager || !filename) return LT_INVALIDPARAMS;
+    const auto key = nolf::platform::asset_key(filename);
+    const bool pending = manager->m_Models.HasPending(key);
+    auto old = manager->m_Models.Unload(key);
+    auto* element = dhash_FindElement(manager->m_hModelHash,key.c_str(),static_cast<uint32>(key.size()));
+    if (element) dhash_Remove(manager->m_hModelHash,element);
+    if (!old && !pending && !element) return LT_NOTFOUND;
+    auto* head = manager->ObjectListHead();
+    for (auto* link = head->m_pNext; link != head; link = link->m_pNext) {
+        auto* instance = static_cast<ModelInstance*>(link->m_pData);
+        if ((old && instance->m_ModelOwner == old) || (file && instance->m_pSData && instance->m_pSData->m_pModelFile == file)) {
+            instance->BindModel(manager->m_PlaceholderModelOwner,true,true);
+            if (file) file->m_Flags |= 1;
+        }
+    }
+    return LT_OK;
 }
 
-// Copy a file out of the resource trees onto disk. The trees are tried in
-// list order and the first one that will open the file wins — there is no
-// second chance, so a tree that has the name but cannot open it ends the
-// search with an error rather than falling through to the next.
-//
-// The stream's own copy answers 1 for a complete copy, and this inverts it
-// into an LTRESULT: LT_OK when everything arrived, LT_ERROR otherwise. The
-// stream is released either way, before the answer is worked out, which is
-// why the result needs a local at all.
-//
-// The tree list is the manager's own first field, so no `lea` appears for the
-// head — the parameter register doubles as it.
-//
-// The tree record is a NAMED LOCAL (pTreeRec). lithtech.exe (0x0046b8a3)
-// then reads the record and its tree through the same register
-// (`mov 0x8(%edi),%eax; mov 0xc(%eax),%eax`) and loads Release's vtable
-// before copying the copy's result aside (0x0046b8d7); the nested cast gave
-// ecx/edx for both, a 95-of-95-byte near. server.dll is identical either way.
-LTRESULT fs_CopyFile(CFileMgr* pFileMgr, const char* pszSourceFile,
-                     const char* pszDestFile)
-{
-	LTLink* pHead = &pFileMgr->m_Trees;
-	LTLink* pCur  = pHead->m_pNext;
-
-	while (pCur != pHead)
-	{
-		CFileTreeRec* pTreeRec = (CFileTreeRec*)pCur->m_pData;
-		ILTStream* pStream =
-			fs_OpenStreamInTree(pTreeRec->m_pTree,
-			                    (char*)pszSourceFile, 0);
-
-		if (pStream)
-		{
-			int bCopied = fs_CopyStreamToFile(pStream, pszDestFile);
-
-			pStream->Release();
-
-			return bCopied == 0;
-		}
-
-		pCur = pCur->m_pNext;
-	}
-
-	return LT_NOTFOUND;
-}
-
-// The other half of se_RegisterModel: a model going out of the hash, by name.
-// Everything still pointing at it is switched to the manager's placeholder and
-// marked as waiting again, and if anything was, the file record is marked too
-// — which is what makes a later load of the same file fix the objects up.
-//
-// The lookup measures the name without its terminator, exactly as
-// se_RegisterModel's insert does (no `inc %eax` after the strlen in either),
-// so the two agree and the name is found.
-//
-// `delete pModel` is the compiler's own shape: the null test, then slot zero
-// of the vtable called with a one — VC6's scalar deleting destructor — and no
-// test written in the source.
-//
-// The count of switched objects lives in the dead pFilename parameter slot
-// (`andl $0x0,0xc(%ebp)` and `incl 0xc(%ebp)`); with the manager, the list
-// head, the cursor, the object, its tracker's model address and the model
-// itself all live at once there is no register left for it.
-LTRESULT sm_UnloadModel(CServerMgr* pMgr, char* pFilename, CFileIdentifier* pFile)
-{
-	void*   hElement;
-	Model*  pModel;
-	LTLink* pHead;
-	LTLink* pCur;
-	int     nSwitched;
-
-	hElement = dhash_FindElement(pMgr->m_hModelHash, pFilename,
-	                             strlen(pFilename));
-
-	if (!hElement)
-		return LT_NOTFOUND;
-
-	pModel = (Model*)dhash_GetData(hElement);
-
-	delete pModel;
-
-	dhash_Remove(pMgr->m_hModelHash, hElement);
-
-	nSwitched = 0;
-
-	pHead = pMgr->ObjectListHead();
-
-	for (pCur = pHead->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-	{
-		ModelInstance* pInst = (ModelInstance*)pCur->m_pData;
-
-		if (pInst->m_AnimTracker.GetModel() == pModel)
-		{
-			pInst->m_AnimTracker.SetModel(pMgr->m_pPlaceholderModel);
-
-			pInst->m_AnimTracker.m_Flags |= 8;
-
-			nSwitched++;
-		}
-	}
-
-	if (nSwitched)
-		((CFileRef*)pFile)->m_Flags |= 1;
-
-	return LT_OK;
-}
 
 
 // 0x10054028 — the per-object-type hooks (servermgr.h's ObjTypeHandlers,
@@ -1584,3 +773,13 @@ ObjTypeHandlers g_ObjTypeHandlers[11] =
 	{ se_InitContainer,  LTNULL       },     // OT_CONTAINER
 	{ LTNULL,            LTNULL       },     // OT_CANVAS
 };
+
+void se_NotifyFileRegistered(CServerMgr* manager, const CFileRef& file) {
+    if (!manager) return;
+    const auto* head = &manager->m_ClientList.m_Head;
+    for (auto* current = head->m_pNext; current != head; current = current->m_pNext) {
+        auto* client = static_cast<Client*>(current->m_pData);
+        xfer_AddFile(client->m_FileTransfer.get(),
+                     const_cast<char*>(file.m_Name.c_str()), file.m_Unknown04, file.m_nFileID, file.m_Flags);
+    }
+}

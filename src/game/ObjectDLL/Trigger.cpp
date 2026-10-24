@@ -10,12 +10,14 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Trigger.h"
 #include "iltserver.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "PlayerObj.h"
-#include "gameservershell.h"
+#include "GameServerShell.h"
 #include "SoundMgr.h"
 #include "ObjectMsgs.h"
 #include <stdio.h>
@@ -323,7 +325,8 @@ uint32 Trigger::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD 
 	switch (messageID)
 	{
 		case MID_TRIGGER :
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleTriggerMsg(hSender, szMsg);
 		break;
 	}
@@ -344,15 +347,15 @@ void Trigger::HandleTriggerMsg(HOBJECT hSender, const char* szMsg)
 {
 	// See if we should trigger the trigger...
 
-	if (_stricmp(szMsg, g_szTrigger) == 0)
+	if (nolf::ascii_compare(szMsg, g_szTrigger) == 0)
 	{
         DoTrigger(hSender, LTFALSE);
 	}
-	else if (_stricmp(szMsg, g_szLock) == 0)  // See if we should lock the trigger...
+	else if (nolf::ascii_compare(szMsg, g_szLock) == 0)  // See if we should lock the trigger...
 	{
         m_bLocked = LTTRUE;
 	}
-	else if (_stricmp(szMsg, g_szUnLock) == 0) // See if we should unlock the trigger...
+	else if (nolf::ascii_compare(szMsg, g_szUnLock) == 0) // See if we should unlock the trigger...
 	{
         m_bLocked = LTFALSE;
 	}
@@ -492,7 +495,7 @@ void Trigger::ObjectTouch(HOBJECT hObj)
 
 				if (pAIName && pObjName)
 				{
-					if ( stricmp(pAIName, pObjName) != 0 )
+					if ( nolf::ascii_compare(pAIName, pObjName) != 0 )
 					{
 						return;
 					}
@@ -521,7 +524,7 @@ void Trigger::ObjectTouch(HOBJECT hObj)
 
 				if (pBodyName && pObjName)
 				{
-					if ( stricmp(pBodyName, pObjName) != 0 )
+					if ( nolf::ascii_compare(pBodyName, pObjName) != 0 )
 					{
 						return;
 					}

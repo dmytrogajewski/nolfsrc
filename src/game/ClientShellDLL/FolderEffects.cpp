@@ -1,7 +1,7 @@
 // FolderEffects.cpp: implementation of the CFolderEffects class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderEffects.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

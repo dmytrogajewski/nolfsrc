@@ -8,7 +8,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "GameStartPoint.h"
 #include "iltserver.h"
 #include "GameServerShell.h"
@@ -152,7 +155,7 @@ LTBOOL GameStartPoint::ReadProp(ObjectCreateStruct *pData)
 		{
 			for (int i=0; i < g_knNumGameTypes; i++)
 			{
-				if (_stricmp(genProp.m_String, GameTypeToString((GameType)i)) == 0)
+				if (nolf::ascii_compare(genProp.m_String, GameTypeToString((GameType)i)) == 0)
 				{
 					m_eGameType = (GameType) i;
 					break;
@@ -208,7 +211,7 @@ LTBOOL GameStartPoint::ReadProp(ObjectCreateStruct *pData)
 		{
 			for (int i=0; i < 3; i++)
 			{
-				if (_stricmp(genProp.m_String, aszTeamNames[i]) == 0)
+				if (nolf::ascii_compare(genProp.m_String, aszTeamNames[i]) == 0)
 				{
 					m_byTeam = i;
 					break;
@@ -300,11 +303,11 @@ LTRESULT CGameStartPointPlugin::PreHook_EditStringList(
 {
 	// See if we can handle the property...
 
-    if (_stricmp("GameType", szPropName) == 0)
+    if (nolf::ascii_compare("GameType", szPropName) == 0)
 	{
 		for (int i=0; i < g_knNumGameTypes; i++)
 		{
-			_ASSERT(cMaxStrings > (*pcStrings) + 1);
+			GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 			if (cMaxStrings > (*pcStrings) + 1)
 			{
 				strcpy(aszStrings[(*pcStrings)++], GameTypeToString((GameType)i));
@@ -317,7 +320,7 @@ LTRESULT CGameStartPointPlugin::PreHook_EditStringList(
 
 	// Handle Player model...
 
-    if (_stricmp("PlayerModel", szPropName) == 0)
+    if (nolf::ascii_compare("PlayerModel", szPropName) == 0)
 	{
 		m_ModelStylePlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings,	cMaxStringLength);
@@ -330,11 +333,11 @@ LTRESULT CGameStartPointPlugin::PreHook_EditStringList(
 
 	// Handle physics model...
 
-    if (_stricmp("PhysicsModel", szPropName) == 0)
+    if (nolf::ascii_compare("PhysicsModel", szPropName) == 0)
 	{
 		for (int i=PPM_FIRST; i < PPM_NUM_MODELS; i++)
 		{
-			_ASSERT(cMaxStrings > (*pcStrings) + 1);
+			GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 			if (cMaxStrings > (*pcStrings) + 1)
 			{
 				strcpy(aszStrings[(*pcStrings)++], GetPropertyNameFromPlayerPhysicsModel((PlayerPhysicsModel)i));
@@ -344,11 +347,11 @@ LTRESULT CGameStartPointPlugin::PreHook_EditStringList(
 		return LT_OK;
 	}
 
-    if (_stricmp("Team", szPropName) == 0)
+    if (nolf::ascii_compare("Team", szPropName) == 0)
 	{
 		for (int i=0; i < 3; i++)
 		{
-			_ASSERT(cMaxStrings > (*pcStrings) + 1);
+			GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 			if (cMaxStrings > (*pcStrings) + 1)
 			{
 				strcpy(aszStrings[(*pcStrings)++], aszTeamNames[i]);

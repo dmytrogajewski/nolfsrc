@@ -11,12 +11,16 @@
 // ----------------------------------------------------------------------- //
 
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "WorldProperties.h"
 #include "ltengineobjects.h"
-#include "gameservershell.h"
+#include "GameServerShell.h"
 #include "ObjectMsgs.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include <stdio.h>
 #include "AIVolumeMgr.h"
 
@@ -24,10 +28,10 @@
 #define SKYPAN_TEXTURE	"Tex\\SkyPan.dtx"
 
 #define ADD_RAMP(num, time, r, g, b, group) \
-	ADD_REALPROP_FLAG(RampTime##num##, time, group)\
-	ADD_COLORPROP_FLAG(RampColor##num##, r, g, b, group)\
-	ADD_STRINGPROP_FLAG(Target##num##, "", group)\
-	ADD_STRINGPROP_FLAG(Message##num##, "", group)
+	ADD_REALPROP_FLAG(RampTime##num, time, group)\
+	ADD_COLORPROP_FLAG(RampColor##num, r, g, b, group)\
+	ADD_STRINGPROP_FLAG(Target##num, "", group)\
+	ADD_STRINGPROP_FLAG(Message##num, "", group)
 
 extern CGameServerShell *g_pGameServerShell;
 
@@ -132,7 +136,7 @@ LTRESULT CWorldPropertiesPlugin::PreHook_EditStringList(
     const uint32 cMaxStringLength)
 {
 	// GOTY: reconstructed from the Game of the Year Object.lto (g_pLTServer test)
-    if (g_pLTServer && _stricmp(szSoundFilter, szPropName) == 0)
+    if (g_pLTServer && nolf::ascii_compare(szSoundFilter, szPropName) == 0)
 	{
 		m_SoundFilterMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
@@ -156,7 +160,7 @@ LTRESULT CWorldPropertiesPlugin::PreHook_EditStringList(
 WorldProperties::WorldProperties()
 {
 	// There should be only one world properties object per level...
-	_ASSERT(!g_pWorldProperties);
+	GAME_ASSERT(!g_pWorldProperties);
 	if (g_pWorldProperties)
 	{
         g_pLTServer->CPrint("WorldProperties ERROR!  More than one WorldProperties object detected!");
@@ -566,7 +570,8 @@ uint32 WorldProperties::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESS
 	{
 		case MID_TRIGGER:
 		{
-            const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+            const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+            const char* szMsg = szMsgStorage.c_str();
 			HandleMsg(hSender, szMsg);
 		}
 		break;
@@ -600,18 +605,18 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], "ON") == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], "ON") == 0)
 			{
 				char buf[20];
 				sprintf(buf,"%.2f", m_fWorldTimeSpeed);
 
                 g_pLTServer->SetGameConVar("WorldTimeSpeed", buf);
 			}
-			else if (_stricmp(parse.m_Args[0], "OFF") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "OFF") == 0)
 			{
                 g_pLTServer->SetGameConVar("WorldTimeSpeed", "-1.0");
 			}
-			else if (_stricmp(parse.m_Args[0], "WorldTimeSpeed") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "WorldTimeSpeed") == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -619,14 +624,14 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     g_pLTServer->SetGameConVar("WorldTimeSpeed", parse.m_Args[1]);
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "WorldTime") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "WorldTime") == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
                     g_pLTServer->SetGameConVar("WorldTime", parse.m_Args[1]);
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szFogColor) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szFogColor) == 0)
 			{
 				if (parse.m_nArgs > 3 && parse.m_Args[1] && parse.m_Args[2] && parse.m_Args[3])
 				{
@@ -636,7 +641,7 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szFogEnable) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szFogEnable) == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -644,7 +649,7 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szFogNearZ) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szFogNearZ) == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -652,7 +657,7 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szFogFarZ) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szFogFarZ) == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -660,7 +665,7 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szSkyFogEnable) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szSkyFogEnable) == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -668,7 +673,7 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szSkyFogFarZ) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szSkyFogFarZ) == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -676,7 +681,7 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], szSkyFogNearZ) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], szSkyFogNearZ) == 0)
 			{
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -684,15 +689,15 @@ void WorldProperties::HandleMsg(HOBJECT hSender, const char* szMsg)
                     bChangedFog = LTTRUE;
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "objective") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "objective") == 0)
 			{
 				HandleObjectiveMsg(&parse);
 			}
-			else if (_stricmp(parse.m_Args[0], "transmission") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "transmission") == 0)
 			{
 				HandleTransmissionMsg(&parse);
 			}
-			else if (_stricmp(parse.m_Args[0], "victory") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "victory") == 0)
 			{
 				HandleVictoryMsg(&parse);
 			}
@@ -787,19 +792,19 @@ void WorldProperties::HandleObjectiveMsg(ConParse *pParse)
 	{
 
         uint8 nRequest = OBJECTIVE_ADD_ID;
-		if (_stricmp(pParse->m_Args[1], "Add") == 0)
+		if (nolf::ascii_compare(pParse->m_Args[1], "Add") == 0)
 		{
 			nRequest = OBJECTIVE_ADD_ID;
 		}
-		else if (_stricmp(pParse->m_Args[1], "Remove") == 0)
+		else if (nolf::ascii_compare(pParse->m_Args[1], "Remove") == 0)
 		{
 			nRequest = OBJECTIVE_REMOVE_ID;
 		}
-		else if (_stricmp(pParse->m_Args[1], "RemoveAll") == 0)
+		else if (nolf::ascii_compare(pParse->m_Args[1], "RemoveAll") == 0)
 		{
 			nRequest = OBJECTIVE_CLEAR_ID;
 		}
-		else if (_stricmp(pParse->m_Args[1], "Completed") == 0)
+		else if (nolf::ascii_compare(pParse->m_Args[1], "Completed") == 0)
 		{
 			nRequest = OBJECTIVE_COMPLETE_ID;
 		}

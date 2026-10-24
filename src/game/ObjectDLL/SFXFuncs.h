@@ -14,6 +14,8 @@
 #define __SFX_FUNCS_H__
 
 #include "ServerUtilities.h"
+#include "AssertMgr.h"
+#include <cassert>
 
 // Use ADD_LENSFLARE_PROPERTIES() in your class definition to enable
 // the following properties in the editor.  For example:
@@ -119,7 +121,7 @@ inline LENSFLARE::~LENSFLARE()
 
 inline void LENSFLARE::SetSpriteFile(char* szSpriteFile)
 {
-	_ASSERT(szSpriteFile);
+	GAME_ASSERT(szSpriteFile);
 	FREE_HSTRING(hstrSpriteFile);
     hstrSpriteFile = g_pLTServer->CreateString(szSpriteFile);
 }

@@ -3,6 +3,5 @@
 #include "afxext.h"
 #include "afxcmn.h"
 #else
-#include <windows.h>
 #include "mfcstub.h"
 #endif

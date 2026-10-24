@@ -28,26 +28,26 @@
 	public:
 		
 		// Get/Set friction coefficient.
-		virtual LTRESULT GetFrictionCoefficient(HOBJECT hObj, float &coeff);
-		virtual LTRESULT SetFrictionCoefficient(HOBJECT hObj, float coeff);
+		virtual LTRESULT GetFrictionCoefficient(HOBJECT hObj, float &coeff) = 0;
+		virtual LTRESULT SetFrictionCoefficient(HOBJECT hObj, float coeff) = 0;
 
 		// Get/set force ignore limit.
-		virtual LTRESULT GetForceIgnoreLimit(HOBJECT hObj, float &limit);
-		virtual LTRESULT SetForceIgnoreLimit(HOBJECT hObj, float limit);
+		virtual LTRESULT GetForceIgnoreLimit(HOBJECT hObj, float &limit) = 0;
+		virtual LTRESULT SetForceIgnoreLimit(HOBJECT hObj, float limit) = 0;
 		
 		// Get/Set acceleration and velocity
-		virtual LTRESULT GetVelocity(HOBJECT hObj, LTVector *pVel);
+		virtual LTRESULT GetVelocity(HOBJECT hObj, LTVector *pVel) = 0;
 		virtual LTRESULT SetVelocity(HOBJECT hObj, LTVector *pVel)=0;
 		
-		virtual LTRESULT GetAcceleration(HOBJECT hObj, LTVector *pAccel);
+		virtual LTRESULT GetAcceleration(HOBJECT hObj, LTVector *pAccel) = 0;
 		virtual LTRESULT SetAcceleration(HOBJECT hObj, LTVector *pAccel)=0;
 
 		// Get/Set an object's mass (default is 30).
-		virtual LTRESULT GetObjectMass(HOBJECT hObj, float &mass);
-		virtual LTRESULT SetObjectMass(HOBJECT hObj, float mass);
+		virtual LTRESULT GetObjectMass(HOBJECT hObj, float &mass) = 0;
+		virtual LTRESULT SetObjectMass(HOBJECT hObj, float mass) = 0;
 
 		// Get the object's current dimensions.
-		virtual LTRESULT GetObjectDims(HOBJECT hObj, LTVector *pNewDims);
+		virtual LTRESULT GetObjectDims(HOBJECT hObj, LTVector *pNewDims) = 0;
 		
 		// Changes the object's dimensions without pushing against objects and world.
 		// Flags is a combination of SETDIMS_ flags above.
@@ -58,10 +58,10 @@
 		virtual LTRESULT MoveObject(HOBJECT hObj, LTVector *pPos, uint32 flags)=0;
 
 		// Find out what the object is standing on.
-		virtual LTRESULT GetStandingOn(HOBJECT hObj, CollisionInfo *pInfo);
+		virtual LTRESULT GetStandingOn(HOBJECT hObj, CollisionInfo *pInfo) = 0;
 
 		// Returns LT_YES if hObj is a main world object and LT_NO otherwise.
-		virtual LTRESULT IsWorldObject(HOBJECT hObj);
+		virtual LTRESULT IsWorldObject(HOBJECT hObj) = 0;
 
 		// Get/set global force.  This is an acceleration applied to all objects
 		// when they move.  Default is (0,-2000,0) which simulates gravity.

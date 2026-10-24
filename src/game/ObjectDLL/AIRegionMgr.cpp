@@ -1,6 +1,6 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "AIRegionMgr.h"
 #include "AIPath.h"
 #include "FastHeap.h"
@@ -22,8 +22,8 @@ CAIRegionMgr::CAIRegionMgr()
 
 CAIRegionMgr::~CAIRegionMgr()
 {
-	g_pAIRegionMgr = LTNULL;
 	Term();
+	if (g_pAIRegionMgr == this) g_pAIRegionMgr = LTNULL;
 }
 
 void CAIRegionMgr::Term()

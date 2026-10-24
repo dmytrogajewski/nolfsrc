@@ -1,0 +1,88 @@
+diff --git a/src/Performance.c b/src/Performance.c
+index 29f9abe..e275d84 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -86,6 +86,12 @@ void DmPerformance_release(DmPerformance* slf) {
+ 	Dm_free(slf);
+ }
+ 
++// Every repeat restarts the clock and lasts the segment's length.
++static uint32_t Dm_getSegmentEnd(DmPerformance const* slf) {
++	uint32_t remaining = slf->segment->repeats > slf->segment_loop ? slf->segment->repeats - slf->segment_loop : 0;
++	return slf->segment_start + slf->segment->length * (remaining + 1);
++}
++
+ static uint32_t Dm_getBoundaryOffset(DmPerformance* slf, DmTiming timing) {
+ 	uint32_t timing_unit_length = 0;
+ 
+@@ -106,8 +112,8 @@ static uint32_t Dm_getBoundaryOffset(DmPerformance* slf, DmTiming timing) {
+ 			return slf->time;
+ 		}
+ 
+-		// A segment message at the same time replaces the pending repeat.
+-		uint32_t end = slf->segment_start + slf->segment->length;
++		// After the last repeat; repeats keep it scheduled (see DmPerformance_handleSegmentMessage).
++		uint32_t end = Dm_getSegmentEnd(slf);
+ 		return end > slf->time ? end : slf->time;
+ 	}
+ 	default:
+@@ -726,9 +732,24 @@ static void DmPerformance_handleCommandMessage(DmPerformance* slf, DmMessage_Com
+ 
+ static void DmPerformance_handleSegmentMessage(DmPerformance* slf, DmMessage_SegmentChange* msg) {
+ 	DmSegment* sgt = msg->segment;
+-	DmSegment_release(slf->segment);
++	if (slf->segment != NULL) {
++		DmSegment_release(slf->segment);
++	}
+ 	slf->segment_serial += 1;
+ 
++	// A repeat keeps segment changes scheduled after it, rebased onto its restarted clock.
++	enum { DmInt_KEPT_SEGMENT_CHANGES = 8 };
++	DmMessage kept[DmInt_KEPT_SEGMENT_CHANGES];
++	size_t kept_count = 0;
++	if (sgt != NULL && msg->loop != 0) {
++		for (size_t i = 0; i < slf->control_queue.queue_length && kept_count < DmInt_KEPT_SEGMENT_CHANGES; ++i) {
++			DmMessage* pending = &slf->control_queue.queue[i]->data;
++			if (pending->type == DmMessage_SEGMENT && pending->time >= slf->time) {
++				DmMessage_copy(pending, &kept[kept_count++], (int64_t) pending->time - (int64_t) slf->time);
++			}
++		}
++	}
++
+ 	// Get rid of the currently playing segment.
+ 	DmMessageQueue_clear(&slf->control_queue);
+ 	DmMessageQueue_clear(&slf->music_queue);
+@@ -796,6 +817,12 @@ static void DmPerformance_handleSegmentMessage(DmPerformance* slf, DmMessage_Seg
+ 
+ 	slf->segment = DmSegment_retain(sgt);
+ 	slf->segment_start = slf->time;
++	slf->segment_loop = msg->loop;
++
++	for (size_t i = 0; i < kept_count; ++i) {
++		DmMessageQueue_add(&slf->control_queue, &kept[i], kept[i].time, DmQueueConflict_REPLACE);
++		DmMessage_free(&kept[i]);
++	}
+ 
+ 	// If required, schedule to loop this segment.
+ 	if (msg->loop < sgt->repeats) {
+@@ -1062,7 +1089,7 @@ DmResult DmPerformance_getPlayback(DmPerformance* slf, DmPlayback* out) {
+ 	out->remaining = 0;
+ 
+ 	if (slf->segment != NULL) {
+-		uint32_t end = slf->segment_start + slf->segment->length;
++		uint32_t end = Dm_getSegmentEnd(slf);
+ 		if (end > slf->time) {
+ 			out->remaining =
+ 			    Dm_getSampleCountForDuration(end - slf->time, slf->time_signature, slf->tempo, slf->sample_rate, 1);
+diff --git a/src/_Internal.h b/src/_Internal.h
+index 0bbe130..981c4b3 100644
+--- a/src/_Internal.h
++++ b/src/_Internal.h
+@@ -546,6 +546,7 @@ struct DmPerformance {
+ 	DmSegment* segment;
+ 	uint32_t segment_start;
+ 	uint32_t segment_serial;
++	uint32_t segment_loop; // The repeat playing, counted from zero.
+ 	DmStyle* style;
+ 	DmBand* band;
+ 	DmSynth synth;

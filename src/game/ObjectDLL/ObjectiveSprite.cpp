@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "ObjectiveSprite.h"
 #include "iltserver.h"
 #include "ObjectMsgs.h"
@@ -136,17 +138,18 @@ uint32 ObjectiveSprite::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESS
 	{
  		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
-			if (stricmp(szMsg, "COMPLETE") == 0)
+			if (nolf::ascii_compare(szMsg, "COMPLETE") == 0)
 			{
 				SetCompleted();
 			}
-			else if (stricmp(szMsg, "RESET") == 0)
+			else if (nolf::ascii_compare(szMsg, "RESET") == 0)
 			{
 				Reset();
 			}
-			else if (stricmp(szMsg, "ON") == 0)
+			else if (nolf::ascii_compare(szMsg, "ON") == 0)
 			{
 				if (m_hObject)
 				{
@@ -157,7 +160,7 @@ uint32 ObjectiveSprite::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESS
                     g_pLTServer->SetObjectUserFlags(m_hObject, dwUsrFlags | USRFLG_VISIBLE);
 				}
 			}
-			else if (stricmp(szMsg, "OFF") == 0)
+			else if (nolf::ascii_compare(szMsg, "OFF") == 0)
 			{
 				if (m_hObject)
 				{

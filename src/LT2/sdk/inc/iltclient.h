@@ -19,28 +19,7 @@
 	#define PS_DUMB			(1<<3)	// The engine leaves the system alone.. you must
 									// update and move them.
 
-	// The particle structure for particle systems.
-	struct LTParticle
-	{
-		LTVector m_Velocity;
-		LTVector m_Color;	// Particle colors are 0-255.
-		float	 m_Alpha;	// 0-1.
-		float	 m_Size;	// Particle size
-		LTParticle *m_pNext;
-	};
-
-	
-	// The line structure for line system.
-	struct LTLinePt
-	{
-		LTVector	m_Pos;
-		float		r, g, b, a;	// Values 0-1.
-	};
-
-	struct LTLine
-	{
-		LTLinePt	m_Points[2];
-	};
+	#include "ltparticle.h"
 
 	DEFINE_HANDLE_TYPE(HLTLINE)
 
@@ -416,7 +395,7 @@
 		//		LT_OK if successful,  fTimer is set only if this is returned.
 		//		LT_FINISHED if sound is not playing (may be delayed due to collisions, or done).
 		//		LT_INVALIDPARAMS if hSound not available.
-		LTRESULT	(*GetSoundOffset)( HLTSOUND hSound, uint32 * dwOffset, uint32 * dwSize = NULL );
+		LTRESULT (*GetSoundOffset)(HLTSOUND hSound, uint32* dwOffset, uint32* dwSize);
 
 		// Check if sound finished playing or if object it was attached to was removed.
 		// Arguments:

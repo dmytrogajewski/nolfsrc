@@ -1,6 +1,6 @@
 #ifndef _AVECTOR_H_
 #define _AVECTOR_H_
-
+#include "ltvector.h"
 
 
 class CAVector
@@ -19,8 +19,7 @@ public:
 	double Getk() { return m_k; }
 
 
-#if defined(_LITHTECH_)
-    operator const LTVector() const
+    operator LTVector() const
 	{
         LTVector vec;
 		vec.x = (float)m_i;
@@ -28,7 +27,6 @@ public:
 		vec.z = (float)m_k;
 		return vec;
 	}
-#endif
 
 protected:
 

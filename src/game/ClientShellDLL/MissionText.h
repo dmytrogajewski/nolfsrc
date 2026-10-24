@@ -5,11 +5,8 @@
 #if !defined(AFX_MISSIONTEXT_H__FFB1A7C1_ACB4_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_MISSIONTEXT_H__FFB1A7C1_ACB4_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
-#include "LithFontMgr.h"
+#include "lithfontmgr.h"
 
 class CMissionText
 {

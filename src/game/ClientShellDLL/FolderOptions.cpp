@@ -1,7 +1,7 @@
 // FolderOptions.cpp: implementation of the CFolderOptions class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderOptions.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

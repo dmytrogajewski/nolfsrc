@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "ExplosionFX.h"
 #include "FXButeMgr.h"
 #include "ClientServerShared.h"

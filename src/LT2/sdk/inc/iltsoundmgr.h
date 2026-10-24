@@ -68,7 +68,7 @@
 	struct InitSoundInfo
 	{
 		// Name of 3d provider to use
-		char						m_sz3DProvider[_MAX_PATH+1];
+		char						m_sz3DProvider[LT_MAX_PATH+1];
 
 		// Number of sw voices
 		uint8						m_nNumSWVoices;

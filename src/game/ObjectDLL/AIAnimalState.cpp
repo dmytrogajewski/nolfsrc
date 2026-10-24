@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIAnimal.h"
 #include "AIAnimalState.h"
 #include "AIAnimalStrategy.h"
@@ -240,17 +243,17 @@ void CAIDogStateIdle::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "POSE") )
+	if ( !nolf::ascii_compare(szName, "POSE") )
 	{
-		if ( !_stricmp(szValue, "SIT") )
+		if ( !nolf::ascii_compare(szValue, "SIT") )
 		{
 			m_ePose = CAnimatorAIAnimal::eIdleSit;
 		}
-		else if ( !_stricmp(szValue, "LAY") )
+		else if ( !nolf::ascii_compare(szValue, "LAY") )
 		{
 			m_ePose = CAnimatorAIAnimal::eIdleLay;
 		}
-		else if ( !_stricmp(szValue, "STAND") )
+		else if ( !nolf::ascii_compare(szValue, "STAND") )
 		{
 			m_ePose = CAnimatorAIAnimal::eIdleStand;
 		}
@@ -1085,17 +1088,17 @@ void CAISharkStateIdle::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "POSE") )
+	if ( !nolf::ascii_compare(szName, "POSE") )
 	{
-		if ( !_stricmp(szValue, "SIT") )
+		if ( !nolf::ascii_compare(szValue, "SIT") )
 		{
 			m_ePose = CAnimatorAIAnimal::eIdleSit;
 		}
-		else if ( !_stricmp(szValue, "LAY") )
+		else if ( !nolf::ascii_compare(szValue, "LAY") )
 		{
 			m_ePose = CAnimatorAIAnimal::eIdleLay;
 		}
-		else if ( !_stricmp(szValue, "STAND") )
+		else if ( !nolf::ascii_compare(szValue, "STAND") )
 		{
 			m_ePose = CAnimatorAIAnimal::eIdleStand;
 		}
@@ -1395,12 +1398,12 @@ void CAISharkStateGoto::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "PT") )
+	if ( !nolf::ascii_compare(szName, "PT") )
 	{
 		sscanf(szValue, "%f,%f,%f", &m_vDest.x, &m_vDest.y, &m_vDest.z);
 		m_cNodes = 0;
 	}
-	else if ( !_stricmp(szName, "OBJ") )
+	else if ( !nolf::ascii_compare(szName, "OBJ") )
 	{
 		HOBJECT hObject;
 		if ( LT_OK != FindNamedObject(szValue, hObject) )
@@ -1411,7 +1414,7 @@ void CAISharkStateGoto::HandleNameValuePair(char *szName, char *szValue)
 		g_pLTServer->GetObjectPos(hObject, &m_vDest);
 		m_cNodes = 0;
 	}
-	else if ( !_stricmp(szName, "PTS") )
+	else if ( !nolf::ascii_compare(szName, "PTS") )
 	{
 		m_cNodes = 0;
 
@@ -1437,7 +1440,7 @@ void CAISharkStateGoto::HandleNameValuePair(char *szName, char *szValue)
 			szPoint = strtok(NULL, ",");
 		}
 	}
-	else if ( !_stricmp(szName, "LOOP") )
+	else if ( !nolf::ascii_compare(szName, "LOOP") )
 	{
 		m_bLoop = IsTrueChar(*szValue);
 	}
@@ -1698,8 +1701,10 @@ void CAISharkStateMaul::Update()
 		g_pLTServer->SetModelLooping(m_hTarget, LTTRUE);
 
 		HATTACHMENT hAttachment;
-		LTRESULT dResult = g_pLTServer->CreateAttachment(GetAI()->GetObject(), m_hTarget, "Maul", &LTVector(0,0,0), &LTRotation(0,0,0,1), &hAttachment);
-		_ASSERT(LT_OK == dResult);
+		LTVector offset(0,0,0);
+		LTRotation rotation(0,0,0,1);
+		LTRESULT dResult = g_pLTServer->CreateAttachment(GetAI()->GetObject(), m_hTarget, "Maul", &offset, &rotation, &hAttachment);
+		GAME_ASSERT(LT_OK == dResult);
 	}
 
 	if ( m_bBiting && !m_pStrategyOneShotAni->IsAnimating() )
@@ -1759,11 +1764,11 @@ void CAISharkStateMaul::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "TIME") )
+	if ( !nolf::ascii_compare(szName, "TIME") )
 	{
 		m_fMaulTime = (LTFLOAT)atof(szValue);
 	}
-	else if ( !_stricmp(szName, "TARGET") )
+	else if ( !nolf::ascii_compare(szName, "TARGET") )
 	{
 		GetAI()->Unlink(m_hTarget);
 		m_hTarget = LTNULL;

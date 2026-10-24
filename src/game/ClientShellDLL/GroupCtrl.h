@@ -5,12 +5,9 @@
 #if !defined(AFX_GROUPCTRL_H__E67EC300_548F_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_GROUPCTRL_H__E67EC300_548F_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
-#include "LTGUIMgr.h"
-#include "stdlith.h"
+#include "ltguimgr.h"
+#include "dynarray.h"
 
 class CGroupSubCtrl
 {

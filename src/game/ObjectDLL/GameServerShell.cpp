@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include <stdexcept>
+#include <cassert>
+#include "engine/portable/string.h"
 #include "GameServerShell.h"
 #include "PlayerObj.h"
 #include "iltserver.h"
@@ -22,6 +25,7 @@
 #include "Sparam.h"
 #include "ObjectMsgs.h"
 #include <stdio.h>
+#include <sstream>
 #include "DialogueWindow.h"
 #include "CSDefs.h"
 #include "AssertMgr.h"
@@ -93,6 +97,9 @@ IServerShell* CreateServerShell(ILTServer *pServerDE)
 	// Set our global pointer
 
     g_pLTServer = pServerDE;
+#ifdef NOLFSRC_NATIVE
+	CVarTrack::BeginSession();
+#endif
 
 	// Set up the LT subsystem pointers
 
@@ -148,10 +155,16 @@ void DeleteServerShell(IServerShell *pInputShell)
 	// DeleteServerShell() is called so we CAN'T set this to NULL)
 
 	debug_delete(pShell);
+	if (g_pGameServerShell == pShell) {
+		g_pGameServerShell = LTNULL;
+#ifdef NOLFSRC_NATIVE
+		CVarTrack::BeginSession();
+#endif
+	}
 
 	// Return the report hook to the normal CRT function
 
-	CAssertMgr::Disable();
+	if (!g_pGameServerShell) CAssertMgr::Disable();
 }
 
 LTBOOL g_bInfiniteAmmo = LTFALSE;
@@ -221,7 +234,7 @@ CGameServerShell::CGameServerShell(ILTServer *pServerDE)
 
 	// Initialize all the globals...
 
-	m_GlobalMgr.Init();
+	if (!m_GlobalMgr.Init()) throw std::runtime_error("Original game data manager initialization failed");
 
 	if (GetGameType() == SINGLE)
 	{
@@ -351,7 +364,7 @@ LPBASECLASS	CGameServerShell::OnClientEnterWorld(HCLIENT hClient, void *pClientD
 		{
 			if (sClientName[0] && sClientRefName[0])
 			{
-				if (_stricmp(sClientName, sClientRefName) == 0)
+				if (nolf::ascii_compare(sClientName, sClientRefName) == 0)
 				{
                     bFoundClient = LTTRUE;
 				}
@@ -543,7 +556,7 @@ void CGameServerShell::SendGameDataToClient(HCLIENT hClient)
         g_pLTServer->WriteToMessageDWord(hWrite, (uint32)m_Objectives[0].dwObjectives[i]);
 	}
 	//send list of team objectives
-	for ( i = 0; i < m_Objectives[dwTeam].nNumObjectives; i++)
+	for (int i = 0; i < m_Objectives[dwTeam].nNumObjectives; i++)
 	{
         g_pLTServer->WriteToMessageDWord(hWrite, (uint32)m_Objectives[dwTeam].dwObjectives[i]);
 	}
@@ -553,12 +566,12 @@ void CGameServerShell::SendGameDataToClient(HCLIENT hClient)
     g_pLTServer->WriteToMessageByte(hWrite, (uint8)nNumObj);
 
 	//send list of general completed objectives
-	for (i = 0; i < m_CompletedObjectives[0].nNumObjectives; i++)
+	for (int i = 0; i < m_CompletedObjectives[0].nNumObjectives; i++)
 	{
         g_pLTServer->WriteToMessageDWord(hWrite, (uint32)m_CompletedObjectives[0].dwObjectives[i]);
 	}
 	//send list of team completed objectives
-	for (i = 0; i < m_CompletedObjectives[dwTeam].nNumObjectives; i++)
+	for (int i = 0; i < m_CompletedObjectives[dwTeam].nNumObjectives; i++)
 	{
         g_pLTServer->WriteToMessageDWord(hWrite, (uint32)m_CompletedObjectives[dwTeam].dwObjectives[i]);
 	}
@@ -746,7 +759,7 @@ void CGameServerShell::ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage)
 			// GOTY: reconstructed from the Game of the Year Object.lto -- our
 			// key, salted with theirs, ours and the player's name
 			g_pLTServer->WriteToMessageDWord(hResponse,
-				GAME_HANDSHAKE_ROTATE(pPlayer->GetNetName()[0] & 0xf) ^ nClientKey ^ (uint32)this);
+				GAME_HANDSHAKE_ROTATE(pPlayer->GetNetName()[0] & 0xf) ^ nClientKey ^ m_handshakeMask);
 			g_pLTServer->EndMessage(hResponse);
 		}
 		break;
@@ -759,21 +772,12 @@ void CGameServerShell::ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage)
 			// password is the mask salted with the first (up to) four
 			// characters of the player's name
 			char* pName = pPlayer->GetNetName();
-			uint32 nNameKey = *((uint32*)pName);
-			if (!(nNameKey & 0x000000ff))
-			{
-				nNameKey = 0;
-			}
-			else if (!(nNameKey & 0x0000ff00))
-			{
-				nNameKey &= 0x000000ff;
-			}
-			else if (!(nNameKey & 0x00ff0000))
-			{
-				nNameKey &= 0x0000ffff;
-			}
+            uint32 nNameKey = 0;
+            for (unsigned i = 0; i < 4 && pName[i]; ++i)
+                nNameKey |= uint32(static_cast<unsigned char>(pName[i])) << (i * 8);
 
-			uint32 nXORMask = GAME_HANDSHAKE_ROTATE(pName[0] & 0xf) ^ (uint32)this;
+
+			uint32 nXORMask = GAME_HANDSHAKE_ROTATE(pName[0] & 0xf) ^ m_handshakeMask;
 			if ((nXORMask ^ nNameKey) != nClientPassword)
 			{
 				g_pLTServer->CPrint("Handshake failed for '%s'!", pPlayer->GetNetName());
@@ -803,7 +807,17 @@ void CGameServerShell::ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage)
 			}
 
 			// Read in their client file CRC
-			uint32 nCShellCRC = CRC32::CalcRezFileCRC("cshell.dll");
+			uint32 nCShellCRC;
+#ifdef NOLFSRC_NATIVE
+			if (!CRC32::ClientShellCompatibilityCRC(nCShellCRC))
+			{
+				g_pLTServer->CPrint("Retail client shell identity is missing; reimport original game assets");
+				g_pLTServer->KickClient(hClient, GAME_DISCON_BADCSHELL);
+				return;
+			}
+#else
+			nCShellCRC = CRC32::CalcRezFileCRC("cshell.dll");
+#endif
 			nCShellCRC ^= nXORMask;
 			nClientCRC = g_pLTServer->ReadFromMessageDWord(hMessage);
 			if (nCShellCRC != nClientCRC)
@@ -834,7 +848,7 @@ void CGameServerShell::ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage)
 					P6_MaskPassword(sGiven, nLen, nXORMask);
 					sGiven[nLen] = '\0';
 				}
-				if (stricmp(sGiven, m_GameInfo.m_sPassword) != 0)
+				if (nolf::ascii_compare(sGiven, m_GameInfo.m_sPassword) != 0)
 				{
 					g_pLTServer->CPrint("Handshake failed for '%s'!", pPlayer->GetNetName());
 					g_pLTServer->CPrint("  '%s' was booted due to a missing or wrong password",
@@ -2879,7 +2893,7 @@ void CGameServerShell::SetupGameInfo()
     uint32 dwLen = sizeof(NetGame);
     g_pLTServer->GetGameInfo((void**)&pGameInfo, &dwLen);
 
-	if (pGameInfo)
+	if (pGameInfo && dwLen == sizeof(NetGame))
 	{
 		memcpy(&m_GameInfo, pGameInfo, sizeof(NetGame));
 	}
@@ -2904,7 +2918,9 @@ void CGameServerShell::SetServerOptions()
 		OPTION* pOpt = g_pServerOptionMgr->GetOption(i);
 		if (GetGameType() == pOpt->eGameType || pOpt->eGameType == SINGLE)
 		{
-			pOpt->SetValue(m_GameInfo.m_fOptions[i]);
+			// Omitted values retain the current console setting, or the
+			// attribute default when no setting has been created yet.
+			pOpt->SetValue(i < m_GameInfo.m_byNumOptions ? m_GameInfo.m_fOptions[i] : pOpt->GetValue());
 		}
 	}
 }
@@ -3266,12 +3282,12 @@ LTRESULT CGameServerShell::ServerAppMessageFn(char* sMsg, int nLen)
 {
 	// Sanity checks...
 
-	if (!sMsg) return(LT_OK);
+	if (!sMsg || nLen <= 0 || nLen > 1024 * 1024) return LT_INVALIDPARAMS;
 
-	istrstream memStream( sMsg, nLen );
+	std::istringstream memStream(std::string(sMsg, nLen));
 
-	char nVal;
-	memStream >> nVal;
+	char nVal = 0;
+	if (!(memStream >> nVal)) return LT_INVALIDPARAMS;
 
 	switch( nVal )
 	{
@@ -3379,7 +3395,7 @@ void CGameServerShell::HandleConsoleTriggerMsg(HCLIENT hSender, HMESSAGEREAD hMe
 
 	// Special case if we're supposed to list objects of a certain type...
 
-	if (_strnicmp(pMsg, "LIST", 4) == 0)
+	if (nolf::ascii_compare_n(pMsg, "LIST", 4) == 0)
 	{
         ILTCommon* pCommon = g_pLTServer->Common();
 		if (!pCommon) return;
@@ -3662,7 +3678,7 @@ void CGameServerShell::HandleUpdateServerOptions(HMESSAGEREAD hMessage)
 
 void CGameServerShell::Save(HMESSAGEWRITE hWrite, uint32 dwSaveFlags)
 {
-	_ASSERT(hWrite);
+	GAME_ASSERT(hWrite);
 	if (!hWrite) return;
 
 	m_charMgr.Save(hWrite);
@@ -3694,7 +3710,7 @@ void CGameServerShell::Save(HMESSAGEWRITE hWrite, uint32 dwSaveFlags)
 
 void CGameServerShell::Load(HMESSAGEREAD hRead, uint32 dwLoadFlags)
 {
-	_ASSERT(hRead);
+	GAME_ASSERT(hRead);
 	if (!hRead) return;
 
 	m_charMgr.Load(hRead);
@@ -4021,38 +4037,39 @@ LTBOOL CGameServerShell::IsPositionOccupied(LTVector & vPos, CPlayerObj* pPlayer
 
 void CGameServerShell::ServerAppAddClient( HCLIENT hClient )
 {
-	char szBuf[1024];
-	ostrstream memStream( szBuf, sizeof( szBuf ));
+	std::ostringstream memStream;
 
 	// Write out the player information.
-	memStream << (( BYTE )SERVERAPP_ADDCLIENT ) << endl;
-	memStream << (( int )g_pLTServer->GetClientID( hClient )) << endl;
+	memStream << (( BYTE )SERVERAPP_ADDCLIENT ) << std::endl;
+	memStream << (( int )g_pLTServer->GetClientID( hClient )) << std::endl;
 
 	// Send to the server app.
-	g_pLTServer->SendToServerApp( szBuf, sizeof( szBuf ));
+	auto payload = memStream.str();
+    payload.push_back('\0');
+    g_pLTServer->SendToServerApp(payload.data(), static_cast<uint32>(payload.size()));
 }
 
 void CGameServerShell::ServerAppRemoveClient( HCLIENT hClient )
 {
-	char szBuf[32];
-	ostrstream memStream( szBuf, sizeof( szBuf ));
+	std::ostringstream memStream;
 
 	// Write out the player information.
-	memStream << (( BYTE )SERVERAPP_REMOVECLIENT ) << endl;
-	memStream << (( int )g_pLTServer->GetClientID( hClient )) << endl;
+	memStream << (( BYTE )SERVERAPP_REMOVECLIENT ) << std::endl;
+	memStream << (( int )g_pLTServer->GetClientID( hClient )) << std::endl;
 
 	// Send to the server app.
-	g_pLTServer->SendToServerApp( szBuf, sizeof( szBuf ));
+	auto payload = memStream.str();
+    payload.push_back('\0');
+    g_pLTServer->SendToServerApp(payload.data(), static_cast<uint32>(payload.size()));
 }
 
 void CGameServerShell::ServerAppShellUpdate( )
 {
 	int i;
-	char szBuf[1024];
-	ostrstream memStream( szBuf, sizeof( szBuf ));
+	std::ostringstream memStream;
 
 	// Write the message id.
-	memStream << (( BYTE )SERVERAPP_SHELLUPDATE ) << endl;
+	memStream << (( BYTE )SERVERAPP_SHELLUPDATE ) << std::endl;
 
 	// Add info for each player.
 	for (i = 0; i < MAX_CLIENTS; i++)
@@ -4065,40 +4082,44 @@ void CGameServerShell::ServerAppShellUpdate( )
 		if( !hClient )
 			continue;
 
-		memStream << (( int )g_pLTServer->GetClientID( hClient )) << endl;
-		memStream << pPlayer->GetNetName( ) << endl;
-		memStream << (( int )pPlayer->GetFragCount( )) << endl;
+		memStream << (( int )g_pLTServer->GetClientID( hClient )) << std::endl;
+		memStream << pPlayer->GetNetName( ) << std::endl;
+		memStream << (( int )pPlayer->GetFragCount( )) << std::endl;
 	}
 
 	// Signal end of player list.
-	memStream << (( int )-1 ) << endl;
+	memStream << (( int )-1 ) << std::endl;
 
 	// Send to the server app.
-	g_pLTServer->SendToServerApp( szBuf, sizeof( szBuf ));
+	auto payload = memStream.str();
+    payload.push_back('\0');
+    g_pLTServer->SendToServerApp(payload.data(), static_cast<uint32>(payload.size()));
 }
 
 void CGameServerShell::ServerAppPreStartWorld( )
 {
-	char szBuf[32];
-	ostrstream memStream( szBuf, sizeof( szBuf ));
+	std::ostringstream memStream;
 
-	memStream << (( BYTE )SERVERAPP_PRELOADWORLD ) << endl;
+	memStream << (( BYTE )SERVERAPP_PRELOADWORLD ) << std::endl;
 
 	// Send to the server app.
-	g_pLTServer->SendToServerApp( szBuf, sizeof( szBuf ));
+	auto payload = memStream.str();
+    payload.push_back('\0');
+    g_pLTServer->SendToServerApp(payload.data(), static_cast<uint32>(payload.size()));
 }
 
 
 void CGameServerShell::ServerAppPostStartWorld( )
 {
-	char szBuf[32];
-	ostrstream memStream( szBuf, sizeof( szBuf ));
+	std::ostringstream memStream;
 
-	memStream << (( BYTE )SERVERAPP_POSTLOADWORLD ) << endl;
-	memStream << (( int )m_nCurLevel ) << endl;
+	memStream << (( BYTE )SERVERAPP_POSTLOADWORLD ) << std::endl;
+	memStream << (( int )m_nCurLevel ) << std::endl;
 
 	// Send to the server app.
-	g_pLTServer->SendToServerApp( szBuf, sizeof( szBuf ));
+	auto payload = memStream.str();
+    payload.push_back('\0');
+    g_pLTServer->SendToServerApp(payload.data(), static_cast<uint32>(payload.size()));
 }
 
 

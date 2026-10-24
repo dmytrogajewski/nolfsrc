@@ -8,7 +8,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "LaserTrigger.h"
 #include "iltserver.h"
 #include "ClientServerShared.h"
@@ -114,13 +115,13 @@ void LaserTrigger::HandleTriggerMsg(HOBJECT hSender, const char* szMsg)
 {
 	// See if we hide/show ourself :)
 
-	if (_stricmp(szMsg, "LOCK") == 0)
+	if (nolf::ascii_compare(szMsg, "LOCK") == 0)
 	{
         uint32 dwUsrFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
 		dwUsrFlags &= ~USRFLG_VISIBLE;
         g_pLTServer->SetObjectUserFlags(m_hObject, dwUsrFlags);
 	}
-	else if (_stricmp(szMsg, "UNLOCK") == 0)
+	else if (nolf::ascii_compare(szMsg, "UNLOCK") == 0)
 	{
         uint32 dwUsrFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
 		dwUsrFlags |= USRFLG_VISIBLE;

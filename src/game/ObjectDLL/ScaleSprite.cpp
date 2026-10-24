@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "ScaleSprite.h"
 #include "iltserver.h"
 #include "ObjectMsgs.h"
@@ -156,17 +158,18 @@ uint32 ScaleSprite::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGER
 	{
  		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
-			if (stricmp(szMsg, "DESTROY") == 0)
+			if (nolf::ascii_compare(szMsg, "DESTROY") == 0)
 			{
 				SetDestroyed();
 			}
-			else if (stricmp(szMsg, "DAMAGE") == 0)
+			else if (nolf::ascii_compare(szMsg, "DAMAGE") == 0)
 			{
 				SetDamaged();
 			}
-			else if (stricmp(szMsg, "ON") == 0)
+			else if (nolf::ascii_compare(szMsg, "ON") == 0)
 			{
 				if (m_hObject)
 				{
@@ -177,7 +180,7 @@ uint32 ScaleSprite::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGER
                     g_pLTServer->SetObjectUserFlags(m_hObject, dwUsrFlags | USRFLG_VISIBLE);
 				}
 			}
-			else if (stricmp(szMsg, "OFF") == 0)
+			else if (nolf::ascii_compare(szMsg, "OFF") == 0)
 			{
 				if (m_hObject)
 				{

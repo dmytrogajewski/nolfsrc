@@ -35,6 +35,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ltbasetypes.h"
+#include <limits>
+#include <new>
+#include <type_traits>
+#include <utility>
 
 
 // ======================================================================= //
@@ -82,12 +86,9 @@ inline void* operator new(size_t size, void* ptr, DummyClassBlahBlah* pBlah)
 	return ptr;
 }
 
-#if _MSC_VER != 1100
 inline void operator delete(void* pDataPtr, void* ptr, DummyClassBlahBlah* pBlah)
 {
 }
-#endif
-
 
 // The single-object pair: the same two templates with a count of one.
 // l_allocator.h carries these beside the array pair below, and they belong
@@ -120,23 +121,27 @@ inline void operator delete(void* pDataPtr, void* ptr, DummyClassBlahBlah* pBlah
 // folds away and only the null test is left behind — a `test`/`jne` onto
 // the very next instruction, two bytes the shipped image really does carry
 // (0x100243de, 0x1001b2af, 0x1001b8fa).
-template<class T>
-inline T* BaseNew(LAlloc* pAlloc, T* dummy, uint32 nElements)
+template<class T, class... Args>
+inline T* BaseNew(LAlloc* pAlloc, T* dummy, uint32 nElements, const Args&... args)
 {
 	T *ptr, *pTemp;
+	if (nElements > std::numeric_limits<uint32>::max() / sizeof(T)) return 0;
 
 	ptr = (T*)pAlloc->Alloc(sizeof(T) * nElements);
 	if (!ptr)
 		return 0;
 
-	// Construct elements.
-	pTemp = ptr;
-	while (nElements)
-	{
-		--nElements;
-		::new(pTemp, (DummyClassBlahBlah*)0) T;
-		++pTemp;
-	}
+    pTemp = ptr;
+    try {
+        for (uint32 i = 0; i < nElements; ++i, ++pTemp) {
+            if constexpr (sizeof...(Args) == 0) ::new(pTemp, (DummyClassBlahBlah*)0) T;
+            else ::new(pTemp, (DummyClassBlahBlah*)0) T(args...);
+        }
+    } catch (...) {
+        while (pTemp != ptr) (--pTemp)->~T();
+        pAlloc->Free(ptr);
+        throw;
+    }
 
 	return ptr;
 }
@@ -178,25 +183,22 @@ public:
 
 	void        operator=(const GenListPos& other);
 
-	union
-	{
-		void*   m_Pos;
-		uint32  m_Index;
-	};
+	void* m_Pos = nullptr;
+	uint32 m_Index = 0;
 };
 
 
 class GenListPos : public BaseGenListPos
 {
 public:
-	            GenListPos()                            {}
-	            GenListPos(void* pos)                   {m_Pos = pos;}
-	            GenListPos(uint32 index)                {m_Index = index;}
+	            GenListPos() { m_Pos = nullptr; m_SubIndex.m_Pos = nullptr; }
+	            GenListPos(void* pos) { m_Pos = pos; m_SubIndex.m_Pos = nullptr; }
+	            GenListPos(uint32 index) { m_Pos = nullptr; m_Index = index; m_SubIndex.m_Pos = nullptr; }
 
 	// Use this to get m_SubIndex as a GenListPos.
-	inline GenListPos& GetSubIndex()
+	inline BaseGenListPos& GetSubIndex()
 	{
-		return *((GenListPos*)&m_SubIndex);
+		return m_SubIndex;
 	}
 
 	// For GenHash.
@@ -257,6 +259,7 @@ public:
 // Inlines.
 inline void BaseGenListPos::operator=(const GenListPos& other)
 {
+	m_Pos = other.m_Pos;
 	m_Index = other.m_Index;
 }
 
@@ -333,6 +336,16 @@ class CMoArray : public GenList<T>
 	public:
 
 		// Constructors
+		CMoArray(const CMoArray& other) {
+		    Clear();
+		    if (!CopyArray(other)) throw std::bad_alloc();
+		}
+		CMoArray(CMoArray&& other) noexcept {
+		    m_pArray = other.m_pArray;
+		    m_nElements = other.m_nElements;
+		    m_Cache = other.m_Cache;
+		    other.Clear();
+		}
 		            CMoArray(CMoArray<T, C>& copyFrom, const T& toAdd);
 
 		            CMoArray()
@@ -363,7 +376,13 @@ class CMoArray : public GenList<T>
 		LTBOOL      Compare(const CMoArray<T, C>& other);
 
 		// Assignment
-		CMoArray<T, C>& operator=(const CMoArray<T, C>& other);
+        CMoArray<T, C>& operator=(const CMoArray<T, C>& other);
+        void Swap(CMoArray<T, C>& other) noexcept {
+            using std::swap;
+            swap(m_pArray, other.m_pArray);
+            swap(m_nElements, other.m_nElements);
+            swap(m_Cache, other.m_Cache);
+        }
 		CMoArray<T, C>  operator+(const T& toAdd);
 
 		LTBOOL      CopyGenList(const GenList<T>& theList);
@@ -373,7 +392,15 @@ class CMoArray : public GenList<T>
 		LTBOOL      AppendArray(const CMoArray<T, C>& other);
 
 		// Find and compare with T::operator==.
-		uint32      FindElement(const T x) const;
+		uint32      FindElement(const T& x) const {
+            if constexpr (requires (const T& a, const T& b) { a == b; }) {
+                for (uint32 i = 0; i < m_nElements; ++i)
+                    if (m_pArray[i] == x) return i;
+                return BAD_INDEX;
+            } else {
+                return MoArray_FindElementMemcmp(&x, m_pArray, m_nElements, sizeof(T));
+            }
+        }
 
 		LTBOOL      Append(const T& toAdd) { return Insert(m_nElements, toAdd); }
 		LTBOOL      Insert(uint32 index, const T& toInsert);
@@ -465,7 +492,7 @@ class CMoArray : public GenList<T>
 		    return m_pArray[index];
 		}
 
-		void        Set(uint32 index, T& data);
+		void        Set(uint32 index, T& data) { m_pArray[index] = data; }
 
 		// Returns a pointer to the internal array..
 		// IN-CLASS, as dynarray.h:235 has it, and the body matters: an
@@ -476,16 +503,17 @@ class CMoArray : public GenList<T>
 		// registers first, which only happens when the source reads
 		// GetArray() / GetSize().
 		T*          GetArray()  { return m_pArray; }
+        const T*    GetArray() const { return m_pArray; }
 
 
 	// Accessors for MFC compatibility.
 	public:
 
-		T&          GetAt(uint32 index) const;
-		void        SetAt(uint32 index, T data);
+		T&          GetAt(uint32 index) const { return m_pArray[index]; }
+		void        SetAt(uint32 index, T data) { m_pArray[index] = data; }
 
-		void        RemoveAll();
-		LTBOOL      Add(const T& toAdd);
+		void        RemoveAll() { SetSize(0); }
+		LTBOOL      Add(const T& toAdd) { return Insert(m_nElements, toAdd); }
 
 
 	// GenList implementation.
@@ -588,11 +616,7 @@ class CMoArray : public GenList<T>
 
 		virtual LTBOOL      GenFindElement(const T& toFind, GenListPos& thePos) const
 		{
-			thePos.m_Index = MoArray_FindElementMemcmp(
-				&toFind,
-				m_pArray,
-				m_nElements,
-				sizeof(T));
+			thePos.m_Index = FindElement(toFind);
 
 			return thePos.m_Index != BAD_INDEX;
 		}
@@ -676,6 +700,7 @@ DYNA_TEMPLATE
 LTBOOL CMoArray<T, C>::CopyArray2(const CMoArray<T,C> &other, LAlloc *pAlloc)
 {
 	uint32 i;
+	if (this == &other) return LTTRUE;
 
 	if( m_pArray )
 	{
@@ -783,6 +808,7 @@ void CMoArray<T, C>::Remove( uint32 index )
 DYNA_TEMPLATE
 void CMoArray<T, C>::Remove2( uint32 index, LAlloc *pAlloc )
 {
+	if (index >= m_nElements) return;
 	uint32 i, newSize, newAllocSize;
 	T *pNewArray;
 	LTBOOL bSlideDown;
@@ -827,6 +853,29 @@ void CMoArray<T, C>::Remove2( uint32 index, LAlloc *pAlloc )
 	--m_nElements;
 }
 
+
+DYNA_TEMPLATE
+LTBOOL CMoArray<T, C>::SetSizeInit(uint32 size, T& value)
+{
+    return SetSizeInit4(size, value, &g_DefAlloc);
+}
+DYNA_TEMPLATE
+LTBOOL CMoArray<T, C>::SetSizeInit2(uint32 size, T value)
+{
+    return SetSizeInit4(size, std::move(value), &g_DefAlloc);
+}
+DYNA_TEMPLATE
+LTBOOL CMoArray<T, C>::SetSizeInit3(uint32 size, T& value, LAlloc* allocator)
+{
+    return SetSizeInit4(size, value, allocator);
+}
+DYNA_TEMPLATE
+LTBOOL CMoArray<T, C>::SetSizeInit4(uint32 size, T value, LAlloc* allocator)
+{
+    if (!SetSize2(size, allocator)) return LTFALSE;
+    for (uint32 i = 0; i < m_nElements; ++i) m_pArray[i] = value;
+    return LTTRUE;
+}
 
 DYNA_TEMPLATE
 LTBOOL CMoArray<T, C>::SetSize2( uint32 newSize, LAlloc *pAlloc )
@@ -885,6 +934,7 @@ LTBOOL CMoArray<T, C>::InternalNiceSetSize( uint32 newSize, LTBOOL bFast, LAlloc
 		return LTTRUE;
 	}
 
+	if (newSize > std::numeric_limits<uint32>::max() - m_Cache.GetWantedCache()) return LTFALSE;
 	pNewArray = _AllocateTArray(newSize + m_Cache.GetWantedCache(), pAlloc);
 	if(!pNewArray)
 		return LTFALSE;
@@ -894,11 +944,14 @@ LTBOOL CMoArray<T, C>::InternalNiceSetSize( uint32 newSize, LTBOOL bFast, LAlloc
 		nToCopy = newSize;
 
 	// Copy as many elements as we can.
-	if(bFast)
-	{
-		memcpy(pNewArray, m_pArray, sizeof(T)*nToCopy);
-	}
-	else
+    bool copied = false;
+    if constexpr (std::is_trivially_copyable_v<T>) {
+        if (bFast) {
+            if (nToCopy) memcpy(pNewArray, m_pArray, sizeof(T)*nToCopy);
+            copied = true;
+        }
+    }
+	if (!copied)
 	{
 		for(i=0; i < nToCopy; i++)
 		{

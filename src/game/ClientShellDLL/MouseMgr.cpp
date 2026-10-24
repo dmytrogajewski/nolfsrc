@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "MouseMgr.h"
 //#include "ClientShell.h"
 

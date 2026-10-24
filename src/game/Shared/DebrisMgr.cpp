@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "DebrisMgr.h"
 #include "CommonUtilities.h"
 
@@ -170,7 +173,7 @@ DEBRIS* CDebrisMgr::GetDebris(char* pName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pName) == 0))
 		{
 			return *pCur;
 		}
@@ -553,19 +556,19 @@ LTRESULT CDebrisMgrPlugin::PreHook_EditStringList(
 LTBOOL CDebrisMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings,
     const uint32 cMaxStrings, const uint32 cMaxStringLength)
 {
-	_ASSERT(aszStrings && pcStrings && g_pDebrisMgr);
+	GAME_ASSERT(aszStrings && pcStrings && g_pDebrisMgr);
     if (!aszStrings || !pcStrings || !g_pDebrisMgr) return LTFALSE;
 
 	// Add an entry for each debris type
 
 	int nNumDebris = g_pDebrisMgr->GetNumDebris();
-	_ASSERT(nNumDebris > 0);
+	GAME_ASSERT(nNumDebris > 0);
 
     DEBRIS* pDebris = LTNULL;
 
 	for (int i=0; i < nNumDebris; i++)
 	{
-		_ASSERT(cMaxStrings > (*pcStrings) + 1);
+		GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 		pDebris = g_pDebrisMgr->GetDebris(i);
 		if (pDebris && pDebris->szName[0])

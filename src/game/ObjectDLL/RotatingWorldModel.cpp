@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "RotatingWorldModel.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -130,7 +132,7 @@ LTRESULT CRotatingWorldModelPlugin::PreHook_Light(
 		// Look for the object and make sure it's a keyframer light.
 		if(pInterface->FindObject(cParse.m_Args[0], hShadowLight) != LT_OK ||
 			pInterface->GetClassName(hShadowLight, className, sizeof(className)) != LT_OK ||
-			stricmp(className, KEYFRAMERLIGHT_CLASSNAME) != 0)
+			nolf::ascii_compare(className, KEYFRAMERLIGHT_CLASSNAME) != 0)
 		{
 			continue;
 		}
@@ -403,7 +405,8 @@ uint32 RotatingWorldModel::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HM
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleTrigger(hSender, szMsg);
 		}
 		break;
@@ -973,12 +976,12 @@ void RotatingWorldModel::UpdateSpinDown()
 
 void RotatingWorldModel::HandleTrigger(HOBJECT hSender, const char* szMsg)
 {
-	if (m_eState == RWM_OFF && stricmp(szMsg, TRIGGER_MSG_ON) == 0)
+	if (m_eState == RWM_OFF && nolf::ascii_compare(szMsg, TRIGGER_MSG_ON) == 0)
 	{
 		SetSpinUp();
 		SetNextUpdate(RWM_UPDATE_DELTA);
 	}
-	else if (m_eState == RWM_NORMAL && stricmp(szMsg, TRIGGER_MSG_OFF) == 0)
+	else if (m_eState == RWM_NORMAL && nolf::ascii_compare(szMsg, TRIGGER_MSG_OFF) == 0)
 	{
 		SetSpinDown();
 		SetNextUpdate(RWM_UPDATE_DELTA);

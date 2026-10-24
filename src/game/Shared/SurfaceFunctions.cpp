@@ -8,7 +8,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "ContainerCodes.h"
 #include "SurfaceFunctions.h"
 #include "ClientServerShared.h"
@@ -79,7 +82,7 @@ LTBOOL GetImpactSprite(SurfaceType eSurfType, LTFLOAT & fScale, int nAmmoId,
 	strncpy(pBuf, pAmmo->pImpactFX->szMark, nBufLen);
     if (!pBuf[0]) return LTFALSE;
 
-	if (stricmp(pBuf, "SURFACE") == 0)
+	if (nolf::ascii_compare(pBuf, "SURFACE") == 0)
 	{
 		// Use the surface to dtermine the bullet hole...
 
@@ -146,7 +149,7 @@ char* GetMovementSound(SurfaceType eSurfType, LTBOOL bLeftFoot,
 					   PlayerPhysicsModel eModel)
 {
 	SURFACE* pSurf = g_pSurfaceMgr->GetSurface(eSurfType);
-    _ASSERT(pSurf);
+    GAME_ASSERT(pSurf);
     if (!pSurf) return LTNULL;
 
 	switch (eModel)
@@ -191,16 +194,16 @@ char* GetMovementSound(SurfaceType eSurfType, LTBOOL bLeftFoot,
 char* GetImpactSound(SurfaceType eSurfType, int nAmmoId)
 {
 	AMMO* pAmmo = g_pWeaponMgr->GetAmmo(nAmmoId);
-	_ASSERT(pAmmo);
+	GAME_ASSERT(pAmmo);
     if (!pAmmo) return LTNULL;
 
     if (!(pAmmo->pImpactFX->szSound[0])) return LTNULL;
 	SAFE_STRCPY(s_FileBuffer, pAmmo->pImpactFX->szSound);
 
-	if (_stricmp(s_FileBuffer, "SURFACE") == 0)
+	if (nolf::ascii_compare(s_FileBuffer, "SURFACE") == 0)
 	{
 		SURFACE* pSurf = g_pSurfaceMgr->GetSurface(eSurfType);
-		_ASSERT(pSurf);
+		GAME_ASSERT(pSurf);
         if (!pSurf) return LTNULL;
 
 		if (pAmmo->eType == VECTOR)

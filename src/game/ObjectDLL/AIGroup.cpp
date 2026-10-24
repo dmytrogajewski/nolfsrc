@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "AIGroup.h"
 #include "AI.h"
 #include "AISense.h"
@@ -298,7 +300,8 @@ uint32 AIGroup::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD 
 	{
 		case MID_TRIGGER:
 		{
-            const char* szMessage = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+            const auto szMessageStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+            const char* szMessage = szMessageStorage.c_str();
 			TriggerMsg(hSender, szMessage);
 		}
 		break;
@@ -317,11 +320,11 @@ uint32 AIGroup::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD 
 
 void AIGroup::TriggerMsg(HOBJECT hSender, const char* szMessage)
 {
-	if ( !_strnicmp(szMessage, s_szMessageSend, s_nMessageSendLen) )
+	if ( !nolf::ascii_compare_n(szMessage, s_szMessageSend, s_nMessageSendLen) )
 	{
 		SendMessageToAllMembers(&szMessage[s_nMessageSendLen]);
 	}
-	else if ( !_strnicmp(szMessage, s_szMessageAdd, s_nMessageAddLen) )
+	else if ( !nolf::ascii_compare_n(szMessage, s_szMessageAdd, s_nMessageAddLen) )
 	{
 		HOBJECT hObject;
 		if ( LT_OK == FindNamedObject(&szMessage[s_nMessageAddLen], hObject) )
@@ -336,7 +339,7 @@ void AIGroup::TriggerMsg(HOBJECT hSender, const char* szMessage)
 			Link(pAI->GetObject());
 		}
 	}
-	else if ( !_stricmp(szMessage, s_szMessageRemove) )
+	else if ( !nolf::ascii_compare(szMessage, s_szMessageRemove) )
 	{
 		SendMessageToAllMembers(s_szMessageRemove);
         g_pLTServer->RemoveObject(m_hObject);

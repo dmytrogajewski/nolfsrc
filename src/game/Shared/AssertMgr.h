@@ -1,31 +1,17 @@
-// ----------------------------------------------------------------------- //
-//
-// MODULE  : AssertMgr.h
-//
-// PURPOSE : AssertMgr definition
-//
-// CREATED : 05.06.1999
-//
-// ----------------------------------------------------------------------- //
+#pragma once
+#include <atomic>
 
-#ifndef __ASSERT_MGR_H__
-#define __ASSERT_MGR_H__
-
-class CAssertMgr
-{
-	public : // Public methods
-
-		static void Enable();
-		static void Disable();
-
-	protected : // Protected methods
-
-		static int ReportHook(int nReportType, char* szMessage, int* pnReturnValue);
-
-	protected : // Protected member variables
-
-        static LTBOOL            m_bEnabled;
-		static _CRT_REPORT_HOOK	m_crhPrevious;
+class CAssertMgr {
+public:
+    static void Enable();
+    static void Disable();
+    static void ReportFailed(const char* expression, const char* file, unsigned line);
+private:
+    static std::atomic_bool enabled_;
 };
 
+#ifndef NDEBUG
+#define GAME_ASSERT(expression) ((expression) ? static_cast<void>(0) : CAssertMgr::ReportFailed(#expression, __FILE__, __LINE__))
+#else
+#define GAME_ASSERT(expression) static_cast<void>(0)
 #endif

@@ -1,13 +1,26 @@
+#include "world_state.h"
+using CWorldGeom = CWorldBsp;
+#include "world_lighting.h"
 // server.dll — the shared ILTModel tracker accessors (reconstruction). Build /O1.
+#include "world_record.h"
+#include <vector>
+#include "world_polygon.h"
+#include "world_node.h"
+#include "world_object_record.h"
+#include "engine/portable/string.h"
+#include "platform/system.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cmath>
 #include "commonmodel.h"
-#include "servermgr.h"
+#include "command_parser.h"
+#include "ltquatbase.h"
 #include "de_error.h"
 // CModelLoadRequest, which LoadChildModels below both reads and fills in for
 // each child it asks for.
-#include "serverengine.h"
+#include "model_loading.h"
+#include "model_file.h"
 
 // ltquatbase.cpp's own file-scope table, at 0x10052ed0: { QY, QZ, QX }.
 static int g_QNext[3] = { QY, QZ, QX };
@@ -18,7 +31,7 @@ static int g_QNext[3] = { QY, QZ, QX };
 // g_pEmptyFilename) in this unit's .data (name ours).
 // lithtech.exe's twin is 0x004abfc4 (500.0f), in the same place right
 // after its g_pEmptyFilename (0x004abfc0), so both images define it.
-float g_CV_DefaultDrawIndexedDist = 500.0f;
+extern float g_CV_DefaultDrawIndexedDist;
 
 // The four name lookups. Note the two macro forms sitting 200 bytes apart in
 // one file: GetSocket and GetNode pass the name as a literal and the code as
@@ -230,7 +243,10 @@ LTRESULT CommonModelLT::GetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTB
 	if (!hObj || hObj->m_ObjectType != OT_MODEL)
 		RETURN_ERROR_NAMED(2, "ILTModel::GetPieceHideStatus", LT_INVALIDPARAMS);
 
-	bHidden = (((ModelInstance*)hObj)->m_HiddenPieces & (1 << hPiece)) != 0;
+    auto* model = static_cast<ModelInstance*>(hObj)->m_AnimTracker.GetModel();
+    if (!model) return LT_NOTINITIALIZED;
+    if (hPiece >= 32 || hPiece >= model->m_Pieces.GetSize()) return LT_INVALIDPARAMS;
+	bHidden = (((ModelInstance*)hObj)->m_HiddenPieces & (uint32{1} << hPiece)) != 0;
 	return LT_OK;
 }
 
@@ -238,6 +254,10 @@ LTRESULT CommonModelLT::SetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTB
 {
 	if (!hObj || hObj->m_ObjectType != OT_MODEL)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::SetPieceHideStatus", LT_INVALIDPARAMS);
+
+    auto* model = static_cast<ModelInstance*>(hObj)->m_AnimTracker.GetModel();
+    if (!model) return LT_NOTINITIALIZED;
+    if (hPiece >= 32 || hPiece >= model->m_Pieces.GetSize()) return LT_INVALIDPARAMS;
 
 	// The requested state is normalized to 0/1 once and kept: the shipped code
 	// holds it in a callee-saved register and tests that, rather than reading
@@ -263,10 +283,10 @@ LTRESULT CommonModelLT::SetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTB
 	LTBOOL bNewHidden = (bHidden != 0);
 	uint32 dwMask;
 
-	if (bNewHidden == ((pInst->m_HiddenPieces & (1 << hPiece)) != 0))
+	if (bNewHidden == ((pInst->m_HiddenPieces & (uint32{1} << hPiece)) != 0))
 		return LT_NOCHANGE;
 
-	dwMask = (1 << hPiece);
+	dwMask = (uint32{1} << hPiece);
 	if (bNewHidden)
 		pInst->m_HiddenPieces = pInst->m_HiddenPieces | dwMask;
 	else
@@ -302,7 +322,7 @@ LTRESULT CommonModelLT::GetCurAnimLength(LTAnimTracker* pTracker, uint32& length
 	if (!pTracker)
 		RETURN_ERROR_NAMED(2, "ILTModel::GetCurAnimLength", LT_INVALIDPARAMS);
 
-	pAnim = pTracker->m_TimeRef.m_pModel->m_AnimArray.m_pArray[pTracker->m_TimeRef.m_Cur.m_iAnim].m_pAnim;
+	pAnim = pTracker->GetCurAnim();
 	if (!pAnim)
 		RETURN_ERROR_NAMED(1, "ILTModel::GetCurAnimLength", LT_NOTINITIALIZED);
 
@@ -314,7 +334,7 @@ LTRESULT CommonModelLT::SetCurAnim(LTAnimTracker* pTracker, HMODELANIM hAnim)
 {
 	// The instance is read before the checks, not after — the same shape the
 	// six ServerModelLT overrides use.
-	ModelInstance* pInst = (ModelInstance*)pTracker->GetModelInstance();
+	ModelInstance* pInst = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pInst)
 		RETURN_ERROR_NAMED(2, "ILTModel::SetCurAnim", LT_INVALIDPARAMS);
 
@@ -380,6 +400,9 @@ LTRESULT CommonModelLT::RemoveTracker(HOBJECT hObj, LTAnimTracker* pTracker)
 		if (hObj->FindTracker(pTracker, &ppLink))
 		{
 			*ppLink = pTracker->GetNext();
+            ++pTracker->m_MutationGeneration;
+            pTracker->m_Link.m_pData = nullptr;
+            pTracker->m_Link.m_pNext = nullptr;
 			return LT_OK;
 		}
 
@@ -436,16 +459,6 @@ LTRESULT CommonModelLT::RemoveTracker(HOBJECT hObj, LTAnimTracker* pTracker)
 // called and still matches (a declined site forces the COMDAT out anyway);
 // lithtech.exe is /O2 (= /Ot) and takes it, which is why our 91-byte
 // ??0ModelWalker COMDAT has no home anywhere in the shipped image.
-inline ModelWalker::ModelWalker()
-{
-	m_pObjTransform = LTNULL;
-	m_Unknown_e8 = 0;
-	m_Unknown_ec = 0;
-	m_Unknown_f0 = 0;
-	m_Unknown_f4 = 0;
-	m_Unknown_e0 = 0;
-}
-
 LTRESULT CommonModelLT::GetNodeTransform(HOBJECT hObj, HMODELNODE hNode,
                                          LTransform& transform, LTBOOL bWorldSpace)
 {
@@ -515,7 +528,7 @@ LTRESULT CommonModelLT::GetSocketTransform(HOBJECT hObj, HMODELSOCKET hSocket,
 	// it — the convention CreateAttachment writes.
 	if (hSocket >= pModel->m_Sockets.m_nElements)
 	{
-		return ((ILTModelSelf*)this)->GetNodeTransform(hObj, hSocket - pModel->m_Sockets.m_nElements,
+		return GetNodeTransform(hObj, hSocket - pModel->m_Sockets.m_nElements,
 		                                               transform, bWorldSpace);
 	}
 
@@ -675,17 +688,7 @@ LTFLOAT ci_Random(LTFLOAT min, LTFLOAT max)
 // block as the readers above, which our reconstruction currently splits
 // between this file and stringbank.cpp; the block's own translation unit has
 // not been identified.
-void fs_FreeFileList(FileEntry* pList)
-{
-	FileEntry* pNext;
 
-	while (pList)
-	{
-		pNext = pList->m_pNext;
-		dfree(pList);
-		pList = pNext;
-	}
-}
 
 
 // commonmodel.h's two model globals, defined here, in the module that owns
@@ -694,7 +697,7 @@ void fs_FreeFileList(FileEntry* pList)
 // shipped value is 0x10056ff4 -- the pooled "" literal, the same zero byte
 // savrest.cpp and servermessage.cpp reach as g_szNoName (aliases.rsp).
 char*  g_pEmptyFilename = "";               // 0x10052edc
-uint32 g_nModelDataBytes;                   // 0x10058724 (uninitialised)
+std::atomic_size_t g_nModelDataBytes{0};                   // 0x10058724 (uninitialised)
 
 // 0x10016cc5 — build a model. Fourteen sub-objects run first (thirteen
 // constructors and one float initialiser), then the vptr, then a body that is
@@ -750,7 +753,7 @@ uint32 g_nModelDataBytes;                   // 0x10058724 (uninitialised)
 // expanded inside it), and 0x100165e5 calls the CModelXform one (0x10017ce0),
 // while the ModelNode one is expanded here with Init left as a call. So no
 // edit to the ctor's own spelling can be the answer. The ModelNode vtable
-// 0x1004da34 stored here is also the one CModelSub20C's +0x18 child array
+// 0x1004da34 stored here is also the one ModelNode's +0x18 child array
 // gets (default ctor 0x1001831d, called from 0x10016954/0x10016996), which
 // points at m_Nodes and m_Array18 being one instantiation in the original.
 // Measured, and none of these moves this site at /Ob1 (still 567):
@@ -760,11 +763,11 @@ uint32 g_nModelDataBytes;                   // 0x10058724 (uninitialised)
 //   * Model::Model moved to the top or the bottom of this file, or compiled
 //     alone in its own TU; an earlier or later function using the ctor
 //     or Init<ModelNode*> directly; the temporary retyped to
-//     CMoArray<CModelSub20C*, NoCache>.
+//     CMoArray<ModelNode*, NoCache>.
 //   * `#pragma inline_depth(n)`. It only takes effect as the value at the
 //     END of the TU. n=1 gives the shipped shape here but costs the file
 //     400 -> 246; n=2 gives 351; n>=3 changes nothing.
-//   * `__forceinline` on the ctor: expands Init too, and calls _InitArray
+//   * `NOLF_FORCE_INLINE` on the ctor: expands Init too, and calls _InitArray
 //     (630 bytes, file 396).
 //   * Every member collection.h declares but never defines, given a body:
 //     TermPointers/CopyPointers (in class and out of class), Compare,
@@ -775,18 +778,19 @@ uint32 g_nModelDataBytes;                   // 0x10058724 (uninitialised)
 //     AFTER Init has been expanded into it.
 // At /Ob2 the expansion needs the rest of this file present: with only
 // Model::Model in the TU it is still a call. Dropping either half of the
-// file, or CModelSub20C::CModelSub20C() by itself, also makes it a call.
+// file, or ModelNode::ModelNode() by itself, also makes it a call.
 //
 // Both parameters are stored as they arrive: the first also builds the data
 // reference at +0x84, and both call sites hand it the same allocator twice.
 // The casts are ours — 0x174 is the field Load later points at m_DataBlock,
 // so its type comes from there and not from here.
-Model::Model(uint32* pAlloc1, uint32* pAlloc2)
+Model::Model(LAlloc* pAlloc1, LAlloc* pAlloc2)
 	: m_DataRef(pAlloc1),
 	  m_f0a0(0.0f)
 {
-	m_pDataBlock = (CMoMemBlock*)pAlloc1;
-	m_pAlloc     = (IMoAllocator*)pAlloc2;
+	m_pDataBlock = pAlloc1;
+    m_FileFlags = 0xffff;
+	m_pAlloc     = pAlloc2;
 
 	m_f0a4 = 96.0f;
 
@@ -853,24 +857,11 @@ Model::Model(uint32* pAlloc1, uint32* pAlloc2)
 }
 
 
-// 0x10016f26 — take a model apart. The body is three statements: hand the
-// data block's contents back, then take the model's own size and the block's
-// rounded size back off the running total (the second is `mov 0x18c(%esi)`,
-// which is m_DataBlock.m_nSize and is what pins CMoMemBlock's last field).
-//
-// Everything after that is the compiler's: thirteen sub-object destructors in
-// reverse declaration order — 0x20c, 0x1d4, 0x17c, 0x164, 0x154, 0x8c, 0x84,
-// 0x70, 0x54, 0x44, 0x34, 0x24, 0x14 — each collection's `~CMoArray` inlined
-// to a vptr store plus `Term(&g_DefAlloc)`. That the shipped order is exactly
-// the constructor's in reverse is the independent check on the member list.
-Model::~Model()
-{
-	sub_10017016(LTTRUE);
-
-	g_nModelDataBytes -= sizeof(Model);
-	g_nModelDataBytes -= m_DataBlock.m_nSize;
+Model::~Model() {
+    sub_10017016(LTTRUE);
+    g_nModelDataBytes -= sizeof(Model);
+    g_nModelDataBytes -= m_DataBlock.m_nSize;
 }
-
 
 // 0x100174b9 — the same search FindAnim does, restricted to one model. The
 // model test comes FIRST and the name compare second, which matters: the
@@ -887,7 +878,7 @@ AnimInfo* Model::FindAnimInModel(char* pName, Model* pModel, uint32* pIndex)
 		ModelAnim* pAnim = pInfo->m_pAnim;
 
 		if (pAnim->m_pModel == pModel &&
-		    stricmp(pAnim->GetName(), pName) == 0)
+		    nolf::ascii_compare(pAnim->GetName(), pName) == 0)
 		{
 			if (pIndex)
 				*pIndex = i;
@@ -1032,7 +1023,7 @@ void Model::sub_10017145(LTBOOL bFlag)
 				{
 					pModel->m_CacheCount--;
 
-					if (bFlag && pRec->m_pOwner28->m_CacheCount == 0)
+					if (bFlag && !m_ChildOwners[i] && pRec->m_pOwner28->m_CacheCount == 0)
 						delete pRec->m_pOwner28;
 				}
 			}
@@ -1046,6 +1037,7 @@ void Model::sub_10017145(LTBOOL bFlag)
 		}
 	}
 
+	for (auto& owner : m_ChildOwners) owner.reset();
 	m_nChildModels = 1;
 	m_pChildModels[0] = &m_Sub1d4;
 }
@@ -1068,23 +1060,20 @@ char* Model::GetFilename()
 
 LTBOOL Model::SetFilename(char* pFilename)
 {
-	char* pNew;
-
-	FreeFilename();
-
-	pNew = new char[strlen(pFilename) + 1];
-	if (!pNew)
-		return LTFALSE;
-
-	strcpy(pNew, pFilename);
-	m_pFilename = pNew;
-	return LTTRUE;
+    if (!pFilename) return LTFALSE;
+    const auto length = strlen(pFilename);
+    std::unique_ptr<char[]> copy(new (std::nothrow) char[length + 1]);
+    if (!copy) return LTFALSE;
+    memcpy(copy.get(),pFilename,length + 1);
+    FreeFilename();
+    m_pFilename = copy.release();
+    return LTTRUE;
 }
 
 void Model::FreeFilename()
 {
 	if (m_pFilename != g_pEmptyFilename)
-		delete m_pFilename;
+		delete[] m_pFilename;
 
 	m_pFilename = g_pEmptyFilename;
 }
@@ -1107,12 +1096,12 @@ LTBOOL Model::FindPiece(char* pName, HMODELPIECE* pPiece)
 	{
 		ModelPiece* pCur = m_Pieces.m_pArray[i];
 
-		if (stricmp(pName, pCur->m_Name) == 0)
+		if (nolf::ascii_compare(pName, pCur->m_Name) == 0)
 		{
 			if (pPiece)
 				*pPiece = i;
 
-			return (LTBOOL)pCur;
+			return pCur != nullptr;
 		}
 	}
 
@@ -1127,12 +1116,12 @@ LTBOOL Model::FindWeightSet(char* pName, HMODELWEIGHTSET* pSet)
 	{
 		ModelWeightSet* pCur = m_WeightSets.m_pArray[i];
 
-		if (stricmp(pName, pCur->m_Name) == 0)
+		if (nolf::ascii_compare(pName, pCur->m_Name) == 0)
 		{
 			if (pSet)
 				*pSet = i;
 
-			return (LTBOOL)pCur;
+			return pCur != nullptr;
 		}
 	}
 
@@ -1147,12 +1136,12 @@ LTBOOL Model::FindNode(char* pName, HMODELNODE* pNode)
 	{
 		char* pCurName = m_Nodes.m_pArray[i]->m_pName;
 
-		if (stricmp(pCurName, pName) == 0)
+		if (nolf::ascii_compare(pCurName, pName) == 0)
 		{
 			if (pNode)
 				*pNode = i;
 
-			return (LTBOOL)m_Nodes.m_pArray[i];
+			return m_Nodes.m_pArray[i] != nullptr;
 		}
 	}
 
@@ -1171,7 +1160,7 @@ LTBOOL Model::FindAnim(char* pName, uint32* pIndex, AnimInfo** ppInfo)
 	{
 		ModelAnim* pAnim = m_AnimArray.m_pArray[i].m_pAnim;
 
-		if (stricmp(pAnim->m_pName, pName) == 0)
+		if (nolf::ascii_compare(pAnim->m_pName, pName) == 0)
 		{
 			if (pIndex)
 				*pIndex = i;
@@ -1179,7 +1168,7 @@ LTBOOL Model::FindAnim(char* pName, uint32* pIndex, AnimInfo** ppInfo)
 			if (ppInfo)
 				*ppInfo = &m_AnimArray.m_pArray[i];
 
-			return (LTBOOL)pAnim;
+			return pAnim != nullptr;
 		}
 	}
 
@@ -1194,12 +1183,12 @@ LTBOOL Model::FindSocket(char* pName, HMODELSOCKET* pSocket)
 	{
 		ModelSocket* pCur = m_Sockets.m_pArray[i];
 
-		if (stricmp(pCur->m_Name, pName) == 0)
+		if (nolf::ascii_compare(pCur->m_Name, pName) == 0)
 		{
 			if (pSocket)
 				*pSocket = i;
 
-			return (LTBOOL)pCur;
+			return pCur != nullptr;
 		}
 	}
 
@@ -1219,147 +1208,17 @@ LTBOOL Model::FindSocket(char* pName, HMODELSOCKET* pSocket)
 // 0x43 is LT_OUTOFMEMORY, and VC6 tail-merged the two `push $imm; pop %eax`
 // returns into one, keeping the second site's `pop` and jumping the first
 // into it.
-LTRESULT Model::Load(ILTStream* pStream, IMoAllocator* pAlloc)
-{
-	CModelLoadState state;
-	uint32          nBytes;
-
-	if (!LoadHeader(pStream, &state))
-		return LT_INVALIDFILE;
-
-	if (state.sub_1001cec1(&nBytes))
-	{
-		CMoMemBlock* pBlock = &m_DataBlock;
-
-		if (!pBlock->Alloc(pAlloc, nBytes))
-			return LT_OUTOFMEMORY;
-
-		m_pDataBlock = pBlock;
-		m_DataRef.Set(pBlock);
-		g_nModelDataBytes += nBytes;
-	}
-
-	return LT_OK;
+LTRESULT Model::Load(ILTStream* stream, IMoAllocator* allocator) {
+    if (!allocator || !model_ValidateStream(stream)) return LT_INVALIDFILE;
+    // Serialized record sizes describe the 32-bit file, not native objects.
+    // Native arrays allocate their actual sizeof(T) through the delegate.
+    sub_10017016(0);
+    m_pDataBlock = allocator;
+    m_DataRef.Set(allocator);
+    CModelLoadState state;
+    return LoadHeader(stream,&state) ? LT_OK : LT_INVALIDFILE;
 }
 
-
-// ---- the model's own growable pointer arrays (0x1001a03d) --------------- //
-//
-// A third member of the collection family that collection.cpp already holds
-// two of. Its resize is CConnList::SetSize (0x1000c470) with every m_nSpare
-// and m_nGrowBy term deleted — the same relationship CFixedCollection has to
-// CTypedCollection — so the record is a vptr, the buffer and the count and
-// nothing else, and a resize allocates exactly the count asked for. What
-// separates it from collection.cpp's CFixedCollection is the allocation call:
-// this one reaches AllocItems as a two-argument member on `this`
-// (`mov %esi,%ecx; push pAlloc; push nItems; call`, callee-cleaned), where
-// CFixedCollection's is the three-argument static. The release, 0x1001aad4,
-// is likewise CConnList's 0x1000d020 with the spare-clearing store gone.
-//
-// The class name is ours, and its home is really collection.cpp; it is here
-// because commonmodel.h is where the address was already written down and
-// verification is per function with relocations masked.
-//
-// It is a template, and the image says so three times over: 0x10019a9a,
-// 0x10019e14 and 0x1001a03d are the same seventy-six bytes to the byte, and
-// the only thing that separates them is which AllocItems they call —
-// 0x1001ac72 (`shl $0x5`), 0x1001b2af (`shl $0x6`) and 0x100243de
-// (`shl $0x2`). One body, three element sizes, and all three share the one
-// release at 0x1001aad4, whose body carries no element size at all. So the
-// element type is a template parameter and the instantiation list below is
-// the whole of what distinguishes them; the sizes are all that is knowable
-// about the two non-pointer element types (names ours).
-//
-// Named CModelPtrArray rather than CMoPtrArray because collection.h --
-// which this file now reaches through commonmodel.h, so that Model can
-// declare its real sub-objects -- already uses that name for dynarray.h's
-// own `CMoArray<void*>` typedef. This template is the same idea reached
-// independently and should fold into that one; it is renamed rather than
-// deleted because its three instantiations carry matches of their own.
-class CMoElem20 { public: uint8 m_pad[0x20]; };
-class CMoElem40 { public: uint8 m_pad[0x40]; };
-
-template <class T>
-class CModelPtrArray
-{
-public:
-	virtual void _v00() = 0;
-
-	LTBOOL SetSize(uint32 nItems, class CMoAllocator* pAlloc);
-
-	// Declared, not defined: 0x1001aad4 and the three allocators above. The
-	// four-byte one is the same body CConnList::AllocItems is, which is why
-	// every pointer array in the image shares it.
-	void   FreeItems(class CMoAllocator* pAlloc, uint32 nItems);    // 0x1001aad4
-	T*     AllocItems(uint32 nItems, class CMoAllocator* pAlloc);
-
-	T*     m_pItems;                         // 0x04
-	uint32 m_nItems;                         // 0x08
-};
-
-template <class T>
-LTBOOL CModelPtrArray<T>::SetSize(uint32 nItems, CMoAllocator* pAlloc)
-{
-	uint32 nOld = m_nItems;
-
-	if (nItems == nOld && nItems != 0)
-		return LTTRUE;
-
-	if (m_pItems)
-		FreeItems(pAlloc, nOld);
-
-	m_nItems = nItems;
-
-	if (nItems > 0)
-	{
-		m_pItems = AllocItems(nItems, pAlloc);
-
-		if (!m_pItems)
-		{
-			m_nItems = 0;
-
-			return LTFALSE;
-		}
-	}
-
-	return LTTRUE;
-}
-
-// The two helpers are the template's own _AllocateTArray and
-// _DeleteAndDestroyArray over a NoCache array (collection.h), transcribed:
-// 0x1001ac72 / 0x1001b2af / 0x100243de (BaseNew with nothing to construct,
-// so only the null test is left) and the one release, 0x1001aad4.
-template <class T>
-T* CModelPtrArray<T>::AllocItems(uint32 nItems, CMoAllocator* pAlloc)
-{
-	T* tPtr = LNew_Array((LAlloc*)pAlloc, T, nItems);
-
-	return tPtr;
-}
-
-template <class T>
-void CModelPtrArray<T>::FreeItems(CMoAllocator* pAlloc, uint32 nItems)
-{
-	if (m_pItems)
-	{
-		LDelete_Array((LAlloc*)pAlloc, m_pItems, nItems);
-		m_pItems = 0;
-	}
-}
-
-// 0x10019a9a, 0x10019e14 and 0x1001a03d, in that order of element size.
-template class CModelPtrArray<CMoElem20>;
-template class CModelPtrArray<CMoElem40>;
-template class CModelPtrArray<void*>;
-
-
-// 0x1001651d — one keyframe's defaults, and the function that says how long
-// the record is and what is in it: four dwords and a byte, in offset order,
-// off one zero register, with the string put on the shared empty string
-// rather than left null. It is a constructor and not an initialiser — it
-// hands `this` back in eax (`mov %ecx,%eax` first, before the zero register
-// clobbers ecx) — and it exists at all because the keyframe collection's
-// allocator (0x1001b730) runs it over every element it hands out.
 AnimKeyFrame::AnimKeyFrame()
 {
 	m_Time      = 0;
@@ -1382,13 +1241,13 @@ AnimKeyFrame::AnimKeyFrame()
 //     collection's -- the destructor stores it at that member's offset -- so
 //     the classes have four and three slots.
 //   * the members and their offsets are the destructors' own member-teardown
-//     tails, in reverse declaration order: CUnknownD974 has a collection at
+//     tails, in reverse declaration order: ModelAnimationNode has a collection at
 //     +0x08 (SetSize2 0x100195e4, the 79-byte body the 0x20-element arrays
-//     use) and a four-byte one at +0x1c (0x1001a03d); CUnknownD9E4 has a
+//     use) and a four-byte one at +0x1c (0x1001a03d); ModelAnim has a
 //     four-byte collection at +0x08 (0x100196cb, whose release is the shared
-//     pointer-sized 0x1001aad4) and one whole CUnknownD974 at +0x28.
+//     pointer-sized 0x1001aad4) and one whole ModelAnimationNode at +0x28.
 //   * each destructor body is a single out-of-line call, and both callees are
-//     reached from elsewhere too -- 0x1001662c from CUnknownD9E4's own body
+//     reached from elsewhere too -- 0x1001662c from ModelAnim's own body
 //     and 0x100167e1 from nothing else yet -- so they are members rather than
 //     destructor bodies written inline.
 //
@@ -1403,163 +1262,32 @@ AnimKeyFrame::AnimKeyFrame()
 // It is not a POD either: it has a user-written out-of-line operator=, and
 // CopyArray2 at 0x1001b6a3 CALLS it — see commonmodel.h.)
 //
-// The collection at +0x1c holds CUnknownD974*, one per child of the node
+// The collection at +0x1c holds ModelAnimationNode*, one per child of the node
 // record at +0x04: 0x1001bb37 sizes it from that record's own child count and
-// then fills it with one recursively-read CUnknownD974 apiece.
+// then fills it with one recursively-read ModelAnimationNode apiece.
 
-class CUnknownD9E4;
-
-class CUnknownD974
-{
-public:
-	CUnknownD974();                          // 0x10016534
-	// 0x10016578 — the same record with its owner and its 0x18 word given
-	// by argument, which is what slot 0x0c news up.
-	CUnknownD974(CUnknownD9E4* pOwner, uint32 n18);
-
-	virtual ~CUnknownD974();                 // 0x100165ac, vtable 0x1004d974
-	// Slots 1 and 2 are the getter and the setter for the owner at +0x2c —
-	// four bytes and ten, and CUnknownD9E4's own constructor calls the
-	// setter on its embedded copy with itself, which is what says what the
-	// field holds. Slot 3 is the factory: 0x30 bytes out of the engine
-	// allocator, which pins this class's size, and then the two-argument
-	// constructor on them (names ours).
-	virtual CUnknownD9E4* _v04();            // 0x10016558
-	virtual void _v08(CUnknownD9E4* pOwner); // 0x1001665e
-	virtual CUnknownD974* _v0c(CUnknownD9E4* pOwner, uint32 n18);  // 0x10016668
-
-	// 0x100165e5 — three fields cleared and the 0x20-element collection
-	// assigned from a fresh empty one, exactly the shape Model's own
-	// constructor uses for two of its collections (name ours).
-	void sub_100165e5();
-	// 0x1001662c — hands both collections back to the allocator the model
-	// below answers with (name ours).
-	void sub_1001662c();
-	// 0x1001671c — the model this hangs off, reached through the owner at
-	// +0x2c and its own +0x20. Seven bytes (name ours).
-	Model* sub_1001671c();
-	// 0x1001b5c9 — the twin of 0x1001b605 for this collection: every
-	// element back to the allocator, then the array emptied. Declared only
-	// (name ours).
-	// 0x100166de — reached from CUnknownD9E4's slot 1 with the model's
-	// +0x2c0 record: re-point this record, and every child under it, at
-	// the matching node of a node tree (name ours).
-	LTBOOL sub_100166de(Model::CModelSub20C* pSub20c);
-	// 0x1001668a — flatten this record and everything under it into the
-	// owner's per-node array, in depth-first order, advancing the caller's
-	// counter. LTFALSE when the array is missing or the counter has reached
-	// the model's node count, and a failure anywhere below aborts the whole
-	// walk (name ours).
-	LTBOOL sub_1001668a(uint32* pnCount);
-
-	// 0x1001bb37 — this node's animation data, off the wire, and the whole
-	// subtree under it. One CModelXform per keyframe of the owning
-	// animation, then one child record per child of the node at +0x04 —
-	// read recursively through this same function, which is what makes the
-	// animation data a tree with the same shape as the node tree. A child
-	// that fails to read takes the whole array with it: the child is handed
-	// back to the allocator and every sibling already read is released
-	// through 0x1001b5c9 (name ours).
-	LTBOOL sub_1001bb37(class ILTStream* pStream);
-
-	// 0x04 — the node this record animates. Its +0x1c/+0x20 are
-	// CModelSub20C::m_Array18's array and count, which is how 0x1001bb37
-	// knows how many children to read (name ours).
-	Model::CModelSub20C* m_pSub20c04;        // 0x04
-	CMoArray<CModelXform, NoCache> m_Array08;// 0x08 .. 0x18
-	uint32 m_Unknown18;                      // 0x18
-	// The elements are CUnknownD974*, which the release names: the
-	// BaseDelete the array's own teardown reaches (0x1001ba94) is this
-	// class's own, and 0x1001bb37 fills the array with recursively-read
-	// children of exactly this type.
-	CMoArray<CUnknownD974*, NoCache> m_Array1c;  // 0x1c .. 0x2c
-	CUnknownD9E4* m_pOwner2c;                // 0x2c
-};
-
-class CUnknownD9E4
-{
-public:
-	// 0x1001674d — 0x5c bytes, which is exactly what slot 2 allocates and
-	// exactly where the embedded CUnknownD974 at +0x28 ends plus the
-	// pointer that follows it. The two constants it plants are read off the
-	// bytes: -1 into +0x18 (`orl $0xffffffff`, VC6's four-byte store of a
-	// negative one) and 0xc8 into +0x1c.
-	CUnknownD9E4(Model* pModel);             // 0x1001674d
-
-	virtual ~CUnknownD9E4();                 // 0x100167b4, vtable 0x1004d9e4
-	virtual void _v04(Model* pModel);        // 0x1001682b
-	virtual CUnknownD9E4* _v08(Model* pModel);   // 0x10016856
-
-	// 0x100167e1 — the release: the block at +0x04 given back through the
-	// owning model's allocator, the collection at +0x08 emptied, the
-	// sub-object at +0x28 released and then 0x10016874 run (name ours).
-	void sub_100167e1();
-	// 0x10016874 — put the +0x58 slot back on the embedded record, giving
-	// back whatever else was in it first (name ours).
-	void sub_10016874();
-	// 0x10016897 — twelve bytes, `push 0x4(%esp); call 0x100168a3; ret $4`:
-	// the out-of-line copy of a one-line forwarder onto the member below
-	// it. The reader at 0x1001bc69 ends with its answer (name ours).
-	LTBOOL sub_10016897(LTBOOL bFlag);
-	// 0x100168a3 — (re)build the flat node array from the record tree
-	// (name ours).
-	LTBOOL sub_100168a3(LTBOOL bForce);
-	// 0x1001bc69 — the animation, out of the model file: its name, two
-	// version-gated dwords, the keyframe table, and then the whole node
-	// tree's animation data through the record at +0x58. THIS CLASS IS
-	// `ModelAnim` (see the note on ModelAnim in commonmodel.h): every
-	// offset this function touches lands on a field ModelAnim already had
-	// (name ours).
-	LTBOOL sub_1001bc69(class ILTStream* pStream);
-
-	// 0x04 — a FLAT array of the node records under this animation, one slot
-	// per model node: 0x1001668a walks the record tree depth-first and
-	// stores each record into it, bounded by the model's node-transform
-	// count. The release frees it, which is all the old `void*` reading had
-	// (name ours).
-	CUnknownD974** m_ppNodeRecords;          // 0x04
-	// The keyframe table: ModelAnim::m_pKeyFrames and m_nKeyFrames are this
-	// collection's m_pArray and m_nElements. 0x1001bc69 sizes it off the
-	// wire and then fills each record's m_Time and m_pString, and the
-	// allocator it reaches (0x1001b730) bakes in both the 0x14 element size
-	// and the constructor at 0x1001651d.
-	CMoArray<AnimKeyFrame, NoCache> m_Array08;  // 0x08 .. 0x18
-	int32  m_n18;                            // 0x18  the constructor's -1;
-	                                         //       read off the wire for
-	                                         //       file version >= 11
-	uint32 m_Unknown1c;                      // 0x1c  the constructor's 0xc8;
-	                                         //       read off the wire for
-	                                         //       file version >= 12, and
-	                                         //       ModelAnim's
-	                                         //       m_nInterpolationTime
-	Model* m_pModel;                         // 0x20
-	char*  m_pName;                          // 0x24  the shared empty string
-	CUnknownD974  m_Sub28;                   // 0x28 .. 0x58
-	CUnknownD974* m_p58;                     // 0x58  normally &m_Sub28
-};
-
-CUnknownD974::CUnknownD974()
+ModelAnimationNode::ModelAnimationNode()
 {
 	sub_100165e5();
 }
 
-CUnknownD974::CUnknownD974(CUnknownD9E4* pOwner, uint32 n18)
+ModelAnimationNode::ModelAnimationNode(ModelAnim* pOwner, ModelAnimationNode* parent)
 {
 	sub_100165e5();
 
 	m_pOwner2c  = pOwner;
-	m_Unknown18 = n18;
+	m_pParent = parent;
 }
 
-CUnknownD974::~CUnknownD974()
+ModelAnimationNode::~ModelAnimationNode()
 {
 	sub_1001662c();
 }
 
 // 0x1001671c — seven bytes: the owner at +0x2c, and the model at +0x20 of it.
-Model* CUnknownD974::sub_1001671c()
+Model* ModelAnimationNode::sub_1001671c()
 {
-	return m_pOwner2c->m_pModel;
+	return m_pOwner2c ? m_pOwner2c->m_pModel : nullptr;
 }
 
 // 0x10016723 (42 bytes) / 0x004457e0 (55) -- CModelXform::operator= -- is
@@ -1568,11 +1296,11 @@ Model* CUnknownD974::sub_1001671c()
 // 0x1001662c — both collections handed back to the model's own data block.
 // The model is fetched twice, once per collection, which is two calls in the
 // shipped code and therefore two in the source.
-void CUnknownD974::sub_1001662c()
-{
-	m_Array08.SetSize2(0, (LAlloc*)sub_1001671c()->m_pDataBlock);
-
-	FreeArrayElements(&m_Array1c, (LAlloc*)sub_1001671c()->m_pDataBlock);
+void ModelAnimationNode::sub_1001662c() {
+    auto* model = sub_1001671c();
+    auto* alloc = model ? model->GetAlloc() : &g_DefAlloc;
+    m_Array08.Term(alloc);
+    FreeArrayElements(&m_Array1c,alloc);
 }
 
 // 0x100165e5 — the shared body of both constructors. The collection at +0x08
@@ -1580,10 +1308,10 @@ void CUnknownD974::sub_1001662c()
 // is the two-statement `{ CMoArray<T,C> temp(0); m_Array = temp; }` shape
 // Model's own constructor uses twice, and the temporary's teardown (vtable
 // re-stored, Term()) is the tail of the function.
-void CUnknownD974::sub_100165e5()
+void ModelAnimationNode::sub_100165e5()
 {
 	m_pOwner2c   = 0;
-	m_Unknown18  = 0;
+	m_pParent = nullptr;
 	m_pSub20c04  = 0;
 
 	{
@@ -1593,19 +1321,19 @@ void CUnknownD974::sub_100165e5()
 	}
 }
 
-CUnknownD9E4* CUnknownD974::_v04()
+ModelAnim* ModelAnimationNode::_v04()
 {
 	return m_pOwner2c;
 }
 
-void CUnknownD974::_v08(CUnknownD9E4* pOwner)
+void ModelAnimationNode::_v08(ModelAnim* pOwner)
 {
 	m_pOwner2c = pOwner;
 }
 
-CUnknownD974* CUnknownD974::_v0c(CUnknownD9E4* pOwner, uint32 n18)
+ModelAnimationNode* ModelAnimationNode::_v0c(ModelAnim* pOwner, ModelAnimationNode* parent)
 {
-	return new CUnknownD974(pOwner, n18);
+	return new ModelAnimationNode(pOwner, parent);
 }
 
 
@@ -1657,35 +1385,7 @@ CUnknownD974* CUnknownD974::_v0c(CUnknownD9E4* pOwner, uint32 n18)
 // public header does not carry. Every offset the check touches is the SDK's:
 // m_pModel at 0x00, m_Prev's index and frame at 0x04/0x06, m_Cur's at
 // 0x0c/0x0e and m_Percent at 0x14 (name ours).
-class CAnimTimeRefView
-{
-public:
-	LTBOOL IsValid();                        // 0x10016410
-
-	Model*       m_pModel;                   // 0x00
-	FrameLocator m_Prev;                     // 0x04
-	FrameLocator m_Cur;                      // 0x0c
-	float        m_Percent;                  // 0x14
-};
-
-// 0x10016410 — is this time reference still usable against its model? Both
-// animation indices in range, both frame indices inside THEIR OWN animation's
-// keyframe count, and the blend fraction in [0, 1].
-//
-// The two frame checks are what make this more than a bounds test: each one
-// indexes the animation table with its own animation index and then compares
-// against that animation's m_nKeyFrames, so a reference that survived an
-// animation being replaced by a shorter one fails here rather than reading off
-// the end of a keyframe array later.
-//
-// The last two tests are ONE statement joined by `||` and the five before it
-// are separate, which is not a style choice: written as two more guarded
-// returns the function is still 104 bytes and still 40 instructions, but VC6
-// lays the shared `return LTFALSE` block out BEFORE the success return and
-// inverts the last compare to `jbe`. As one `||` it hosts that block last and
-// the compare stays `ja`, which is what shipped. Five guards then two joined
-// is the shape.
-LTBOOL CAnimTimeRefView::IsValid()
+LTBOOL AnimTimeRef::IsValid()
 {
 	Model* pModel = m_pModel;
 	uint32 nAnims;
@@ -1701,19 +1401,19 @@ LTBOOL CAnimTimeRefView::IsValid()
 	if (m_Cur.m_iAnim >= nAnims)
 		return LTFALSE;
 
-	if (m_Prev.m_iFrame >=
+	if (!pModel->m_AnimArray[m_Prev.m_iAnim].m_pAnim || m_Prev.m_iFrame >=
 	    pModel->m_AnimArray.m_pArray[m_Prev.m_iAnim].m_pAnim->m_nKeyFrames)
 	{
 		return LTFALSE;
 	}
 
-	if (m_Cur.m_iFrame >=
+	if (!pModel->m_AnimArray[m_Cur.m_iAnim].m_pAnim || m_Cur.m_iFrame >=
 	    pModel->m_AnimArray.m_pArray[m_Cur.m_iAnim].m_pAnim->m_nKeyFrames)
 	{
 		return LTFALSE;
 	}
 
-	if (m_Percent < 0.0f || m_Percent > 1.0f)
+	if (!std::isfinite(m_Percent) || m_Percent < 0.0f || m_Percent > 1.0f)
 		return LTFALSE;
 
 	return LTTRUE;
@@ -1738,8 +1438,8 @@ LTRESULT se_NoChildModel(CModelLoadRequest* pReq, Model** ppModel)
 // down. The out-parameter names the node that failed, and only the level that
 // actually tested it stores -- a failing recursion returns straight out,
 // because the level below has already written its own answer there.
-LTBOOL mod_SameNodeTree(Model::CModelSub20C* pA, Model::CModelSub20C* pB,
-                        Model::CModelSub20C** ppMismatch)
+LTBOOL mod_SameNodeTree(ModelNode* pA, ModelNode* pB,
+                        ModelNode** ppMismatch)
 {
 	uint32 i;
 
@@ -1751,8 +1451,8 @@ LTBOOL mod_SameNodeTree(Model::CModelSub20C* pA, Model::CModelSub20C* pB,
 
 	for (i = 0; i < pA->m_Array18.m_nElements; i++)
 	{
-		Model::CModelSub20C* pChildB = pB->m_Array18.m_pArray[i];
-		Model::CModelSub20C* pChildA = pA->m_Array18.m_pArray[i];
+		ModelNode* pChildB = pB->m_Array18.m_pArray[i];
+		ModelNode* pChildA = pA->m_Array18.m_pArray[i];
 
 		if (!mod_SameNodeTree(pChildA, pChildB, ppMismatch))
 			return LTFALSE;
@@ -1792,7 +1492,7 @@ LTBOOL mod_SameNodeTree(Model::CModelSub20C* pA, Model::CModelSub20C* pB,
 //     the nested form; naming the value changes nothing.
 //   * the bound test reversed to `nElements <= *pnCount` -- 83 bytes, the
 //     load still hoisted above the call.
-//   * naming the child `CUnknownD974* pChild` in the loop -- 84 bytes and
+//   * naming the child `ModelAnimationNode* pChild` in the loop -- 84 bytes and
 //     the same residual.
 //
 // THE LAST RESIDUAL was which arm owns the epilogue: shipped puts the
@@ -1804,7 +1504,7 @@ LTBOOL mod_SameNodeTree(Model::CModelSub20C* pA, Model::CModelSub20C* pB,
 // after them, give the shipped placement -- so the shared-exit host IS a
 // source property here. (A `bRet` result local with a `break` out of the
 // loop was 93 bytes.)
-LTBOOL CUnknownD974::sub_1001668a(uint32* pnCount)
+LTBOOL ModelAnimationNode::sub_1001668a(uint32* pnCount)
 {
 	uint32 i;
 	uint32 nNodes;
@@ -1836,9 +1536,9 @@ LTBOOL CUnknownD974::sub_1001668a(uint32* pnCount)
 // must agree (m_Array1c's +0x24 against the node's m_Array18 count at +0x20)
 // or the walk refuses, and each child is rebound to the node's child of the
 // same index, recursively.  The children's answers are not looked at
-// (0x10016708's result is dropped), and the one caller, CUnknownD9E4's slot 1,
+// (0x10016708's result is dropped), and the one caller, ModelAnim's slot 1,
 // drops this one's too.
-LTBOOL CUnknownD974::sub_100166de(Model::CModelSub20C* pSub20c)
+LTBOOL ModelAnimationNode::sub_100166de(ModelNode* pSub20c)
 {
 	uint32 i;
 
@@ -1854,19 +1554,21 @@ LTBOOL CUnknownD974::sub_100166de(Model::CModelSub20C* pSub20c)
 }
 
 
-LTBOOL CUnknownD974::sub_1001bb37(ILTStream* pStream)
+LTBOOL ModelAnimationNode::sub_1001bb37(ILTStream* pStream)
 {
 	uint32 i, j;
-	CUnknownD974* pChild;
-	CMoArray<CUnknownD974*, NoCache>* pChildArray;
-	CUnknownD974* pNull;
+	ModelAnimationNode* pChild;
+	CMoArray<ModelAnimationNode*, NoCache>* pChildArray;
+	ModelAnimationNode* pNull;
 
 	if (!m_Array08.SetSize2(m_pOwner2c->m_Array08.GetSize(),
 	                        sub_1001671c()->GetAlloc()))
 		return LTFALSE;
 
-	for (i = 0; i < m_pOwner2c->m_Array08.GetSize(); i++)
-		pStream->Read(&m_Array08[i], sizeof(CModelXform));
+	for (i = 0; i < m_pOwner2c->m_Array08.GetSize(); i++) {
+        w_ReadVector(pStream,&m_Array08[i].m_Pos);
+        w_ReadRotation(pStream,&m_Array08[i].m_Rot);
+    }
 
 	// ONE STATEMENT, not SetSize2 plus a written-out zero loop. The shipped
 	// /O2 build CALLS the 124-byte SetSizeInit3 at 0x0044e5f0 out of line
@@ -1903,7 +1605,7 @@ LTBOOL CUnknownD974::sub_1001bb37(ILTStream* pStream)
 	for (i = 0; i < m_pSub20c04->m_Array18.GetSize(); i++)
 	{
 		pChild = BaseNew(sub_1001671c()->GetAlloc(),
-		                 (CUnknownD974*)0, 1, _v04(), (uint32)this);
+		                 (ModelAnimationNode*)0, 1, _v04(), this);
 		if (!pChild)
 			return LTFALSE;
 
@@ -1974,9 +1676,9 @@ LTBOOL CUnknownD974::sub_1001bb37(ILTStream* pStream)
 // carries a list of the rest".  The two reader bodies below give it its
 // interior:
 //
-//   +0x00  CMoArray<CPieceLodQ44C,  NoCache>   (allocator 0x0044c970, which
+//   +0x00  CMoArray<ModelPieceLod,  NoCache>   (allocator 0x0044c970, which
 //          multiplies by 0x20 AND runs a constructor; release 0x0044c720)
-//   +0x10  CMoArray<CPieceDimQ44C,  NoCache>   (allocator 0x0044ca90, the
+//   +0x10  CMoArray<ModelPieceDimension,  NoCache>   (allocator 0x0044ca90, the
 //          22-byte constructor-free one, also 0x20 per element)
 //   +0x20  Model*                              (dereferenced at +0x174 for
 //          the allocator, and what the setter at 0x00446090 writes)
@@ -1984,13 +1686,13 @@ LTBOOL CUnknownD974::sub_1001bb37(ILTStream* pStream)
 // which is 0x24 exactly, and 0x0044cae0's `lea (%edi,%edi,8); shl $2` -- the
 // allocator for the collection of them -- multiplies by 0x24 in the clear.
 //
-// The element constructor at 0x00445410 is what fixes CPieceLodQ44C's shape:
+// The element constructor at 0x00445410 is what fixes ModelPieceLod's shape:
 // it zeroes a dword at +0x00, a WORD at +0x04 (and not the word at +0x06),
 // and six dwords at +0x08..+0x1c.  The reader fills +0x04 and +0x06 off the
 // wire, points +0x00 into the model's own pool, and reads the six dwords
 // last.
 //
-// CPieceDimQ44C has no constructor at all (0x0044ca90 is 22 bytes: allocate,
+// ModelPieceDimension has no constructor at all (0x0044ca90 is 22 bytes: allocate,
 // null-test, return) and the reader walks it with TWO strides at once -- 8
 // bytes for a pair of floats and 2 bytes for a word, three times -- which is
 // three (float, float, uint16) triples against a 0x20-byte record.
@@ -2009,76 +1711,8 @@ LTBOOL CUnknownD974::sub_1001bb37(ILTStream* pStream)
 // collection `CMoArray<void*, NoCache>`, which is a placeholder -- the cast
 // below is what the indexing says it really is.  Fields by offset; the reader
 // fills +0x10 FIRST and then +0x00 through +0x0c.
-class CModelVertQ44C
-{
-public:
-	uint32 m_n00;                            // 0x00
-	uint32 m_n04;                            // 0x04
-	uint32 m_n08;                            // 0x08
-	uint32 m_n0c;                            // 0x0c
-	uint32 m_n10;                            // 0x10  read first
-};
-
-class CPieceLodQ44C
-{
-public:
-	CPieceLodQ44C();                         // 0x00445410
-
-	CModelVertQ44C* m_pVerts;                // 0x00  into Model::m_Unknown054
-	uint16 m_nVerts;                         // 0x04
-	uint16 m_n06;                            // 0x06  NOT zeroed by the ctor
-	uint32 m_n08;                            // 0x08
-	uint32 m_n0c;                            // 0x0c
-	uint32 m_n10;                            // 0x10
-	uint32 m_n14;                            // 0x14
-	uint32 m_n18;                            // 0x18
-	uint32 m_n1c;                            // 0x1c
-};
-
-class CPieceDimQ44C
-{
-public:
-	uint16 m_nBits[3];                       // 0x00
-	uint16 m_pad_06;                         // 0x06
-	float  m_Range[3][2];                    // 0x08 .. 0x20
-};
-
-class CPieceDataQ44C
-{
-public:
-	// 0x1001bf85 / 0x0044d3f0.
-	LTBOOL sub_1001bf85Q44C(class ILTStream* pStream, uint32* pnBase);
-	// 0x00446090 -- `mov 0x4(%esp),%eax; mov %eax,0x20(%ecx); ret $0x4`.
-	void   SetModelQ44C(class Model* pModel);
-	CPieceDataQ44C();                        // through BaseNew at 0x0044cae0
-	~CPieceDataQ44C();                       // 0x004460a0's owner
-
-	CMoArray<CPieceLodQ44C, NoCache> m_Array00;   // 0x00
-	CMoArray<CPieceDimQ44C, NoCache> m_Array10;   // 0x10
-	class Model* m_pModel;                        // 0x20
-};
-
-// commonmodel.h's ModelPiece with the first 0x24 bytes and m_Array34 given
-// their real types.  Same offsets, same size (0x6c).
-class ModelPieceQ44C : public CPieceDataQ44C
-{
-public:
-	// 0x1001c1a5 / 0x0044d6e0.
-	LTBOOL sub_1001c1a5Q44C(class ILTStream* pStream, uint32* pnBase);
-
-	uint32 m_Unknown24;                      // 0x24
-	uint32 m_nOffset;                        // 0x28
-	float  m_f2c;                            // 0x2c
-	float  m_f30;                            // 0x30
-	CMoArray<CPieceDataQ44C, NoCache> m_Array34;  // 0x34
-	uint32 m_Unknown44;                      // 0x44
-	char   m_Name[0x68 - 0x48];              // 0x48
-	class Model* m_pModel68;                 // 0x68
-};
-
-
 // --------------------------------------------------------------------- //
-//  0x0044d3f0   749 bytes   CPieceDataQ44C::sub_1001bf85
+//  0x0044d3f0   749 bytes   ModelPieceData::sub_1001bf85
 //                           (server.dll 0x1001bf85 -- the enumeration there
 //                            splits it into 0x1001bf85/81 + 0x1001bfd6/463;
 //                            it is one 544-byte function, and 749/544 is the
@@ -2088,19 +1722,17 @@ public:
 //
 // One piece's vertex data off the wire, in two passes.
 //
-// FIRST PASS -- the quantisation ranges.  A count, then that many 0x20-byte
-// records, each of which is three (float, float, uint16) triples: a low and a
-// high and a bit count, once per axis.  The compiler runs the inner
+// FIRST PASS -- triangles. A count, then three (float u, float v, uint16
+// vertex index) corners per record. The compiler runs the inner
 // three-iteration loop with TWO induction variables at once (edi striding by
 // 8 for the float pair, [esp+0x1c] striding by 2 for the word), and reloads
 // m_Array10.m_pArray before EVERY ONE of the three reads -- three loads per
 // iteration, which is the "written out at each use" fingerprint and says the
 // subscript is spelled out in full each time rather than cached in a pointer.
 //
-// SECOND PASS -- the levels of detail.  A count, then per record two words, a
-// bounds check, a slice of the MODEL's own vertex pool, and six trailing
-// dwords.  The pool slice is the interesting part: the record does not own
-// its vertices, it points into Model::m_Unknown054 at the caller's running
+// SECOND PASS -- vertices. Each has weight count, replacement index, a
+// slice of the MODEL's weight pool, bind position and normal. The record
+// points into Model::m_Unknown054 at the caller's running
 // offset (`lea (%ecx,%ecx,4); lea (%edx,%ecx,4)` = base + offset*0x14) and
 // then ADVANCES that offset by its own count.  That is what the second
 // argument is -- a cursor shared by the piece and every record under it,
@@ -2131,15 +1763,15 @@ public:
 // `*pStream >> x` closed it (749 of 749): the bytes of each read are the
 // same, but its two inline levels (operator>> -> LTStream_Read) spend the /O2
 // inline budget that was otherwise going on _DeleteAndDestroyArray. The same
-// spelling closed CUnknownD9E4::sub_1001bc69; server.dll does not move.
-LTBOOL CPieceDataQ44C::sub_1001bf85Q44C(ILTStream* pStream, uint32* pnBase)
+// spelling closed ModelAnim::sub_1001bc69; server.dll does not move.
+LTBOOL ModelPieceData::ReadVertexData(ILTStream* pStream, uint32* pnBase)
 {
 	uint32 i, j, k;
 	uint32 nDims;
 	uint32 nLods;
 	uint16 n;
-	CPieceLodQ44C* pLod;
-	CModelVertQ44C* pVert;
+	ModelPieceLod* pLod;
+	CModelVertRec* pVert;
 
 	*pStream >> nDims;
 
@@ -2150,9 +1782,9 @@ LTBOOL CPieceDataQ44C::sub_1001bf85Q44C(ILTStream* pStream, uint32* pnBase)
 	{
 		for (k = 0; k < 3; k++)
 		{
-			*pStream >> m_Array10[i].m_Range[k][0];
-			*pStream >> m_Array10[i].m_Range[k][1];
-			*pStream >> m_Array10[i].m_nBits[k];
+			*pStream >> m_Array10[i].uv[k][0];
+			*pStream >> m_Array10[i].uv[k][1];
+			*pStream >> m_Array10[i].indices[k];
 		}
 	}
 
@@ -2166,39 +1798,39 @@ LTBOOL CPieceDataQ44C::sub_1001bf85Q44C(ILTStream* pStream, uint32* pnBase)
 		pLod = &m_Array00[i];
 
 		*pStream >> n;
-		pLod->m_nVerts = n;
+		pLod->weight_count = n;
 
 		*pStream >> n;
-		pLod->m_n06 = n;
+		pLod->replacement = n;
 
-		if (*pnBase + pLod->m_nVerts > m_pModel->m_Unknown054.m_nElements)
+		if (*pnBase + pLod->weight_count > m_pModel->m_Unknown054.m_nElements)
 			return LTFALSE;
 
-		if (pLod->m_nVerts > 0)
+		if (pLod->weight_count > 0)
 		{
-			pLod->m_pVerts = (CModelVertQ44C*)m_pModel->m_Unknown054.m_pArray
+			pLod->weights = (CModelVertRec*)m_pModel->m_Unknown054.m_pArray
 			                 + *pnBase;
 
-			*pnBase += pLod->m_nVerts;
+			*pnBase += pLod->weight_count;
 
-			for (j = 0; j < pLod->m_nVerts; j++)
+			for (j = 0; j < pLod->weight_count; j++)
 			{
-				pVert = &pLod->m_pVerts[j];
+				pVert = &pLod->weights[j];
 
 				*pStream >> pVert->m_n10;
-				*pStream >> pVert->m_n00;
-				*pStream >> pVert->m_n04;
-				*pStream >> pVert->m_n08;
-				*pStream >> pVert->m_n0c;
+				*pStream >> pVert->m_f[0];
+				*pStream >> pVert->m_f[1];
+				*pStream >> pVert->m_f[2];
+				*pStream >> pVert->m_f[3];
 			}
 		}
 
-		*pStream >> pLod->m_n08;
-		*pStream >> pLod->m_n0c;
-		*pStream >> pLod->m_n10;
-		*pStream >> pLod->m_n14;
-		*pStream >> pLod->m_n18;
-		*pStream >> pLod->m_n1c;
+		*pStream >> pLod->position.x;
+		*pStream >> pLod->position.y;
+		*pStream >> pLod->position.z;
+		*pStream >> pLod->normal.x;
+		*pStream >> pLod->normal.y;
+		*pStream >> pLod->normal.z;
 	}
 
 	return LTTRUE;
@@ -2244,14 +1876,14 @@ LTBOOL CPieceDataQ44C::sub_1001bf85Q44C(ILTStream* pStream, uint32* pnBase)
 // expanding BaseDelete/BaseNew inside the inlined SetSize2, and shipped
 // calls both (0x0044cab0 at 0x0044d799, 0x0044cae0 at 0x0044d7ba) -- the
 // same lever as sub_1001bf85 above.
-LTBOOL ModelPieceQ44C::sub_1001c1a5Q44C(ILTStream* pStream, uint32* pnBase)
+LTBOOL ModelPiece::sub_1001c1a5(ILTStream* pStream, uint32* pnBase)
 {
 	uint32 i;
 	uint32 nRecs;
 	uint32 nDiscard;
 	uint16 n;
 	uint16 nSkip;
-	CPieceDataQ44C* pRec;
+	ModelPieceData* pRec;
 
 	pStream->Read(&n, sizeof(n));
 	m_Unknown24 = n;
@@ -2275,18 +1907,18 @@ LTBOOL ModelPieceQ44C::sub_1001c1a5Q44C(ILTStream* pStream, uint32* pnBase)
 	for (i = 0; i < nRecs; i++)
 	{
 		pRec = &m_Array34[i];
-		pRec->SetModelQ44C(m_pModel68);
+		pRec->SetModel(m_pModel68);
 	}
 
 	if (pStream->ReadString(m_Name, sizeof(m_Name)) != LT_OK)
 		return LTFALSE;
 
-	if (!sub_1001bf85Q44C(pStream, pnBase))
+	if (!ReadVertexData(pStream, pnBase))
 		return LTFALSE;
 
 	for (i = 0; i < nRecs; i++)
 	{
-		if (!m_Array34[i].sub_1001bf85Q44C(pStream, pnBase))
+		if (!m_Array34[i].ReadVertexData(pStream, pnBase))
 			return LTFALSE;
 	}
 
@@ -2304,7 +1936,7 @@ LTBOOL ModelPieceQ44C::sub_1001c1a5Q44C(ILTStream* pStream, uint32* pnBase)
 //  not close.  Everything below is modchunk.cpp's own analysis, verbatim.
 // ======================================================================= //
 // --------------------------------------------------------------------- //
-//  0x0044d090   526 bytes   Model::CModelSub20C::sub_1001bd54
+//  0x0044d090   526 bytes   ModelNode::sub_1001bd54
 //                           (server.dll 0x1001bd54, 372 bytes)
 // --------------------------------------------------------------------- //
 //
@@ -2313,7 +1945,7 @@ LTBOOL ModelPieceQ44C::sub_1001c1a5Q44C(ILTStream* pStream, uint32* pnBase)
 // chunk: the node tree out of the file") and no file defines it.
 //
 // Identification is by ordinal against server.dll and confirmed by every
-// offset: `this` is 0xb4 bytes' worth of CModelSub20C (the recursion allocates
+// offset: `this` is 0xb4 bytes' worth of ModelNode (the recursion allocates
 // exactly 0xb4 at 0x0044d1bc), +0xac is the model (read then dereferenced at
 // +0x174 for the allocator, 0x0044d1c1), +0xb0 is the name (handed to
 // Model::sub_1001c325 at 0x0044d0b1, which is the function every name in a
@@ -2344,7 +1976,7 @@ LTBOOL ModelPieceQ44C::sub_1001c1a5Q44C(ILTStream* pStream, uint32* pnBase)
 // (0x0044d0ba, and 0x0044d180/0x0044d1d0 both jumping straight to the bare
 // `xor eax,eax` exit at 0x0044d27d).  Only a child that fails to READ runs
 // the cleanup -- delete that child, then hand the whole array back -- and
-// that is the same shape CUnknownD974::sub_1001bb37 already carries in
+// that is the same shape ModelAnimationNode::sub_1001bb37 already carries in
 // commonmodel.cpp, which is this function's sibling: the two are near-twins,
 // reading a transform record and then recursing over a child array, and both
 // end their failure arm with BaseDelete + FreeArrayElements.
@@ -2378,12 +2010,12 @@ LTBOOL ModelPieceQ44C::sub_1001c1a5Q44C(ILTStream* pStream, uint32* pnBase)
 // without effect: `*pStream >>` for any read, `m_Array18[i]`, GetAlloc()
 // vs the cast at either failure-arm site, MakeInverseTransform(), and in
 // commonmodel.h FreeArrayElements marked inline / Term(pAlloc) / accessors.
-LTBOOL Model::CModelSub20C::sub_1001bd54(ILTStream* pStream)
+LTBOOL ModelNode::sub_1001bd54(ILTStream* pStream)
 {
 	uint32 i, j;
 	uint32 nChildren;
-	CModelSub20C* pChild;
-	CMoArray<CModelSub20C*, NoCache>* pChildArray;
+	ModelNode* pChild;
+	CMoArray<ModelNode*, NoCache>* pChildArray;
 	LTMatrix mToInvert;
 	LTMatrix mat;
 
@@ -2414,7 +2046,7 @@ LTBOOL Model::CModelSub20C::sub_1001bd54(ILTStream* pStream)
 
 	for (i = 0; i < nChildren; i++)
 	{
-		pChild = BaseNew(m_pModel->GetAlloc(), (CModelSub20C*)0, 1, m_pModel);
+		pChild = BaseNew(m_pModel->GetAlloc(), (ModelNode*)0, 1, m_pModel);
 
 		if (!pChild)
 			return LTFALSE;
@@ -2436,7 +2068,7 @@ LTBOOL Model::CModelSub20C::sub_1001bd54(ILTStream* pStream)
 
 
 // 0x1001674d — build one against a model. Two member records run first (the
-// collection at +0x08 and the CUnknownD974 at +0x28, in declaration order),
+// collection at +0x08 and the ModelAnimationNode at +0x28, in declaration order),
 // then the constants, then the embedded record is pointed back at this one
 // through its own setter — a virtual call, which is why it is a call at all.
 //
@@ -2451,7 +2083,7 @@ LTBOOL Model::CModelSub20C::sub_1001bd54(ILTStream* pStream)
 // produce and which it produces from either order — this file matched
 // 0x1001674d with +0x04 and +0x18 written first, and matches it still with
 // them written last.
-CUnknownD9E4::CUnknownD9E4(Model* pModel)
+ModelAnim::ModelAnim(Model* pModel)
 {
 	m_pModel = pModel;
 	m_pName  = "";
@@ -2465,7 +2097,7 @@ CUnknownD9E4::CUnknownD9E4(Model* pModel)
 	m_p58->_v08(this);
 }
 
-CUnknownD9E4::~CUnknownD9E4()
+ModelAnim::~ModelAnim()
 {
 	sub_100167e1();
 }
@@ -2486,41 +2118,20 @@ CUnknownD9E4::~CUnknownD9E4()
 // into `ecx`, ours does the store first and needs an extra `mov` — so the
 // volatile is not the shape either. Written the plain way, which is what the
 // rest of the function says the source looked like.
-void CUnknownD9E4::sub_100167e1()
-{
-	uint32  nNodes;
-	LAlloc* pAlloc;
-
-	if (m_ppNodeRecords)
-	{
-		nNodes = m_pModel->m_NodeTransforms.m_nElements;
-
-		// LDelete_Array, not a bare Free. BaseDelete's element-count
-		// parameter is UNUSED by the callee, so spelling this as
-		// `->Free(p)` lets VC6 eliminate the load of nNodes entirely --
-		// and the shipped bytes materialise it (`mov eax,[eax+0x78]` +
-		// `mov [esp+8],eax` at 0x00445aa5/0x00445aa8, exactly the seven
-		// bytes this body was short). The neighbour at 0x00445bb0 already
-		// uses this spelling.
-		pAlloc = (LAlloc*)m_pModel->m_pDataBlock;
-
-		LDelete_Array(pAlloc, m_ppNodeRecords, nNodes);
-
-		m_ppNodeRecords = 0;
-	}
-
-	m_Array08.SetSize2(0, (LAlloc*)m_pModel->m_pDataBlock);
-
-	m_Sub28.sub_1001662c();
-
-	sub_10016874();
+void ModelAnim::sub_100167e1() {
+    auto* alloc = m_pModel ? m_pModel->GetAlloc() : &g_DefAlloc;
+    if (m_ppNodeRecords) alloc->Free(m_ppNodeRecords);
+    m_ppNodeRecords = nullptr;
+    m_Array08.Term(alloc);
+    m_Sub28.sub_1001662c();
+    sub_10016874();
 }
 
 // 0x1001682b — slot 1: re-home the name on the new model, keep the model, and
 // pass the model's own +0x2c0 record down to whatever the +0x58 slot points
 // at. The +0x58 load happens before the name store, which is what says the
 // two are separate statements rather than one chained expression.
-void CUnknownD9E4::_v04(Model* pModel)
+void ModelAnim::_v04(Model* pModel)
 {
 	m_pName  = pModel->sub_100173fa(m_pName);
 	m_pModel = pModel;
@@ -2528,15 +2139,15 @@ void CUnknownD9E4::_v04(Model* pModel)
 	m_p58->sub_100166de(pModel->m_pSub20c);
 }
 
-CUnknownD9E4* CUnknownD9E4::_v08(Model* pModel)
+ModelAnim* ModelAnim::_v08(Model* pModel)
 {
-	return new CUnknownD9E4(pModel);
+	return new ModelAnim(pModel);
 }
 
 // 0x10016874 — put the slot back on the embedded record. The `delete` is a
 // virtual one (`call *(%eax)` with a literal 1, the deleting destructor) and
 // carries its own null test, which is why the pointer is tested twice.
-void CUnknownD9E4::sub_10016874()
+void ModelAnim::sub_10016874()
 {
 	if (m_p58 && m_p58 != &m_Sub28)
 		delete m_p58;
@@ -2547,7 +2158,7 @@ void CUnknownD9E4::sub_10016874()
 // 0x10016897 — the forwarder: one argument passed straight on, the answer
 // passed straight back.  0x100168a3 is the very next function (the call's
 // displacement is 3).
-LTBOOL CUnknownD9E4::sub_10016897(LTBOOL bFlag)
+LTBOOL ModelAnim::sub_10016897(LTBOOL bFlag)
 {
 	return sub_100168a3(bFlag);
 }
@@ -2563,10 +2174,10 @@ LTBOOL CUnknownD9E4::sub_10016897(LTBOOL bFlag)
 // (0x00445bdf), and the new's construction loop folds away for a pointer
 // element, leaving only its null test (the two-byte `jne` onto the next
 // instruction at 0x00445bff).
-LTBOOL CUnknownD9E4::sub_100168a3(LTBOOL bForce)
+LTBOOL ModelAnim::sub_100168a3(LTBOOL bForce)
 {
 	uint32 index;
-	CUnknownD974* pRoot;
+	ModelAnimationNode* pRoot;
 
 	// The root record named in its own local: lithtech loads m_p58 BEFORE the
 	// `lea/push` of &index and stores the zero after the push (0x00445c0c);
@@ -2584,7 +2195,7 @@ LTBOOL CUnknownD9E4::sub_100168a3(LTBOOL bForce)
 		              m_pModel->m_NodeTransforms.m_nElements);
 	}
 
-	m_ppNodeRecords = LNew_Array(m_pModel->GetAlloc(), CUnknownD974*,
+	m_ppNodeRecords = LNew_Array(m_pModel->GetAlloc(), ModelAnimationNode*,
 	                             m_pModel->m_NodeTransforms.m_nElements);
 	if (!m_ppNodeRecords)
 		return LTFALSE;
@@ -2606,9 +2217,9 @@ void Model::sub_100170f2()
 
 	for (i = 0; i < m_AnimArray.m_nElements; i++)
 	{
-		CUnknownD9E4* pAnim = (CUnknownD9E4*)m_AnimArray.m_pArray[i].m_pAnim;
+		ModelAnim* pAnim = (ModelAnim*)m_AnimArray.m_pArray[i].m_pAnim;
 
-		if (pAnim->m_pModel == this)
+		if (pAnim && pAnim->m_pModel == this)
 			BaseDelete((LAlloc*)m_pDataBlock, pAnim, 1);
 	}
 
@@ -2654,9 +2265,9 @@ LTBOOL Model::sub_100171f4(LTBOOL bFlag)
 
 		for (i = 0; i < m_AnimArray.m_nElements; i++)
 		{
-			if (((CUnknownD9E4*)m_AnimArray.m_pArray[i].m_pAnim)->m_pModel == this)
+			if (((ModelAnim*)m_AnimArray.m_pArray[i].m_pAnim)->m_pModel == this)
 			{
-				if (!((CUnknownD9E4*)m_AnimArray.m_pArray[i].m_pAnim)->sub_10016897(bFlag))
+				if (!((ModelAnim*)m_AnimArray.m_pArray[i].m_pAnim)->sub_10016897(bFlag))
 					return LTFALSE;
 			}
 		}
@@ -2810,7 +2421,7 @@ LTBOOL Model::sub_100172e3(LTBOOL bFlag)
 // and its out-of-line Mat_InverseTransformation COMDAT matches 0x00446fc0
 // with it. Emitted bytes of both arms are unchanged (integer moves, the
 // xor-zero register). server.dll stays IDENTICAL (0x10017517). The three
-// floats at +0x04 are CModelSub20C's offset vector; ModelNode is still the
+// floats at +0x04 are ModelNode's offset vector; ModelNode is still the
 // stand-in declaration of that class (commonmodel.h), hence the cast.
 void Model::sub_10017517()
 {
@@ -2822,14 +2433,13 @@ void Model::sub_10017517()
 
 		if (pNode->m_iParent < m_NodeTransforms.m_nElements)
 		{
-			LTMatrix mRel = (~m_Nodes.m_pArray[pNode->m_iParent]->m_Transform)
-			                * pNode->m_Transform;
-
-			mRel.GetTranslation(*(LTVector*)&pNode->m_fRelX);
+			LTMatrix mRel = (~m_Nodes.m_pArray[pNode->m_iParent]->m_Mat2c)
+			                * pNode->m_Mat2c;
+            pNode->m_f04 = mRel.m[0][3]; pNode->m_f08 = mRel.m[1][3]; pNode->m_f0c = mRel.m[2][3];
 		}
 		else
 		{
-			((LTVector*)&pNode->m_fRelX)->Init();
+			pNode->m_f04 = pNode->m_f08 = pNode->m_f0c = 0;
 		}
 	}
 }
@@ -2851,7 +2461,7 @@ ModelSocket::ModelSocket()
 // The Win32 import the child loop yields through. Declared rather than
 // included: lthread.h pulls windows.h in and renames methods out from under
 // this file (see the note there).
-extern "C" __declspec(dllimport) void __stdcall Sleep(unsigned long dwMs);
+
 
 
 // 0x1001c604 — the whole model-data reader, and the child models are one of
@@ -2894,6 +2504,7 @@ extern "C" __declspec(dllimport) void __stdcall Sleep(unsigned long dwMs);
 // Model::Model, plus the merge loop's store at -0x1c(%edx,%eax,1).
 LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 {
+    if (!pRequest || !model_ValidateStream(pRequest->m_pStream)) return LT_INVALIDFILE;
 	CModelLoadRequest childReq;
 	CModelLoadState   state;
 	// The declaration order below is the frame, read off the shipped slots:
@@ -2905,7 +2516,7 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 	// compiler temporaries (two induction offsets and a spill of pStream).
 	uint32     i;            // -0x04
 	uint16     nOOBB;        // -0x06
-	CUnknownD9E4* pAnim;     // -0x0c
+	ModelAnim* pAnim;     // -0x0c
 	uint32     nChildren;    // -0x10
 	uint32     nAnims;       // -0x14
 	LTRESULT   dResult;      // -0x20
@@ -2916,7 +2527,7 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 	Model*     pLoaded;      // -0x34
 	uint32     n38;          // -0x38
 	uint32     nPieceBase;   // -0x3c
-	uint32     nOOBB2;       // -0x44
+	ModelNode* nOOBB2;       // -0x44
 	// Never spilled, so their order is not observable.
 	ILTStream* pStream;
 	uint32     j;
@@ -3058,6 +2669,7 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 			childReq.m_bUnknown10   = LTFALSE;
 			childReq.m_pfnLoadChild = pRequest->m_pfnLoadChild;
 			childReq.m_pContext     = pRequest->m_pContext;
+            childReq.m_UserData = pRequest->m_UserData;
 
 			pLoaded = LTNULL;
 
@@ -3099,11 +2711,13 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 
 		pRec->m_Unknown2c = 0;
 
-		if (pRec->m_pOwner28)
+		if (pRec->m_pOwner28) {
 			pRec->m_Unknown2c = sub_10017b69(pRec->m_pOwner28, &nOOBB2);
+            if (!pRec->m_Unknown2c) pRequest->m_bTreesValid = LTFALSE;
+        }
 
 		// Every child is a file read, so give the rest of the machine a turn.
-		Sleep(0);
+		nolf::platform::yield_thread();
 	}
 
 	if (!mod_FindChunk(pStream, "Animation"))
@@ -3112,6 +2726,7 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 	pStream->Read(&nAnims, sizeof(nAnims));
 
 	nAnimTotal = GetTotalAnimCount(0) + nAnims;
+    if (nAnimTotal > 65536) goto fail;
 
 	// The animation table is the one collection here sized out of m_pAlloc
 	// rather than the model's own data block.
@@ -3120,10 +2735,10 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 
 	for (i = 0; i < nAnims; i++)
 	{
-		// CUnknownD9E4 above is ModelAnim under its vtable's name: 0x5c bytes
+		// ModelAnim above is ModelAnim under its vtable's name: 0x5c bytes
 		// with a virtual destructor, which is what this sizes and what the
 		// release on the failure path below sizes too.
-		pAnim = BaseNew(GetAlloc(), (CUnknownD9E4*)0, 1, this);
+		pAnim = BaseNew(GetAlloc(), (ModelAnim*)0, 1, this);
 
 		if (!pAnim)
 			goto fail;
@@ -3133,7 +2748,6 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 
 		if (!m_AnimArray[i].sub_1001bec9(pStream))
 		{
-			BaseDelete((LAlloc*)m_pDataBlock, pAnim, 1);
 			goto fail;
 		}
 	}
@@ -3202,25 +2816,13 @@ fail:
 //     uint32 sub_100176b7();               // 0x100176b7
 //
 // and the call below should then lose the cast.
-class CModelQ44C : public Model
-{
-public:
-	uint32 sub_100176b7Q44C();               // really Model::sub_100176b7
-};
+
 
 // AnimInfo::m_pad_14 in commonmodel.h is this: the three floats the
 // "AnimBindings" chunk writes into the table entry (0x0044dad1-0x0044dade).
 // IT BELONGS IN commonmodel.h as `LTVector m_vAnimBinding;  // 0x14`,
 // replacing m_pad_14; the overlay is here only so that this move touches no
 // header (a commonmodel.h change has to be measured against both images).
-class CAnimInfoQ44C
-{
-public:
-	uint8    m_pad_00[0x14];
-	LTVector m_vAnimBinding;                 // 0x14
-};
-
-
 // --------------------------------------------------------------------- //
 //  0x1001c36c   271 bytes   Model::sub_1001c36c
 //                           (lithtech.exe 0x0044d9a0, 386 bytes)
@@ -3290,7 +2892,7 @@ LTBOOL Model::sub_1001c36c(CModelLoadRequest* pRequest, ILTStream* pStream,
 
 		if (pRec->m_pOwner28)
 		{
-			if (nAnims != ((CModelQ44C*)pRec->m_pOwner28)->sub_100176b7Q44C() ||
+			if (nAnims != pRec->m_pOwner28->OwnedAnimationCount() ||
 			    pRec->m_Unknown20 != pRec->m_pOwner28->m_Sub1d4.m_Unknown20)
 			{
 				pRequest->m_bUnknown18 = LTFALSE;
@@ -3310,7 +2912,7 @@ LTBOOL Model::sub_1001c36c(CModelLoadRequest* pRequest, ILTStream* pStream,
 				pInfo = FindAnimInModel(szName, pRec->m_pOwner28, &iAnim);
 
 				if (pInfo)
-					((CAnimInfoQ44C*)pInfo)->m_vAnimBinding = vBinding;
+					pInfo->m_vAnimBinding = vBinding;
 			}
 		}
 	}
@@ -3461,7 +3063,7 @@ LTBOOL Model::sub_1001c560(ILTStream* pStream)
 // against the default one, which is the second Term in both images.
 ModelWeightSet::~ModelWeightSet()
 {
-	m_Weights.Term(m_pModel->GetAlloc());
+	m_Weights.Term(m_pModel ? m_pModel->GetAlloc() : &g_DefAlloc);
 }
 
 
@@ -3520,7 +3122,7 @@ LTBOOL ModelWeightSet::sub_1001c2bc(ILTStream* pStream)
 // inside the keyframe SetSize2 (342 bytes); with the operator it CALLS them
 // (0x004152b0, 0x0044c7d0) as shipped, 306 of 306. The one in the keyframe
 // loop alone is enough; server.dll is unchanged either way.
-LTBOOL CUnknownD9E4::sub_1001bc69(ILTStream* pStream)
+LTBOOL ModelAnim::sub_1001bc69(ILTStream* pStream)
 {
 	uint32 i, nKeys;
 
@@ -3655,7 +3257,9 @@ char* CMoDataRef::sub_1001638c(char* pName)
 			pCur = pCur->m_pNext;
 		}
 
-		nSize = strlen(pName) + 0xc;
+		const auto length = strlen(pName);
+        if (length > std::numeric_limits<uint32>::max() - sizeof(CMoDataLink)) return "";
+        nSize = static_cast<uint32>(sizeof(CMoDataLink) + length);
 
 		pNew = (CMoDataLink*)m_pAlloc->Alloc(nSize);
 
@@ -3905,15 +3509,14 @@ LTBOOL CModelLoadState::sub_1001cec1(uint32* pnBytes)
 // model owns is what the caller gets back. Every name in a model file comes
 // through here: the model's own, each animation's, and each keyframe's string
 // key (name ours).
-LTBOOL Model::sub_1001c325(ILTStream* pStream, char** ppName)
-{
-	char szName[0x1000];
-
-	if (pStream->ReadString(szName, sizeof(szName)) != LT_OK)
-		return LTFALSE;
-
-	*ppName = sub_100173fa(szName);
-	return LTTRUE;
+LTBOOL Model::sub_1001c325(ILTStream* stream, char** name) {
+    if (!stream || !name) return LTFALSE;
+    unsigned char size[2];
+    if (stream->Read(size,2) != LT_OK) return LTFALSE;
+    std::string text(static_cast<std::size_t>(size[0]) | (static_cast<std::size_t>(size[1]) << 8),'\0');
+    if (stream->Read(text.data(),static_cast<uint32>(text.size())) != LT_OK) return LTFALSE;
+    *name = sub_100173fa(text.data());
+    return text.empty() || (*name)[0];
 }
 
 // 0x1001bec9 — one entry of the animation table, off the wire: the three
@@ -3929,7 +3532,7 @@ LTBOOL AnimInfo::sub_1001bec9(ILTStream* pStream)
 	pStream->Read(&m_vDims.z, 4);
 
 	if (m_pAnim)
-		return ((CUnknownD9E4*)m_pAnim)->sub_1001bc69(pStream);
+		return ((ModelAnim*)m_pAnim)->sub_1001bc69(pStream);
 
 	return LTFALSE;
 }
@@ -3946,45 +3549,7 @@ LTBOOL AnimInfo::sub_1001bec9(ILTStream* pStream)
 // The engine's own copy of the file is a separate translation unit from the
 // model code (it sits at 0x10015bcd-0x100160xx, beside quat_ConvertToMatrix);
 // it lives here because that unit has not been split out.
-void quat_ConvertFromMatrix(float* pQuat, const float mat[4][4])
-{
-	float diag, s;
-	int i, j, k;
 
-	diag = mat[0][0] + mat[1][1] + mat[2][2] + 1.0f;
-
-	if (diag < 0.00001f)
-	{
-		i = QX;
-		if (mat[QY][QY] > mat[QX][QX])
-			i = QY;
-		if (mat[QZ][QZ] > mat[i][i])
-			i = QZ;
-
-		j = g_QNext[i];
-		k = g_QNext[j];
-
-		s = (float)sqrt(mat[i][i] - (mat[j][j] + mat[k][k]) + 1.0f);
-
-		pQuat[i] = s * 0.5f;
-		s = 0.5f / s;
-		pQuat[QW] = (mat[k][j] - mat[j][k]) * s;
-		pQuat[j] = (mat[j][i] + mat[i][j]) * s;
-		pQuat[k] = (mat[k][i] + mat[i][k]) * s;
-		return;
-	}
-	else
-	{
-		s = (float)sqrt(diag);
-	}
-
-	pQuat[3] = s * 0.5f;
-	s = 0.5f / s;
-
-	pQuat[0] = (mat[2][1] - mat[1][2]) * s;
-	pQuat[1] = (mat[0][2] - mat[2][0]) * s;
-	pQuat[2] = (mat[1][0] - mat[0][1]) * s;
-}
 
 
 // 0x10015e17 and 0x10015e69 — the other two functions of ltquatbase.cpp,
@@ -4005,25 +3570,7 @@ void quat_ConvertToMatrix(const float* pQuat, float mat[4][4]);   // 0x10015bcd
 // three FPU loads (one per destination vector's x) and six integer moves —
 // only the first component of each vector goes through st0, because only the
 // first store is where VC6 has already got a float in a register.
-void quat_GetVectors(const float* pQuat, float* pRight, float* pUp,
-                     float* pForward)
-{
-	float mat[4][4];
 
-	quat_ConvertToMatrix(pQuat, mat);
-
-	pRight[0] = mat[0][0];
-	pRight[1] = mat[1][0];
-	pRight[2] = mat[2][0];
-
-	pUp[0] = mat[0][1];
-	pUp[1] = mat[1][1];
-	pUp[2] = mat[2][1];
-
-	pForward[0] = mat[0][2];
-	pForward[1] = mat[1][2];
-	pForward[2] = mat[2][2];
-}
 
 // The interpolation. Three details are worth reading off the bytes because
 // they are what says this is the SDK source rather than something like it:
@@ -4039,48 +3586,7 @@ void quat_GetVectors(const float* pQuat, float* pRight, float* pUp,
 //  - `(1.0 - cosom) > 0.00001f` is compared in *double* (`fcompl` against
 //    0x1004d938, which reads as 1e-05), because the SDK wrote the 1.0 as a
 //    double literal. The `1.0 - t` beside it does the same.
-void quat_Slerp(float* pDest, const float* pQ1, const float* pQ2, float t)
-{
-	float rot1q[4];
-	float omega, cosom, sinom;
-	float scalerot0, scalerot1;
-	int   i, j;
 
-	// Calculate the cosine
-	cosom = pQ1[0]*pQ2[0] + pQ1[1]*pQ2[1] + pQ1[2]*pQ2[2] + pQ1[3]*pQ2[3];
-
-	// adjust signs if necessary
-	if (cosom < 0.0f)
-	{
-		cosom = -cosom;
-		for (j = 0; j < 4; j++)
-			rot1q[j] = -pQ2[j];
-	}
-	else
-	{
-		for (j = 0; j < 4; j++)
-			rot1q[j] = pQ2[j];
-	}
-
-	// calculate interpolating coeffs
-	if ((1.0 - cosom) > 0.00001f)
-	{
-		// standard case
-		omega = (float)acos(cosom);
-		sinom = (float)sin(omega);
-		scalerot0 = (float)sin((1.0 - t) * omega) / sinom;
-		scalerot1 = (float)sin(t * omega) / sinom;
-	}
-	else
-	{
-		// rot0 and rot1 very close - just do linear interp.
-		scalerot0 = 1.0f - t;
-		scalerot1 = t;
-	}
-
-	for (i = 0; i < 4; i++) // build the new quarternion
-		pDest[i] = (float)(scalerot0 * pQ1[i] + scalerot1 * rot1q[i]);
-}
 
 
 // ---- the socket walk (0x100175b6, 0x10017c17) --------------------------- //
@@ -4177,7 +3683,8 @@ LTRESULT CommonModelLT::UpdateMainTracker(HOBJECT hObj, float fUpdateDelta)
 	if (dResult)
 		return dResult;
 
-	at_UpdateTracker(pTracker, (uint32)(fUpdateDelta * 1000.0f));
+	if (!std::isfinite(fUpdateDelta) || fUpdateDelta < 0) return LT_INVALIDPARAMS;
+    at_UpdateTracker(pTracker, static_cast<uint32>(std::min<double>(UINT32_MAX,double(fUpdateDelta)*1000)));
 
 	return LT_OK;
 }
@@ -4229,989 +3736,6 @@ LTRESULT CommonModelLT::UpdateMainTracker(HOBJECT hObj, float fUpdateDelta)
 // in its allocation), +0x54 eight (lea 0(,%eax,8): CLAFrameEntry). The
 // classes below carry only size and constructor profile (names ours; the
 // real ones live in worldmodels.cpp, another TU).
-class CWorldAnimRecQ
-{
-public:
-	CWorldAnimRecQ();                        // 0x00422240
-	uint8 m_pad[0x60];
-};
-
-class CWorldAnimLightQ
-{
-public:
-	uint16 m_n00;
-	uint16 m_n02;
-};
-
-class CWorldAnimFrameQ
-{
-public:
-	void*  m_pData;
-	uint32 m_nSize;
-};
-
-typedef CMoArray<CWorldAnimRecQ>     CWorldSub04;   // ctor 0x1000b7e6, SetSize2 0x1000c267
-typedef CMoArray<CWorldAnimLightQ>   CWorldSub18;   // ctor 0x1000ba1c, SetSize2 0x1000c470
-typedef CMoArray<CWorldAnimFrameQ*>  CWorldSub2C;   // ctor 0x1000ba6d, SetSize2 0x1000c470
-typedef CMoArray<uint8>              CWorldSub40;   // ctor 0x1000af9a, SetSize2 0x1000be59
-typedef CMoArray<CWorldAnimFrameQ>   CWorldSub54;   // ctor 0x1000bb45, SetSize2 0x1002ccee
-
-// InheritWorld's CopyPointers (0x004248d0) CALLS the +0x04 array's resize
-// (0x00414f00). Spelled as the template's own `m_Sub04.Term()` it expands at
-// /O2 and InheritWorld stops matching (measured), and collection.h's
-// CopyPointers is declared but not defined, so the call goes through this
-// view (name ours).
-class CWorldSub04Term
-{
-public:
-	LTBOOL Term(uint32 nItems, class CMoAllocator* pAlloc);
-};
-
-// One world polygon and its surface, as far as the polygon collector below
-// needs them. ltobject_internal.h describes both records already —
-// WorldPoly's m_pSurface at +0x28 and WorldSurface's texture flags at +0x3c —
-// but the flags word this reads is at +0x38 and that header cannot be
-// extended from here, so the two views stay separate (names ours).
-class CWorldSurfaceRec
-{
-public:
-	uint8  m_pad_00[0x04];
-	// The texture basis, the same three vectors worldbsp.cpp's
-	// CWorldSurface carries: origin, U and V. The polygon texture-coordinate
-	// pass below is what reads them here.
-	LTVector m_vO;                           // 0x04
-	LTVector m_vP;                           // 0x10
-	LTVector m_vQ;                           // 0x1c
-	uint8  m_pad_28[0x34 - 0x28];
-	// worldbsp.cpp's CWorldSurface::m_pPlane, the same field: the node
-	// projection pass below is the other reader of it.
-	class LTPlane* m_pPlane;                 // 0x34
-	uint32 m_Flags;                          // 0x38  bit 4 selects the run
-};
-
-class CWorldPolyRec
-{
-public:
-	uint8             m_pad_00[0x28];
-	CWorldSurfaceRec* m_pSurface;            // 0x28
-};
-
-// The collection at CServerWorld+0x19c: the same 0x14-byte shape as the
-// world table, buffer at +0x04 and count at +0x08. It holds every polygon in
-// every loaded world whose surface carries flag 0x10, and 0x10009d39 is what
-// fills it (names ours).
-//
-// This is stdlith's own `CMoArray<T, DefaultCache>` (dynarray.h, transcribed
-// into collection.h), cut down to the members the polygon collector and the
-// world's teardown actually reach, and it has to be spelled as a TEMPLATE
-// with its resize DEFINED rather than as a plain declaration. The two images
-// disagree about this one function and about nothing else in 0x10009d39:
-//
-//   * shipped server.dll  0x10009d39+0x6a  `call 0x1000c470`
-//   * shipped lithtech    0x00424dd0+0x47  the whole body expanded, down to
-//                                          `push $0x4b4e88` for g_DefAlloc
-//
-// One source, two /Ob1 budgets -- exactly the split CModelPtrArray::SetSize
-// above already carries. A non-template out-of-class definition is never an
-// expansion candidate at any /O level, which is what kept BOTH images
-// calling it and what made this function a near; the members below are the
-// four dwords that body touches.
-//
-// The two private helpers are the template's own, and the shipped code says
-// where each of them survives as a call:
-//
-//   * _DeleteAndDestroyArray is a call in both images -- 0x1000d020 in
-//     server.dll, 0x00413050 in lithtech -- at every site, expanded or not.
-//   * _AllocateTArray is a call in server.dll (0x100243de) and is EXPANDED in
-//     lithtech, where all that is left of it is the three-push cdecl
-//     `BaseNew(&g_DefAlloc, 0, newSize + m_WantedCache)` at 0x00424e58. So it
-//     has to be defined too, or lithtech would get a thiscall where the
-//     shipped code has BaseNew.
-//
-// Both out-of-line copies have homes of their own: the resize is 0x1000c470
-// and 0x00414fa0 (where /Ot expanded both helpers into it and /Os expanded
-// neither), and the release is 0x1000d020 and 0x00413050.
-//
-// Making it a candidate does NOT put server.dll's own two call sites at
-// risk, and the shipped image says so by counting: 0x1000c470 is reached by
-// 33 `call`s and 0x10019a9a -- CModelPtrArray::SetSize above, the same
-// construct in this same file, 76 bytes -- by nine. /Os declines a body this
-// size everywhere it meets one. The one that flipped when it was marked
-// `inline` last pass was CWorldTable::SetSizeInit2, 51 bytes and two callers
-// (0x1000c504); that is the regime below this one, not this one.
-template <class T>
-class CWorldPolyArray
-{
-public:
-	// The template's `CMoArray() { Clear(); Init(); }`, in the class so
-	// lithtech.exe's /O2 can expand it into the world's constructor
-	// (0x004223a3 / 0x004223c2: vptr, four zeroes, Init called). server.dll
-	// still calls it; there the stand-in is a size-exact near of the
-	// shipped 34 bytes (the Init push schedule), where only the real
-	// template matches -- the address is credited by the other copies.
-	//
-	// server.dll's build only DECLARES it: link/aliases.rsp binds it to the
-	// real template's out-of-line constructor, the body that matches the
-	// shipped 34 bytes, where this stand-in's own copy was a near the image
-	// has no second address for.
-#ifdef LT_SERVER_BUILD
-	CWorldPolyArray();
-#else
-	CWorldPolyArray()                        // 0x1000b15c
-	{
-		Clear();
-		Init();
-	}
-#endif
-	LTBOOL Init(uint32 size = 0, uint32 cacheSize = CACHE_DEFAULT_SIZE);
-	void   Clear()
-	{
-		m_pItems = 0;
-		m_nItems = 0;
-		m_CacheSize = 0;
-		m_WantedCache = 0;
-	}
-
-	LTBOOL SetSize2(uint32 newSize, LAlloc* pAlloc);              // 0x1000c470
-	// lithtech.exe 0x00428bb0 -- stdlith's CopyArray2; reached only by the
-	// client's InheritWorld. Declared, not defined here.
-	LTBOOL CopyArray2(const CWorldPolyArray<T>& other, LAlloc* pAlloc);
-
-	// Inline: the world's destructor expands it rather than calling it.
-	~CWorldPolyArray() { SetSize2(0, &g_DefAlloc); }
-	virtual void _v00();                     // the collection's vptr
-	T*     m_pItems;                         // 0x04
-	uint32 m_nItems;                         // 0x08
-	uint32 m_CacheSize;                      // 0x0c
-	uint32 m_WantedCache;                    // 0x10
-
-private:
-	void _DeleteAndDestroyArray(LAlloc* pAlloc, uint32 nElements); // 0x1000d020
-	T*   _AllocateTArray(uint32 nElements, LAlloc* pAlloc);        // 0x100243de
-};
-
-template <class T>
-LTBOOL CWorldPolyArray<T>::SetSize2(uint32 newSize, LAlloc* pAlloc)
-{
-	// Uhhh ok...
-	if ((newSize == m_nItems) && (newSize != 0))
-	{
-		return LTTRUE;
-	}
-
-	if (m_pItems)
-	{
-		_DeleteAndDestroyArray(pAlloc, m_nItems + m_CacheSize);
-	}
-
-	m_nItems = newSize;
-
-	if (newSize > 0)
-	{
-		m_pItems = _AllocateTArray(newSize + m_WantedCache, pAlloc);
-
-		if (!m_pItems)
-		{
-			m_nItems    = 0;
-			m_CacheSize = 0;
-
-			return LTFALSE;
-		}
-
-		m_CacheSize = m_WantedCache;
-	}
-
-	return LTTRUE;
-}
-
-template <class T>
-T* CWorldPolyArray<T>::_AllocateTArray(uint32 nElements, LAlloc* pAlloc)
-{
-	T* tPtr = LNew_Array(pAlloc, T, nElements);
-
-	return tPtr;
-}
-
-template <class T>
-void CWorldPolyArray<T>::_DeleteAndDestroyArray(LAlloc* pAlloc, uint32 nElements)
-{
-	if (m_pItems)
-	{
-		LDelete_Array(pAlloc, m_pItems, nElements);
-		m_pItems = 0;
-	}
-
-	m_CacheSize = 0;
-}
-
-typedef CWorldPolyArray<CWorldPolyRec*> CWorldPolyList;
-
-// The one sub-object of the nine whose extent every field is readable from:
-// the point-shade state at CServerWorld+0xfc (CServerMgr's own 0x2a0 run).
-// 0x1001424e clears it and 0x1001418a fills the two vectors at +0x24 and
-// +0x30 — the second is the reciprocal of the first, component by component,
-// which is what says both are floats and that the run at +0x24 is three
-// vectors and not nine scalars. +0x00 is a pointer: the destructor's body
-// (0x10014295) is `dfree(m_pData); Clear();` and nothing else. +0x20 is the
-// only dword Clear leaves alone (names ours).
-class CWorldSubFC
-{
-public:
-	CWorldSubFC();                           // 0x10014179
-
-	// 0x10014185 — what the world's destructor calls on this sub-object: a
-	// five-byte tail jump, so an out-of-line copy of something inline. No
-	// vptr is restored here, which is what says this class is not
-	// polymorphic (name ours).
-	void Release();                          // 0x10014185
-	~CWorldSubFC() { Release(); }
-
-	// 0x1001424e — back to empty. Eight dwords off one `xor eax,eax` and
-	// then nine `fldz`/`fstps` pairs, one per float: a componentwise zero,
-	// not three LTVector::Init calls (which would be three `flds` and then
-	// three `fstps` per vector). The dword stores are NOT in offset order —
-	// the two triples go 0x10, 0x0c, 0x08 and 0x1c, 0x18, 0x14 — and the
-	// statement order below is read straight off that (name ours).
-	//
-	// The nine floats are `volatile`, and that is what makes this function
-	// match: with plain floats VC6 fills the FPU's latency slots with the
-	// pending integer stores and comes out as one `fldz`, then each
-	// `fldz`/`fstps` pair with two of the dword stores wedged between them —
-	// same 71 bytes, same 28 instructions, sixteen of them in different
-	// places. A volatile store is a barrier the scheduler will not move
-	// another store across, so the dwords all land first and the FP chain
-	// runs uninterrupted, which is exactly the shipped layout; the leading
-	// `fldz` still hoists above them because it touches no memory. Source
-	// order is otherwise irrelevant here — moving the whole float block
-	// above the dwords changes nothing either way. Same reasoning as
-	// ModelAnim::m_nKeyFrames: the grid is filled on the load thread and
-	// read by whoever is already drawing.
-	void Clear();                            // 0x1001424e
-
-	// 0x1001418a — size the grid: the cell size in all three axes, its
-	// reciprocal per axis, and the counts the two corners and that size
-	// work out to. Declared, not reconstructed (196 bytes, thiscall, and
-	// the third argument is a float).
-	void Setup(LTVector* pMin, LTVector* pMax, float fCellSize);
-
-	class CShadeSample* m_pData;             // 0x00
-	uint32   m_n04;                          // 0x04
-	uint32   m_n08;                          // 0x08
-	uint32   m_n0c;                          // 0x0c
-	uint32   m_n10;                          // 0x10
-	uint32   m_n14;                          // 0x14
-	uint32   m_n18;                          // 0x18
-	uint32   m_n1c;                          // 0x1c
-	uint32   m_n20;                          // 0x20  not cleared
-	// The cell size is PLAIN, not volatile, and Setup is what says so:
-	// with the three stores volatile VC6 will not hoist the two parameter
-	// loads above them and the function comes out six bytes displaced.
-	// Clear still needs the barrier, so it writes these three through a
-	// volatile alias instead -- see there.
-	float    m_v24x, m_v24y, m_v24z;         // 0x24
-	float    m_v30x, m_v30y, m_v30z;         // 0x30
-	volatile float m_v3cx, m_v3cy, m_v3cz;   // 0x3c
-};
-
-void CWorldSubFC::Clear()
-{
-	volatile float* pCellSize = (volatile float*)&m_v24x;
-
-	m_pData = LTNULL;
-	m_n04 = 0;
-
-	m_n10 = 0;
-	m_n0c = 0;
-	m_n08 = 0;
-
-	m_n1c = 0;
-	m_n18 = 0;
-	m_n14 = 0;
-
-	pCellSize[0] = 0.0f;
-	pCellSize[1] = 0.0f;
-	pCellSize[2] = 0.0f;
-
-	m_v30x = 0.0f;
-	m_v30y = 0.0f;
-	m_v30z = 0.0f;
-
-	m_v3cx = 0.0f;
-	m_v3cy = 0.0f;
-	m_v3cz = 0.0f;
-}
-
-// 0x10014179 — the constructor, and the clear is all of it.
-CWorldSubFC::CWorldSubFC()
-{
-	Clear();
-}
-
-// 0x10014295 — the teardown the release below tail-jumps to: `dfree(m_pData);
-// Clear();`. smgr.cpp, the file that calls it directly, carries the body as
-// CWorldSubFCView::Term, so this reaches that one definition rather than
-// growing a second copy of it.
-class CWorldSubFCView
-{
-public:
-	void Term();                             // 0x10014295
-};
-
-// 0x10014185 — `jmp 0x10014295` and nothing else.
-void CWorldSubFC::Release()
-{
-	((CWorldSubFCView*)this)->Term();
-}
-
-// 0x1001418a — size the grid.  IDENTICAL, 196 of 196 bytes, in both images
-// (lithtech.exe 0x0043c6f0, 235 bytes).  The cell is a cube, so one float fills all
-// three components of the size at +0x24, and the reciprocal at +0x30 is
-// taken per axis off that.
-//
-// Three things had to be right at once, and each is visible in the bytes:
-//
-//  * `fld1; fdivs 0x2N(%edi)` three times, NOT one hoisted `flds <1.0f>`
-//    with three `fdivr %st(1),%st`.  VC6 pools the literal the moment the
-//    divisor has to be LOADED first, which is what a volatile read forces;
-//    reading the size back through a plain alias lets the divisor fold into
-//    the `fdiv` as a memory operand and the 1.0 is then rematerialised per
-//    site.  That alias is also what stops VC6 forwarding fCellSize straight
-//    into the divide (`fld1; fdiv %st(1),%st`, no memory read at all) --
-//    the stores go through the members and the reads through the pointer,
-//    and VC6 will not connect the two.
-//  * the three reciprocals are LOCALS as well as members.  The counts
-//    multiply by them and the shipped code never re-reads +0x30: x's local
-//    stays in %st(1) because it is spent before the first __ftol call,
-//    y's and z's are live across one, so they spill -- y into the dead
-//    fCellSize parameter slot at 0x10(%ebp), z into the function's one
-//    real local.  Store the member and read the member back instead and
-//    every count becomes `fmuls 0x3N(%edi)`.
-//  * the cell size is NOT volatile.  With the three stores volatile VC6
-//    refuses to hoist `mov 0xc(%ebp),%ebx; mov 0x8(%ebp),%esi` above them
-//    and the whole function comes out six bytes displaced -- same 79
-//    instructions, same 196 bytes, two moves in the wrong slot.
-//
-// A count of zero is bumped to one AFTER the fact rather than clamped in
-// the expression: `xor %ecx,%ecx` then three `cmp %ecx,0xN(%edi); jne`
-// against a 1 materialised once with `push $1; pop %eax`.
-//
-// +0x14/+0x18/+0x1c are the counts less one (`lea -0x1(%reg)`), +0x20 is
-// the Z stride (nx*ny) and +0x04 the whole cell count; the origin at +0x3c
-// is a twelve-byte structure copy of pMin (`add $0x3c,%edi` and three
-// `movsl`), which is what says that triple is an LTVector assignment and
-// not three float stores.
-void CWorldSubFC::Setup(LTVector* pMin, LTVector* pMax, float fCellSize)
-{
-	LTVector* pCellSize = (LTVector*)&m_v24x;
-	float fInvX, fInvY, fInvZ;
-
-	m_v24x = fCellSize;
-	m_v24y = fCellSize;
-	m_v24z = fCellSize;
-
-	fInvX = 1.0f / pCellSize->x;
-	m_v30x = fInvX;
-
-	fInvY = 1.0f / pCellSize->y;
-	m_v30y = fInvY;
-
-	fInvZ = 1.0f / pCellSize->z;
-	m_v30z = fInvZ;
-
-	m_n08 = (uint32)((pMax->x - pMin->x) * fInvX) + 1;
-	m_n0c = (uint32)((pMax->y - pMin->y) * fInvY) + 1;
-	m_n10 = (uint32)((pMax->z - pMin->z) * fInvZ) + 1;
-
-	if (m_n08 == 0)
-		m_n08 = 1;
-
-	if (m_n0c == 0)
-		m_n0c = 1;
-
-	if (m_n10 == 0)
-		m_n10 = 1;
-
-	m_n14 = m_n08 - 1;
-	m_n18 = m_n0c - 1;
-	m_n1c = m_n10 - 1;
-
-	m_n20 = m_n0c * m_n08;
-	m_n04 = m_n10 * m_n0c * m_n08;
-
-	*(LTVector*)&m_v3cx = *pMin;
-}
-
-// The one sub-object with a method Load reaches: it is handed the stream and
-// answers yes or no, and both its constructor and that method live in the
-// same 0x1003xxxx module. Its extent stops at +0xf8, where a dword off the
-// wire follows it (names ours).
-// One sub-object of the one below, at its +0x0c, and the only thing the
-// world's destructor does with CWorldSub6C at all: the teardown reaches
-// +0x78 of the world, which is 0x6c + 0x0c. Its own destructor is a CALL
-// (0x1003978c, another five-byte tail jump), so unlike its neighbours it is
-// out of line. Nothing here fixes its extent -- only its start (name ours).
-class CWorldSub6CSub0C
-{
-public:
-	~CWorldSub6CSub0C();                     // 0x1003978c
-
-	uint8 m_pad[0x04];
-};
-
-class CWorldSub6C
-{
-public:
-	CWorldSub6C();                           // 0x10039b74
-
-	// Inline and empty: the world's destructor expands it, and all it
-	// expands to is the member below being destroyed. No vptr is restored,
-	// so this class is not polymorphic either.
-	~CWorldSub6C() {}
-
-	int sub_1003a473(class ILTStream* pStream);   // 0x1003a473
-
-	// 0x10039c43 — take one light in. A thiscall with two arguments and no
-	// answer the caller keeps: 0x10009e07 below pushes the light and a
-	// literal 1 and never touches %eax. Declared, not reconstructed.
-	void sub_10039c43(class CWorldLight* pLight, int nFlag);  // 0x10039c43
-
-	// lithtech.exe 0x0048d930 -- become a copy of another tree's shape
-	// (worldtree.cpp's CWorldTreeN48D::CopyFrom). Reached only by the
-	// client's InheritWorld below. Declared, not reconstructed.
-	LTBOOL CopyFrom(CWorldSub6C* pOther);    // 0x0048d930
-
-	// 0x7c, not the 0x8c the gap to +0xf8 allows: the constructor's clear
-	// (0x10007f73) ties off a link at +0xe8 and zeroes a dword at +0xf4
-	// directly, which puts both of them outside the sub-object.
-	uint8            m_pad_00[0x0c];
-	CWorldSub6CSub0C m_Sub0C;                // 0x0c
-	uint8            m_pad_10[0x7c - 0x10];
-};
-
-// The world's geometry as the loader and the portal search see it: a
-// polymorphic object with at least eight virtuals, the flags word
-// worldmodels.h calls CWorldModelData::m_Flags at +0x48, and an index word at
-// +0xf8. Two of our headers already describe this same class from other
-// angles — worldmodels.h as CWorldModelData (m_Flags 0x48, the run at 0xa0
-// and its count at 0xa4) and worldbsp.h as CWorldBsp (m_ppParts 0xa0,
-// m_nParts 0xa4, m_nf8 0xf8) — and the offsets agree, so they are one class.
-// Only what this file reaches is declared (names ours).
-class CWorldGeom
-{
-public:
-	virtual void _v00() = 0;
-	virtual void _v04() = 0;
-	virtual void _v08() = 0;
-	virtual void _v0c() = 0;
-	virtual void _v10() = 0;
-	virtual void _v14() = 0;
-	virtual void _v18() = 0;
-	// 0x1c — asked once per world model right after it loads; a nonzero
-	// answer sets bit 1 of the world's own flags word.
-	virtual int  _v1c() = 0;
-
-	// NOT virtual, and CServerWorldRec::Term is what says so: its two
-	// `delete`s reach 0x1000abe5 through `mov %edi,%ecx; call` and not
-	// through the vtable. Declared, not reconstructed -- it belongs to
-	// whichever TU carries the concrete world.
-	~CWorldGeom();                           // 0x1000abe5
-
-	uint8  m_pad_004[0x048 - 0x004];
-	uint32 m_Flags;                          // 0x048  bit 1 = there is a
-	                                         //        second, original copy
-	uint8  m_pad_04c[0x088 - 0x04c];
-	// A run of 0x30-byte records, each carrying a list of poly keys that
-	// 0x1000a2e7 resolves into direct poly pointers once every world model
-	// is in memory (names ours).
-	class CGeomKeyList* m_pKeyLists;         // 0x088
-	uint32 m_nKeyLists;                      // 0x08c
-	uint8  m_pad_090[0x0a0 - 0x090];
-	// worldmodels.h reads the same pair as CWorldModelData::m_pPolies and
-	// m_nPolies, and worldbsp.h as CWorldBsp::m_ppParts/m_nParts.
-	CWorldPolyRec** m_pPolies;               // 0x0a0
-	uint32 m_nPolies;                        // 0x0a4
-	uint8  m_pad_0a8[0x0b0 - 0x0a8];
-	// The world's portals: a run of 0x24-byte records with the name first,
-	// which worldbsp.h reads as m_pChunks/m_nChunks and worldmodels.h as
-	// CWorldModelData's run at 0xa0 — those are a *different* pair four
-	// bytes lower, and this one's extent comes from the search below
-	// (`add $0x24` per record, and the return's `lea (%edi,%edi,8)` then
-	// `lea (%ecx,%eax,4)`, i.e. i * 36). Names ours.
-	class WorldPortalRec* m_pPortals;        // 0x0b0
-	uint32 m_nPortals;                       // 0x0b4
-	uint8  m_pad_0b8[0x0f8 - 0x0b8];
-	uint16 m_iModel;                         // 0x0f8  its index in the table
-};
-
-// What a poly is named by before the world models are all in memory: which
-// world model, and which poly within that model's own run. worldmodels.h
-// declares the same two words as CWorldPolyKey; the resolve below overwrites
-// both of them with the poly's address, so the four bytes are a key on disk
-// and a pointer afterwards (names ours).
-class CWorldPolyKeyRec
-{
-public:
-	uint16 m_iModel;                         // 0x00
-	uint16 m_iPoly;                          // 0x02
-};
-
-// One record of the run at CWorldGeom+0x88: only its key list is reached,
-// and its extent is the walk's `addl $0x30` (names ours).
-class CGeomKeyList
-{
-public:
-	uint8             m_pad_00[0x20];
-	CWorldPolyKeyRec* m_pKeys;               // 0x20
-	uint32            m_nKeys;               // 0x24
-	uint8             m_pad_28[0x30 - 0x28];
-};
-
-// One of those records as this file needs it. servermgr.h describes the same
-// class from the other end — WorldPortal, with the flags word at +0x06 — and
-// cannot be extended from here, so the two views stay separate and the
-// search casts between them (names ours).
-class WorldPortalRec
-{
-public:
-	char*  m_pName;                          // 0x00
-	uint8  m_pad_04[0x24 - 0x04];
-};
-
-// One record of the table of loaded worlds. Sixteen bytes — `new` asks the
-// engine allocator for 0x10 — with the flags word first and three geometry
-// pointers after it: the model as it stands, the model as it was authored
-// (null unless the flags said there is one), and whichever of the two is
-// current. worldmodels.h calls the same record CWorldModelEntry and names
-// +0x00 `char* m_pName`; the loader ORs 3 into that word, so +0x00 is flags
-// and the name is not in the record (names ours).
-class CServerWorldRec
-{
-public:
-	CServerWorldRec();                       // 0x10007ead
-	// 0x10007eb9 -- five bytes, `jmp 0x10007ecc`: the destructor is Term.
-	// LDelete_Array's BaseDelete for this sixteen-byte element (0x1000d22c)
-	// calls it directly, once per record.
-	~CServerWorldRec();                      // 0x10007eb9
-
-	// 0x10007ebe — the record back to empty: one `xor eax,eax` and four
-	// stores, in field order. It leaves the zero register in eax, so it is
-	// an ordinary void member and not the constructor (a VC6 constructor
-	// ends `mov %ecx,%eax`); 0x10007ead is the constructor and its whole
-	// body is a call to this, and 0x10007ecc (Term) calls it again after
-	// giving the two geometry objects back (name ours).
-	void Clear();                            // 0x10007ebe
-
-	// 0x10007ecc — the record emptied: each of the two geometry objects
-	// is given back if its own flag bit is set, and then Clear. The
-	// `delete` is expanded (destructor, then operator delete, under
-	// delete's own null test), and the destructor it reaches is
-	// 0x1000abe5 -- ~CWorldBsp, called NON-virtually, so the pointer's
-	// static type in the shipped source is the concrete world and the
-	// abstract view below is ours. Relocations are masked, so which
-	// destructor the `call` names costs nothing here.
-	void Term();                             // 0x10007ecc
-
-	uint32      m_Flags;                     // 0x00
-	CWorldGeom* m_pWorldBsp;                 // 0x04
-	CWorldGeom* m_pOriginal;                 // 0x08
-	CWorldGeom* m_pCurrent;                  // 0x0c
-};
-
-// 0x10007ead — the whole constructor is the clear, called (not expanded:
-// Clear is defined out of class) and `this` handed back in eax.
-CServerWorldRec::CServerWorldRec()
-{
-	Clear();
-}
-
-// 0x10007eb9 -- a tail jump into Term (Term is out of class, so /Ob1 never
-// expands it).
-CServerWorldRec::~CServerWorldRec()
-{
-	Term();
-}
-
-void CServerWorldRec::Clear()
-{
-	m_Flags     = 0;
-	m_pWorldBsp = LTNULL;
-	m_pOriginal = LTNULL;
-	m_pCurrent  = LTNULL;
-}
-
-// 0x10007ecc — and the teardown, identical in both images (lithtech.exe
-// 0x004222a0).
-//
-// Two flag bits, one per geometry object,
-// tested as BYTES (`testb $0x1,(%esi)`): VC6 narrows `dword & 1` to the low
-// byte by itself, so the field stays a uint32. Each arm carries its OWN null
-// test as well as delete's: the two fold into the one `test; je` per arm, so
-// /O1 cannot tell them apart, but /O2 can -- with a bare `delete` it puts
-// `this` in %esi and the object in %edi, the reverse of the shipped
-// assignment (13 instructions differing). A local `this` copy, a block-scoped
-// pointer per arm, or the flags in a local all leave that reversal in place.
-// The record is cleared at the end through the same member the constructor
-// calls.
-void CServerWorldRec::Term()
-{
-	if ((m_Flags & 1) && m_pWorldBsp)
-		delete m_pWorldBsp;
-
-	if ((m_Flags & 2) && m_pOriginal)
-		delete m_pOriginal;
-
-	Clear();
-}
-
-// The table itself, at CServerWorld+0x188: the 0x14-byte collection shape
-// (vptr, buffer, count), which is why the buffer and the count land on
-// +0x18c and +0x190 — CServerMgr's 0x330 and 0x334, the two dwords
-// servermgr.h currently names m_pFileTrees and m_nFileTrees, with the vptr
-// filling the 0x32c hole in front of them. worldmodels.h reads the same two
-// dwords as CWorldModelList::m_ppEntries/m_nEntries (name ours).
-class CWorldTable
-{
-public:
-	// The template's `CMoArray() { Clear(); Init(); }`, in the class so
-	// lithtech.exe's /O2 can expand it into the world's constructor
-	// (0x004223a3 / 0x004223c2: vptr, four zeroes, Init called). server.dll
-	// still calls it; there the stand-in is a size-exact near of the
-	// shipped 34 bytes (the Init push schedule), where only the real
-	// template matches -- the address is credited by the other copies.
-	//
-	// server.dll's build only DECLARES it: link/aliases.rsp binds it to the
-	// real template's out-of-line constructor, the body that matches the
-	// shipped 34 bytes, where this stand-in's own copy was a near the image
-	// has no second address for.
-#ifdef LT_SERVER_BUILD
-	CWorldTable();
-#else
-	CWorldTable()                            // 0x1000bca5
-	{
-		Clear();
-		Init();
-	}
-#endif
-	LTBOOL Init(uint32 size = 0, uint32 cacheSize = CACHE_DEFAULT_SIZE);
-	void   Clear()
-	{
-		m_pWorlds = 0;
-		m_nWorlds = 0;
-		m_CacheSize = 0;
-		m_WantedCache = 0;
-	}
-
-	// 0x1000c470 — the resize, shared with every other collection over a
-	// four-byte element (declared, not defined: it belongs to the template
-	// in collection.cpp).
-	LTBOOL SetSize2(uint32 nItems, class CMoAllocator* pAlloc);
-
-	// 0x1000c504 — resize and fill. This is stdlith's own
-	// `CMoArray<T,C>::SetSizeInit2(newSize, val)`
-	// (src/LT2/lithshared/stdlith/dynarray.h), with SetSizeInit3's three lines
-	// expanded into it: the allocator is pushed as the literal
-	// &g_DefAlloc rather than coming from an argument, `ret 8` says two
-	// parameters, and the second one is read as a *value* out of its
-	// argument slot inside the loop, not dereferenced. So it is the
-	// by-value overload, and the loop is
-	// `for (i = 0; i < GetSize(); i++) m_pArray[i] = val;` — the count and
-	// the buffer are both re-read from the object on every trip, because a
-	// store through the buffer may have hit either.
-	//
-	// Load's call passes a null, which is what the table wants: every slot
-	// empty before the worlds are read in.
-	LTBOOL SetSizeInit2(uint32 nItems, CServerWorldRec* val);
-	inline LTBOOL SetSizeInit2Inline(uint32 nItems, CServerWorldRec* val);
-
-	// Inline, for the same reason as CWorldPolyList's.
-	~CWorldTable() { SetSize2(0, (class CMoAllocator*)&g_DefAlloc); }
-	virtual void _v00();                     // the collection's vptr
-	CServerWorldRec** m_pWorlds;             // 0x04
-	uint32            m_nWorlds;             // 0x08
-	uint32            m_CacheSize;           // 0x0c
-	uint32            m_WantedCache;         // 0x10
-};
-
-// 0x10058c7c — the one allocator instance every collection in the image is
-// handed. Declared by collection.h now, as `LAlloc g_DefAlloc`, which this
-// file reaches through commonmodel.h; the local opaque declaration that used
-// to sit here conflicted with it on type.
-
-// Two definitions, one body, and the two images between them prove it. The
-// member below matches server.dll at 0x1000c504 and has no home ANYWHERE in
-// lithtech.exe -- because the shipped /O2 CServerWorldFull::Load carries this
-// body expanded (the `test %eax,%eax; je` on SetSize2's result folded into
-// Load's own error path, then `mov X(%ebx),%ecx; xor %eax,%eax; ... movl
-// $X,-X(%edx,%eax,4)` as the fill loop) and /OPT:REF then dropped the
-// out-of-line copy. Both builds are /Ob1, so the expansion needs an `inline`
-// definition; but /O1 TAKES that expansion as well (measured: marking this
-// one definition `inline` costs server.dll its Load at 0x1000804e). So the
-// inline twin below is a stand-in (name ours) reached only by lithtech.exe's
-// Load, and the real member keeps its out-of-line body for server.dll.
-inline LTBOOL CWorldTable::SetSizeInit2Inline(uint32 nItems, CServerWorldRec* val)
-{
-	uint32 i;
-
-	if (!SetSize2(nItems, (CMoAllocator*)&g_DefAlloc))
-		return LTFALSE;
-
-	for (i = 0; i < m_nWorlds; i++)
-		m_pWorlds[i] = val;
-
-	return LTTRUE;
-}
-
-// server.dll only: lithtech.exe's one caller reaches the inline twin, so
-// the out-of-line member has no body there and is not compiled into it.
-#ifdef LT_SERVER_BUILD
-LTBOOL CWorldTable::SetSizeInit2(uint32 nItems, CServerWorldRec* val)
-{
-	uint32 i;
-
-	if (!SetSize2(nItems, (CMoAllocator*)&g_DefAlloc))
-		return LTFALSE;
-
-	for (i = 0; i < m_nWorlds; i++)
-		m_pWorlds[i] = val;
-
-	return LTTRUE;
-}
-#endif
-
-// CServerWorld seen whole. Four virtuals: the vtable the constructor installs
-// (0x1004d330) has exactly four slots before the .rdata float that follows
-// it — 0x1000a268, 0x1000a2b0, 0x1000a37c and 0x1000a3a6, which worldmodels.h
-// already names FindPoly, FindFlagged20 and FindFlagged10 (names ours).
-//
-// The sub-object extents come from Load below rather than from the
-// constructor: the one at +0x6c stops at +0x6c+0x8c because +0xf8 is a dword
-// off the wire, and the one at +0xfc stops at +0x144 because the world's
-// bounding box starts there. Load also fixes what CServerMgr's own +0x30c and
-// +0x318 (m_WorldBoxMin/m_WorldBoxMax) are: this class's +0x168 and +0x174,
-// the file's box grown by a hundred units in each direction.
-class CServerWorldFull
-{
-public:
-	CServerWorldFull();                      // 0x10007f0e
-
-	virtual void _v00() = 0;
-	virtual void _v04() = 0;
-	// 0x1000a37c — worldmodels.h's CWorldModelList::FindFlagged20, which is
-	// slot 2 of this same vtable. Reached through `this` from the resolve
-	// below, so it has to carry its real return type here.
-	virtual CWorldGeom* FindFlagged20() = 0;
-	virtual void _v0c() = 0;
-
-	// 0x10007f73 — the last thing the constructor does, and everything it
-	// does: every field of the class the nine sub-object constructors do not
-	// own goes back to empty, and the point-shade state's own clear is a
-	// tail call (`add $0xfc,%ecx; jmp`). A void member rather than a second
-	// constructor — a VC6 constructor ends `mov %ecx,%eax` and this ends in
-	// a jump (name ours).
-	void Clear();                            // 0x10007f73
-
-	// 0x1000804e — read one world file. 0x10009be5 is Term, which
-	// servermgr.h already declares on CServerWorld.
-	int  Load(WorldLoadRequest* pRequest);
-	void Term();                             // 0x10009be5
-
-	// Three more members Load reaches on `this`, named for their addresses:
-	// the first two are asked yes/no questions and the third is
-	// worldmodels.h's ResetAll.
-	// 0x10009e07 — hand every light on the list to the sub-object at
-	// +0x6c and empty the list. A thiscall taking the head, which the
-	// reader passes as `&pWorld->m_LightHead` off the same register that
-	// carries `this` (name ours).
-	void AddLights(LTLink* pHead);           // 0x10009e07
-
-	// 0x1000a2e7 — turn every poly key in the flagged world model's key
-	// lists into a direct poly pointer, in place. A key naming a world
-	// model or a poly the world does not have fails the whole world
-	// (name ours).
-	int  ResolvePolyKeys();                  // 0x1000a2e7
-	// 0x10009d39 — collect every flag-0x10 polygon in every loaded world
-	// into the collection at +0x19c: one pass to count them, then the
-	// resize, then a second identical pass to store them (name ours).
-	int  CollectFlaggedPolies();             // 0x10009d39
-	void ResetAll();                         // 0x1000a3d0
-
-	// lithtech.exe 0x004248d0 -- CLIENT ONLY, see its definition.
-	LTBOOL InheritWorld(CServerWorldFull* pSrc);
-
-	CWorldSub04  m_Sub04;                    // 0x004
-	CWorldSub18  m_Sub18;                    // 0x018
-	CWorldSub2C  m_Sub2C;                    // 0x02c
-	CWorldSub40  m_Sub40;                    // 0x040
-	CWorldSub54  m_Sub54;                    // 0x054
-	uint32       m_n068;                     // 0x068  filled by the header read
-	CWorldSub6C  m_Sub6C;                    // 0x06c
-	// The lights the world file's object list produced, hung off this head
-	// by the reader below (name ours).
-	LTLink       m_LightHead;                // 0x0e8  tied off by the clear
-	uint32       m_n0f4;                     // 0x0f4
-	float        m_f0f8;                     // 0x0f8  four bytes off the wire,
-	                                         //        and a float: the clear
-	                                         //        stores an `fldz` here
-	CWorldSubFC  m_SubFC;                    // 0x0fc  the point-shade state
-	                                         //        (CServerMgr's 0x2a0 run)
-	LTVector     m_vMin;                     // 0x144  the file's own box
-	LTVector     m_vMax;                     // 0x150
-	// 1 / the box's extent, per axis. One vector rather than three floats:
-	// the clear zeroes it through one `lea 0x15c(%ecx)` and three stores at
-	// +0, +4 and +8, which is an inlined _CVector::Init and not three
-	// separate scalar assignments.
-	LTVector     m_v15c;                     // 0x15c
-	LTVector     m_vBoxMin;                  // 0x168  the box grown by 100
-	LTVector     m_vBoxMax;                  // 0x174  (CServerMgr 0x30c/0x318)
-	uint32       m_n180;                     // 0x180  bit 1 set by a world
-	                                         //        model that asks for it
-	uint32       m_n184;                     // 0x184
-	CWorldTable  m_Worlds;                   // 0x188
-	CWorldPolyList m_Polies;                 // 0x19c
-	uint32       m_n1b0;                     // 0x1b0
-	uint32       m_n1b4;                     // 0x1b4
-	char*        m_pWorldName;               // 0x1b8  read from the file, one
-	                                         //        allocation, nul-added
-	LTLink       m_Link1bc;                  // 0x1bc
-	uint32       m_n1c8;                     // 0x1c8
-	uint32       m_bLoaded;                  // 0x1cc  = CServerMgr+0x370,
-	                                         //        which servermgr.h calls
-	                                         //        m_pWorldFile: it is a
-	                                         //        flag, set to 1 here
-	LTLink       m_Link1d0;                  // 0x1d0
-	LTLink       m_Link1dc;                  // 0x1dc
-	uint32       m_n1e8;                     // 0x1e8
-};
-
-// The world's teardown, seen from a class WITHOUT the four virtuals.
-//
-// CServerWorldFull's first dword looks like a vptr and is not one: its
-// constructor stores 0x1004d330 at the END of the body, after all nine
-// sub-objects are built, where a compiler-generated vptr store would come
-// first. So it is an ordinary function-table field, the class is not
-// polymorphic, and its destructor does not restore it -- which is exactly
-// what the shipped bytes show. Declaring the teardown on CServerWorldFull
-// itself adds that store and costs six bytes, so it goes on a view instead,
-// carrying only the members that HAVE destructors and pads for the rest
-// (name ours).
-class CServerWorldTeardown
-{
-public:
-	~CServerWorldTeardown();                 // 0x1002c9e3
-
-	uint8          m_pad_000[0x004];         // the function table
-	CWorldSub04    m_Sub04;                  // 0x004
-	CWorldSub18    m_Sub18;                  // 0x018
-	CWorldSub2C    m_Sub2C;                  // 0x02c
-	CWorldSub40    m_Sub40;                  // 0x040
-	CWorldSub54    m_Sub54;                  // 0x054
-	uint8          m_pad_068[0x06c - 0x068];
-	CWorldSub6C    m_Sub6C;                  // 0x06c
-	uint8          m_pad_0e8[0x0fc - 0x0e8];
-	CWorldSubFC    m_SubFC;                  // 0x0fc
-	uint8          m_pad_144[0x188 - 0x144];
-	CWorldTable    m_Worlds;                 // 0x188
-	CWorldPolyList m_Polies;                 // 0x19c
-};
-
-// 0x1002c9e3 — nine sub-objects handed back and nothing else. The body is
-// empty; every instruction is compiler-generated member destruction in
-// reverse declaration order, which is what identifies it: the offsets it
-// walks (0x19c, 0x188, 0xfc, 0x78, 0x54, 0x40, 0x2c, 0x18, 0x04) are exactly
-// the ones the constructor builds, read backwards -- and 0x78 is
-// CWorldSub6C's own member rather than a tenth sub-object.
-//
-// This function has NO home in lithtech.exe and no amount of work here will
-// give it one: the /O2 build expanded the whole of it into its one caller in
-// another TU and /OPT:REF dropped the out-of-line copy. Read it at 0x41123e,
-// where the nine offsets run past in the same order (0x19c and 0x188 with
-// their vptrs restored first, then 0xfc, 0x78, 0x54, 0x40 ...) inside a
-// function that is plainly not this one. So the only image this body can
-// win or lose in is server.dll.
-CServerWorldTeardown::~CServerWorldTeardown()
-{
-}
-
-
-// 0x10007f0e — build one. Nine sub-object constructors in offset order, the
-// vptr, and then one member call on `this`; it hands `this` back in eax.
-// lithtech.exe 0x004222f0 (260 bytes) is the same body with /O2 expanding
-// the collection constructors; identical since the five arrays became real
-// CMoArray instantiations (see the comment above CWorldAnimRecQ).
-CServerWorldFull::CServerWorldFull()
-{
-	Clear();
-}
-
-// 0x10007f73 — the clear. Read off the bytes rather than guessed:
-//
-//   * the two grown-box vectors come FIRST and the file's own box and its
-//     reciprocals after them, which is not offset order; everything else is
-//     in ascending offset order and the schedule wedges the plain dword
-//     stores into the FPU's latency slots (see CWorldSubFC::Clear for the
-//     same effect the other way round).
-//   * each vector is zeroed through one `lea` of its own address and stores
-//     at +0, +4, +8 — an inlined `_CVector::Init()` taking its three
-//     defaults, not three scalar assignments (those would index %ecx).
-//   * the four links are `TieOff()`: `mov %eax,0x4(%eax)` then
-//     `mov %eax,(%eax)`, which is the SDK's `m_pPrev = m_pNext = this`
-//     assigning right to left.
-//   * the last statement is the point-shade state's own clear, and it is a
-//     tail call with `this` adjusted by 0xfc — which is also what lets the
-//     store to +0x1e8 be written as `mov %edx,0xec(%ecx)` off the adjusted
-//     register.
-void CServerWorldFull::Clear()
-{
-	m_vBoxMin.Init();
-	m_vBoxMax.Init();
-
-	m_LightHead.TieOff();
-	m_n0f4 = 0;
-	m_f0f8 = 0.0f;
-
-	m_vMin.Init();
-	m_vMax.Init();
-	m_v15c.Init();
-
-	m_n180 = 0;
-	m_n184 = 0;
-
-	m_n1b0 = 0;
-	m_n1b4 = 0;
-	m_pWorldName = LTNULL;
-
-	m_Link1bc.TieOff();
-
-	m_n1c8 = 0;
-	m_bLoaded = 0;
-
-	m_Link1d0.TieOff();
-	m_Link1dc.TieOff();
-
-	m_n1e8 = 0;
-
-	m_SubFC.Clear();
-}
-
-// The world loader's own helpers. Names are ours; nothing in the image names
-// them, and each one's prototype comes from what Load's call site pushes.
-// Six of the seven are reconstructed below; the seventh, 0x100083c9, is not,
-// and the note above its declaration says why.
-//
-//   0x10009be4 — the no-op the request's hook slot defaults to. /OPT:ICF
-//       folded every empty function in the image into one body, so which
-//       no-op the source named is unrecoverable (see servermgr.h).
-// 0x100079cb — the world file's fixed header: the version, two dwords the
-// caller keeps, and eight more it does not. A version that is not 66 is a
-// refused file and nothing further is read.
-//
-// The eight throwaway reads all go through one local, and that local lives in
-// the dead `pStream` parameter slot — pStream is cached in %esi at the top
-// and its slot never read again, which is why the function has an `ebp` frame
-// and no `sub %esp` at all. They are written out eight times because /O1
-// does not unroll: a loop would still be a loop in the bytes. The size 4 is
-// hoisted into %edi (`push $0x4; pop %edi`) and pushed eleven times from
-// there (name ours).
 int w_ReadWorldHeader(class ILTStream* pStream, uint32* pnVersion, uint32* pn2,
                       uint32* pn3)
 {
@@ -5354,1033 +3878,18 @@ int w_GetAmbientLight(char* pWorldName, LTVector* pColor)
 
 	return 0;
 }
-void w_SetupPointShade(CWorldSubFC* pShade, char* pName, LTVector* pMin,
-                       LTVector* pMax, LTVector* pColor);
-// 0x100083c9 — NOT RECONSTRUCTED (3683 bytes), and the reason is where it
-// belongs rather than how hard it is: the class it fills is worldbsp.h's
-// CWorldBsp, whose 0x150 bytes are already laid out there field by field, so
-// this function's home is worldbsp.cpp and not this file. Reconstructing it
-// here would mean a second, local copy of that layout. What was read off the
-// bytes, so the next attempt need not start at the disassembler:
-//
-//   * cdecl, seven arguments (Load cleans 0x1c), one `ret`, and the answer is
-//     an internal code Load hands straight back — zero is success.
-//     0x8(%ebp) is the request, 0xc the world, 0x10 a flags word Load always
-//     passes zero (tested twice, at 0x10008583 and 0x10008639), 0x14 where
-//     the geometry goes, 0x18 and 0x1c the two tick accumulators and 0x20 the
-//     "this is the live copy" flag.
-//   * the frame is 0x17d8 and reached through `__chkstk`. Two CBaseCounter
-//     locals sit at -0x84 and -0x8c, both built with mode 0 (0x10005f38)
-//     before anything else happens; they are started and stopped with
-//     cnt_StartCounter/cnt_EndCounter (0x10005fe3 / 0x10005fec) and their
-//     totals go into the two accumulators. The rest of the frame is one
-//     large read buffer.
-//   * `*ppGeom` is cleared first, off the same zero register the two
-//     constructors' mode argument uses.
-//   * the world itself is `new CWorldBsp` — `push $0x150`, operator new
-//     (0x1000d25d), then the constructor at 0x1000abae, with the usual
-//     VC6 null-arm shape. The teardown paths call ~CWorldBsp (0x1000abe5)
-//     and then operator delete (0x10028ace).
-//   * then a long run of ILTStream::Read (slot 8) and ReadString (slot 0xc)
-//     calls: eight four-byte reads that all go into ONE throwaway local at
-//     -0x20, then +0x48 and +0xdc of the new world, then a 0x40-byte
-//     ReadString into +0x04 (so CWorldBsp+0x04 is a 0x40-char name), then
-//     -0x30, -0x38, -0x34, +0xb4, -0x1c, -0x2c, -0x90, -0x58, +0x84 and on.
-//     Eighty-seven of the function's 142 calls are stream reads.
-//   * twelve calls to dalloc's cleared form (0x1000d374) are the array
-//     allocations, and the collection resizes are 0x1000c470 and 0x1000c0e7
-//     — both already in collection.cpp/worldbsp.h.
-//   * eight sub-readers, one per section, all in the run immediately after
-//     this function: 0x1000922c, 0x10009250, 0x10009275, 0x100092b6 (called
-//     twice), 0x100092e4, 0x10009338 and 0x10009361. None of them is
-//     reconstructed either.
-//   * other callees worth knowing: 0x1000a663 is worldmodels.cpp's
-//     CWorldTree::Load, 0x1000ae73 is CWorldBsp::Recalc (the last thing the
-//     success path does), 0x10005d3d is CommandParser::Next, w_ReadVector
-//     above is called twice, and 0x10014533, 0x1000a8bb, 0x10007cf7 and
-//     0x1000ae73's neighbours are the rest.
-//   * the out-parameter is worldbsp.cpp's own type, CWorldBsp -- the class
-//     CWorldGeom above views -- so the declaration names the definition;
-//     the two call sites below cast their CWorldGeom* slots to it.
-class CWorldBsp;
-int  w_LoadWorldModel(WorldLoadRequest* pRequest, CServerWorldFull* pWorld,
-                      uint32 nFlags, CWorldBsp** ppGeom, uint32* pnLoadTicks,
-                      uint32* pnPrecalcTicks, int bCurrent);
-// 0x10009be4 -- the load hook a request without one of its own gets: a bare
-// `ret` (name ours).
-void w_NullLoadHook(int nParam)
-{
-}
-
-// 0x10039707 — objtypes.h's CObjRoot, the one-argument polymorphic base
-// every allocated object type is built on. Declared here rather than
-// included, because all this file needs of it is a base with a vptr and a
-// constructor taking one int: relocations are masked, so which constructor
-// the `call` reaches costs nothing, and only the SHAPE (base ctor call,
-// then the derived vptr store) has to be right (name ours).
-//
-// The slots are the world-tree object's (worldtree.cpp's CWTObj_D,
-// worldtree2.cpp's CWTObjN48C): CWorldLight's vtable is that base's with
-// slot 3 filled in -- server.dll 0x1004d354: 0x10009911 0x10009897
-// 0x10039740 0x1000989f 0x1000989c 0x10009897 0x1000bd91 0x1000bd91;
-// lithtech.exe 0x004a1fd4: 0x00424570 0x0042d1b0 0x0048c730 0x004244d0
-// 0x00432040 0x0042d1b0 0x00459f70 0x00459f70.
-class CWorldLightRoot
-{
-public:
-	CWorldLightRoot(int n);                  // 0x10039707
-
-	virtual ~CWorldLightRoot();
-
-	virtual LTBOOL WantsTree(void* pTree)        { return LTFALSE; }
-	virtual void   RemoveFromLists();            // 0x10039740 / 0x0048c730
-	virtual void   GetDims(LTVector* pMin, LTVector* pMax) = 0;
-	virtual LTBOOL WantsExtraLink()              { return LTFALSE; }
-	virtual void*  MakeExtraLink(uint32 nIndex)  { return LTNULL; }
-	virtual void   NotifyInserted(void* pObj)    {}
-	virtual void   OnFoundInBox(void* pInfo)     {}
-};
-
-// 0x10009878 — one dynamic light, 0xa0 bytes: `new` asks the engine
-// allocator for exactly that, and the constructor ties off the link at +0x5c
-// with the record itself as its data (ltlink.h's LTLink::Init2). Only the six
-// fields the reader fills are named.
-//
-// It carries a vtable of its own — the shipped constructor stores a vptr
-// AFTER the base's constructor returns, which is what a derived class with
-// its own virtuals does and nothing else does. There is no destructor of
-// its own: the vtable's deleting destructor (0x10009911) calls the base's
-// 0x10039735 directly, with no vptr store in front of it, which is the
-// compiler-generated destructor of a class that declares none.
-class CWorldLight : public CWorldLightRoot
-{
-public:
-	CWorldLight();                           // 0x10009878
-
-	// 0x1000989f / 0x004244d0 -- slot 3, the bounding box of the light's
-	// sphere (name the base's).
-	virtual void GetDims(LTVector* pMin, LTVector* pMax);
-
-	uint8    m_pad_04[0x5c - 0x04];
-	LTLink   m_Link;                         // 0x5c
-	LTVector m_vPos;                         // 0x68
-	float    m_fRadius;                      // 0x74
-	LTVector m_vColor;                       // 0x78
-	LTVector m_vDir;                         // 0x84
-	float    m_fFOVCos;                      // 0x90
-	LTVector m_vOuterColor;                  // 0x94
-};
-
-// The body, and it has to sit above w_ReadWorldLights: VC6's inliner is
-// forward-only, and the shipped /O2 reader expands this constructor in line
-// — base call, vptr store, then the three link stores (`lea 0x5c(%esi),%eax;
-// mov %eax,0x4(%eax); mov %eax,(%eax); mov %esi,0x64(%esi)`) — where
-// server.dll's /O1 copy calls 0x10009878.
-//
-// Marked `inline` for the same reason ModelWalker's constructor above is:
-// both builds are /Ob1, so an unmarked definition is never an expansion
-// candidate and hoisting it alone changes nothing. server.dll is /O1 (= /Os)
-// and declines the expansion (0x100097f4 calls 0x10009878); lithtech.exe is
-// /O2 (= /Ot) and takes it. THIS `inline` IS THE RISKIEST BYTE IN THIS FILE —
-// the body is small enough that /Os might take it after all, and that would
-// cost server.dll its w_ReadWorldLights. If it does, drop the keyword and
-// keep everything else.
-inline CWorldLight::CWorldLight() : CWorldLightRoot(1)
-{
-	// TieOff() and the data store are two statements, not LTLink::Init2:
-	// Init2 is a member call on the link, so BOTH of its stores go through
-	// the link's own pointer, and the shipped body writes the data word off
-	// the object instead — `mov %esi,0x64(%esi)` where Init2 gives
-	// `mov %esi,0x8(%eax)` against the `lea 0x5c(%esi),%eax` TieOff already
-	// needed.
-	m_Link.TieOff();
-	m_Link.m_pData = this;
-}
-
-// 0x1000989f (server.dll, 114 bytes) / 0x004244d0 (lithtech.exe, 153
-// bytes) -- slot 3 of CWorldLight's vtable: the box around the sphere.
-// Server.dll places it right after the constructor (0x10009878) and its two
-// in-class slot bodies (0x10009897, 0x1000989c), and lithtech.exe right
-// before the deleting destructor (0x00424570), so it is defined here. The
-// three `flds 0x74(%ecx)` per statement are an LTVector(r, r, r) temporary;
-// the second statement's `fadds 0x68(%ecx)` against the radius already in
-// %st(0) is VC6 reassociating the add.
-void CWorldLight::GetDims(LTVector* pMin, LTVector* pMax)
-{
-	*pMin = m_vPos - LTVector(m_fRadius, m_fRadius, m_fRadius);
-	*pMax = m_vPos + LTVector(m_fRadius, m_fRadius, m_fRadius);
-}
-
-// 0x100118a1 — the three basis vectors three euler angles stand for: it
-// builds the 4x4 with genericprop.cpp's mat_SetupEuler (0x100116ad, which
-// also takes its angles by value) and then asks the matrix for them
-// (0x1001210b, ltmatrix.h's GetBasisVectors). Declared, not reconstructed;
-// the angles go by value and the out-parameters last, in the header's
-// right/up/forward order (name ours).
-void mat_GetEulerVectors(LTVector vAngles, LTVector* pRight, LTVector* pUp,
-                         LTVector* pForward);
-
-// 0x1000992d — a light the shade grid can take directly, without a record of
-// its own: position, colour and radius straight into the grid. Declared, not
-// reconstructed (name ours).
-void w_AddFastLight(LTVector* pPos, LTVector* pColor, float fRadius,
-                    CWorldSubFC* pShade);
-
-// ======================================================================= //
-//  0x10009338, 41 bytes -- the only caller of the fold above: walk the load
-//  request's class list for a case-folded name match (lithtech.exe twin
-//  0x00423c90, which rotates the loop test to the bottom and calls rather
-//  than expands the compare, so it is not inline at /O2 either).
-//
-//  Declared in worldbsp.cpp's run of w_LoadWorldModel helpers, with the
-//  signature it was read off with there. Only the two fields reached are
-//  laid out: the link at +0x0c and the inline name at +0x10 (name ours).
-//
-//  SHIPPED POSITION: between w_LinkSurfacePoliesQT1 (0x100092e4) and
-//  w_SetNodeProjectionsQT1 (0x10009361) below, which is why it is here;
-//  its one callee, the case-folding compare at 0x1000e480, is dsi.cpp's.
-// ======================================================================= //
-
-class WorldClassQT1;
-
-LTBOOL dsi_StringsEqualUpperQ6L(char* pStr1, char* pStr2);   // dsi.cpp, 0x1000e480
-
-struct CWorldClassLinkQ6L
-{
-	uint8               m_pad_00[0x0c];
-	CWorldClassLinkQ6L* m_pNext;             // +0x0c
-	char                m_Name[1];           // +0x10
-};
-
-WorldClassQT1* w_FindWorldClassQT1(void* pList, char* pName)
-{
-	CWorldClassLinkQ6L* pClass = (CWorldClassLinkQ6L*)pList;
-
-	while (pClass)
-	{
-		if (dsi_StringsEqualUpperQ6L(pClass->m_Name, pName))
-			return (WorldClassQT1*)pClass;
-
-		pClass = pClass->m_pNext;
-	}
-
-	return LTNULL;
-}
-
-
-// ======================================================================= //
-//  0x10009361, 143 bytes — w_LoadWorldModel's sixth helper, and the last
-//  function before w_ReadWorldLights below.  worldbsp.cpp declares it in the
-//  run of six it read off that function's call sites; this is the
-//  reconstruction.
-//
-//  Every tree node gets a projection code in its byte at +0x17: 6 unless
-//  the node's plane normal is within 0.99999 of an axis, in which case
-//  0..5 says which axis and which way.  The whole test is skipped (code 6
-//  everywhere) unless the third argument is set.
-//
-//  The two constants are hoisted out of the loop into %st -- 0x1004d34c
-//  (+0.99999f) first and 0x1004d348 (-0.99999f) second, so the negative one
-//  sits in %st(0) -- and the pair is popped with two `fstp %st(0)` after
-//  the loop.  Both comparisons per axis therefore read a register: the
-//  positive test is `fcomp %st(2)` on the loaded component and the negative
-//  one is `fcoms (%edx)` against the constant already in %st(0), operands
-//  reversed.  That is the ordinary spelling of the two `if`s below; nothing
-//  in the source says "reverse this one".
-// ======================================================================= //
-
-// One world-tree node, 0x18 bytes.  worldbsp.h's CWorldItem18 is the same
-// record -- its +0x00 dword is this pointer and its m_y is this byte -- but
-// that header reaches the whole tree, so the two fields this function needs
-// get a local view instead (names ours).
-class CWorldTreeNodeQT1
-{
-public:
-	CWorldPolyRec* m_pPoly;                  // 0x00
-	uint8          m_pad_04[0x17 - 0x04];
-	uint8          m_nProjection;            // 0x17
-};
-
-void w_SetNodeProjectionsQT1(void* pNodes, uint32 nNodes, int bCurrent)
-{
-	CWorldTreeNodeQT1* pNode;
-	LTPlane* pPlane;
-	uint32 i;
-
-	pNode = (CWorldTreeNodeQT1*)pNodes;
-
-	for (i = 0; i < nNodes; i++)
-	{
-		pNode->m_nProjection = 6;
-
-		if (bCurrent)
-		{
-			pPlane = pNode->m_pPoly->m_pSurface->m_pPlane;
-
-			if (pPlane->m_Normal.x > 0.99999f)
-				pNode->m_nProjection = 0;
-			else if (pPlane->m_Normal.x < -0.99999f)
-				pNode->m_nProjection = 1;
-			else if (pPlane->m_Normal.y > 0.99999f)
-				pNode->m_nProjection = 2;
-			else if (pPlane->m_Normal.y < -0.99999f)
-				pNode->m_nProjection = 3;
-			else if (pPlane->m_Normal.z > 0.99999f)
-				pNode->m_nProjection = 4;
-			else if (pPlane->m_Normal.z < -0.99999f)
-				pNode->m_nProjection = 5;
-		}
-
-		pNode++;
-	}
-}
-
-
-// 0x10009466 — the world's lights, out of the same object list
-// sm_LoadWorldObjects reads: every record whose class is Light, DirLight or
-// ObjectLight has its properties walked, and what comes out either goes
-// straight into the point-shade grid or becomes a CWorldLight on the world's
-// own list. Everything else is skipped by seeking to the record's end.
-//
-// Read off the bytes rather than guessed:
-//
-//   * one 0x100-byte buffer serves both the class name and the property
-//     names, and the property-type byte is a one-byte local living in the
-//     dead pStream parameter slot (at 0xb(%ebp), pStream itself being cached
-//     in %ebx).
-//   * the vector zeroes are `VEC_INIT`, i.e. one chained assignment: a fresh
-//     `fldz` per component and the components stored z, y, x. Three separate
-//     `= 0.0f` statements would store x, y, z.
-//   * the property copies are `VEC_COPY` (three `mov` pairs, componentwise)
-//     where the copies into the record are whole-struct assignments (`movsl`
-//     runs). Both spellings are in the shipped code and they are not
-//     interchangeable.
-//   * `bFast` is initialised ONCE, before the object loop — its `movl $0x1`
-//     is in the prologue — so a FastLightObjects property on one object
-//     still applies to every later object in the file that does not carry
-//     one. `bLightObjects` is reset per object. That asymmetry is in the
-//     shipped bytes, not ours.
-//   * the property loop's entry guard jumps PAST the `if (bLightObjects)`
-//     test rather than to it: with no properties the flag is provably still
-//     the 1 it was just given, so VC6 folded the test away on that path.
-//     That is what says the flag is set before the loop and tested after it.
-//   * a property longer than 0x80 bytes is not read at all — the record is
-//     abandoned by seeking to its end — and the loop then carries on against
-//     a stale value buffer.
-//   * the FOV is `cos()` of half the angle in radians. 0x1003f5f4 contains
-//     `fcos` and 0x1003f924 contains `fsin`, which settles which CRT entry
-//     is which.
-void w_ReadWorldLights(class ILTStream* pStream, CServerWorldFull* pWorld,
-                       CWorldSubFC* pShade)
-{
-	char     sName[0x100];
-	LTVector vUp;
-	LTVector vRight;
-	uint8    value[0x80];
-	LTVector vForward;
-	uint32   nPropFlags;
-	LTVector vOuterColor;
-	LTVector vDir;
-	LTVector vPos;
-	LTVector vColor;
-	uint32   nNumProps;
-	uint32   nPos;
-	int      bLightObjects;
-	float    fFOVCos;
-	int      bFast = 1;
-	uint32   nNumObjects;
-	uint32   i;
-	float    fRadius;
-	uint32   j;
-	uint16   nLen;
-	uint16   nRecordSize;
-	uint8    nType;
-	CWorldLight* pLight;
-
-	pStream->Read(&nNumObjects, 4);
-
-	for (i = 0; i < nNumObjects; i++)
-	{
-		pStream->Read(&nRecordSize, 2);
-		pStream->GetPos(&nPos);
-		pStream->ReadString(sName, sizeof(sName));
-
-		if (strcmp(sName, "Light") == 0 ||
-		    strcmp(sName, "DirLight") == 0 ||
-		    strcmp(sName, "ObjectLight") == 0)
-		{
-			// fFOVCos is the LAST of the five, after the direction
-			// vector and not before it: the /O2 block stores 0x54, 0x50,
-			// 0x4c (the vector, z-y-x) and only then -1.0f into 0x48. /O1
-			// turns the vectors into fldz/fstps pairs and wedges both
-			// integer stores into their latency slots, so it shows the
-			// same bytes either way.
-			VEC_INIT(vColor);
-			fRadius = 0.0f;
-			bLightObjects = 1;
-			VEC_INIT(vDir);
-			fFOVCos = -1.0f;
-
-			pStream->Read(&nNumProps, 4);
-
-			for (j = 0; j < nNumProps; j++)
-			{
-				pStream->ReadString(sName, sizeof(sName));
-				pStream->Read(&nType, 1);
-				pStream->Read(&nPropFlags, 4);
-				pStream->Read(&nLen, 2);
-
-				if (nLen > 0x80)
-					pStream->SeekTo(nPos + nRecordSize);
-				else
-					pStream->Read(value, nLen);
-
-				if (nType == 3 && strcmp(sName, "LightRadius") == 0)
-				{
-					fRadius = *(float*)value;
-				}
-				else if (nType == 2 && (strcmp(sName, "LightColor") == 0 ||
-				                        strcmp(sName, "InnerColor") == 0))
-				{
-					VEC_COPY(vColor, *(LTVector*)value);
-				}
-				else if (nType == 2 && strcmp(sName, "OuterColor") == 0)
-				{
-					VEC_COPY(vOuterColor, *(LTVector*)value);
-				}
-				else if (nType == 1 && strcmp(sName, "Pos") == 0)
-				{
-					VEC_COPY(vPos, *(LTVector*)value);
-				}
-				else if (nType == 5 && strcmp(sName, "LightObjects") == 0)
-				{
-					bLightObjects = *(char*)value;
-				}
-				else if (nType == 5 && strcmp(sName, "FastLightObjects") == 0)
-				{
-					bFast = *(char*)value;
-				}
-				else if (nType == 7 && strcmp(sName, "Rotation") == 0)
-				{
-					mat_GetEulerVectors(*(LTVector*)value, &vRight, &vUp,
-					                    &vForward);
-
-					vDir = vForward;
-				}
-				else if (nType == 3 && strcmp(sName, "FOV") == 0)
-				{
-					fFOVCos = (float)cos(*(float*)value *
-					                     (float)(MATH_PI / 360.0f));
-				}
-			}
-
-			if (bLightObjects)
-			{
-				if (bFast)
-				{
-					w_AddFastLight(&vPos, &vColor, fRadius, pShade);
-				}
-				else
-				{
-					pLight = new CWorldLight;
-
-					if (pLight)
-					{
-						pLight->m_vColor      = vColor;
-						pLight->m_vOuterColor = vOuterColor;
-						pLight->m_vPos        = vPos;
-						pLight->m_fRadius     = fRadius;
-						pLight->m_vDir        = vDir;
-						pLight->m_fFOVCos     = fFOVCos;
-
-						pWorld->m_LightHead.AddAfter(&pLight->m_Link);
-					}
-				}
-			}
-		}
-		else
-		{
-			pStream->SeekTo(nPos + nRecordSize);
-		}
-	}
-
-	pWorld->AddLights(&pWorld->m_LightHead);
-}
-
-
-// One sample of the point-shade grid: four bytes, and only three of them are
-// ever written. The fourth is left holding whatever the stack slot the local
-// occupies happened to contain — the high byte of the `pColor` parameter,
-// which is dead by then — and the whole four bytes are then written into
-// every cell of the grid. That is in the shipped bytes, not ours: the three
-// stores go to +2, +1 and +0 of a four-byte slot and the fill reads the slot
-// as a dword. Names ours.
-class CShadeSample
-{
-public:
-	uint8 m_b;                               // 0x00
-	uint8 m_g;                               // 0x01
-	uint8 m_r;                               // 0x02
-	uint8 m_a;                               // 0x03  never assigned
-};
-
-// 0x10026350 — the grid's cell size for a named world, off the world's own
-// properties. Declared, not reconstructed; it answers a float and takes the
-// name (name ours).
-float w_GetShadeCellSize(char* pWorldName);
-
-// 0x10058360 — a running total of the grid cells every world has taken. The
-// count is added, not the byte size (name ours). It is worldbsp.cpp's g_WorldBytes.
-extern uint32 g_WorldBytes;                 // worldbsp.cpp defines it
-
-// 0x100093f0 — build the world's point-shade grid: size it from the two
-// corners and the world's own cell size, allocate one sample per cell and
-// fill every one of them with the colour the properties gave.
-//
-// Read off the bytes rather than guessed:
-//
-//   * the colour's three components are converted with `__ftol` and only the
-//     low byte of each is kept, so the source casts to a byte; the
-//     conversions run in x, y, z order and the stores land on +2, +1, +0.
-//   * the local sample lives in the dead `pColor` argument slot, which is
-//     why the function has an `ebp` frame and no `sub %esp`.
-//   * the cell size is computed *before* the two corners are pushed —
-//     right-to-left argument evaluation — and its `push` of the world name
-//     doubles as the four bytes the float argument then goes into, which is
-//     how the pending cdecl cleanup disappears.
-//   * the allocation's null check guards the fill and the running total but
-//     not the store into the object: the pointer is stored either way.
-void w_SetupPointShade(CWorldSubFC* pShade, char* pName, LTVector* pMin,
-                       LTVector* pMax, LTVector* pColor)
-{
-	CShadeSample sample;
-	uint32       i;
-
-	sample.m_r = (uint8)pColor->x;
-	sample.m_g = (uint8)pColor->y;
-	sample.m_b = (uint8)pColor->z;
-
-	pShade->Setup(pMin, pMax, w_GetShadeCellSize(pName));
-
-	pShade->m_pData = (CShadeSample*)dalloc(pShade->m_n04 * sizeof(CShadeSample));
-
-	if (pShade->m_pData)
-	{
-		for (i = 0; i < pShade->m_n04; i++)
-			pShade->m_pData[i] = sample;
-
-		g_WorldBytes += pShade->m_n04;
-	}
-}
-
-// 0x1000804e — read one world file into this world.
-//
-// The return value is an internal code, not an LTRESULT: 0 is success, and 3,
-// 1, 4 and 2 are the failures, in the order they appear. Everything that
-// fails after the world has started being built goes through one shared
-// `Term(); return code;` tail — the codes are materialised into a register
-// and jumped in, which is how VC6 tail-merges four identical exits.
-//
-// Read off the bytes rather than guessed:
-//
-//   * the tick counter is a CBaseCounter built with mode 0 at the very top,
-//     which is why the constructor call comes before even the null check.
-//   * the box the rest of the engine uses is the file's box grown by a
-//     hundred units each way, and the reciprocals beside it are 1.0f over
-//     each axis's extent. The grow is `_CVector::operator-(T)` and
-//     `operator+(T)` — the scalar overloads, which is why there is no
-//     twelve-byte by-value copy in front of them, only the operator's return
-//     temporary and the copy out.
-//   * the constant 100.0f is loaded once and left in %st(1) across both
-//     vector expressions, and 1.0f likewise across all three divides. That
-//     is VC6 commoning the literal, not a local.
-//   * the second geometry copy is only read when the first one's flags say
-//     bit 1, and the stream is rewound to the position GetPos gave before the
-//     first read to do it.
-//   * the debug print's threshold is 1 and the flag stored at +0x1cc is also
-//     1, and the shipped code keeps that single 1 in %esi and reuses it for
-//     both — the same register the merged failure tail returns.
-int CServerWorldFull::Load(WorldLoadRequest* pRequest)
-{
-#ifdef LT_SERVER_TIMERS
-	CBaseCounter counter(0);
-#endif
-	ILTStream*   pStream;
-	CServerWorldRec* pRec;
-	CWorldGeom*  pOriginal;
-	LTVector     vScratch;
-	uint32       nHeader24;
-	uint32       nHeader20;
-	uint32       nNameLen;
-	uint32       nNumWorlds;
-	uint32       nNextOffset;
-	uint32       nPos;
-	uint32       nLoadTicks;
-	uint32       nPrecalcTicks;
-	uint32       i;
-	int          nErr;
-
-	if (!pRequest->m_pStream)
-		return 3;
-
-	Term();
-
-	pStream = pRequest->m_pStream;
-
-	if (!pRequest->m_LoadHook)
-		pRequest->m_LoadHook = w_NullLoadHook;
-
-	if (!w_ReadWorldHeader(pStream, &nHeader24, &nHeader20, &m_n068))
-		return 1;
-
-	nLoadTicks = 0;
-	nPrecalcTicks = 0;
-
-	pStream->Read(&nNameLen, 4);
-
-	m_pWorldName = (char*)dalloc(nNameLen + 1);
-
-	if (!m_pWorldName)
-	{
-		Term();
-
-		return 4;
-	}
-
-	pStream->Read(m_pWorldName, nNameLen);
-
-	m_pWorldName[nNameLen] = 0;
-
-	pStream->Read(&m_f0f8, 4);
-
-	w_ReadVector(pStream, &m_vMin);
-	w_ReadVector(pStream, &m_vMax);
-
-	m_vBoxMin = m_vMin - 100.0f;
-	m_vBoxMax = m_vMax + 100.0f;
-
-	m_v15c.x = 1.0f / (m_vMax.x - m_vMin.x);
-	m_v15c.y = 1.0f / (m_vMax.y - m_vMin.y);
-	m_v15c.z = 1.0f / (m_vMax.z - m_vMin.z);
-
-	if (!m_Sub6C.sub_1003a473(pStream))
-	{
-		Term();
-
-		return 4;
-	}
-
-	pStream->Read(&nNumWorlds, 4);
-
-	// The two images genuinely inline differently here: server.dll CALLS
-	// 0x1000c504 (Load matches at 0x1000804e), lithtech.exe carries the
-	// body expanded (0x004224d0). Marking the one definition `inline`
-	// expands it at /O1 too and costs server.dll this Load (measured), so
-	// the /O2 image reaches an inline twin and the server the real member.
-#ifdef LT_SERVER_BUILD
-	if (!m_Worlds.SetSizeInit2(nNumWorlds, LTNULL))
-#else
-	if (!m_Worlds.SetSizeInit2Inline(nNumWorlds, LTNULL))
-#endif
-	{
-		Term();
-
-		return 4;
-	}
-
-	for (i = 0; i < nNumWorlds; i++)
-	{
-		pRec = new CServerWorldRec;
-
-		m_Worlds.m_pWorlds[i] = pRec;
-
-		if (!pRec)
-		{
-			Term();
-
-			return 4;
-		}
-
-		pStream->Read(&nNextOffset, 4);
-		pStream->GetPos(&nPos);
-
-		nErr = w_LoadWorldModel(pRequest, this, 0, (CWorldBsp**)&pRec->m_pWorldBsp,
-		                        &nLoadTicks, &nPrecalcTicks, 1);
-
-		if (nErr)
-		{
-			Term();
-
-			return nErr;
-		}
-
-		if (pRec->m_pWorldBsp->m_Flags & 2)
-		{
-			pStream->SeekTo(nPos);
-
-			nErr = w_LoadWorldModel(pRequest, this, 0, (CWorldBsp**)&pRec->m_pOriginal,
-			                        &nLoadTicks, &nPrecalcTicks, 0);
-
-			if (nErr)
-			{
-				Term();
-
-				return nErr;
-			}
-		}
-
-		if (pRec->m_pWorldBsp->_v1c())
-			m_n180 |= 2;
-
-		pRec->m_Flags |= 3;
-
-		pRec->m_pCurrent = pRec->m_pOriginal ? pRec->m_pOriginal : pRec->m_pWorldBsp;
-
-		pRec->m_pWorldBsp->m_iModel = (uint16)i;
-
-		pOriginal = pRec->m_pOriginal;
-
-		if (pOriginal)
-			pOriginal->m_iModel = (uint16)i;
-
-		pRequest->m_LoadHook(pRequest->m_Unknown0c);
-
-		pStream->SeekTo(nNextOffset);
-	}
-
-	w_GetAmbientLight(m_pWorldName, &vScratch);
-
-#ifdef LT_SERVER_TIMERS
-	cnt_StartCounter(&counter);
-#endif
-
-	if (!ResolvePolyKeys())
-	{
-		Term();
-
-		return 2;
-	}
-
-	ResetAll();
-
-	if (!CollectFlaggedPolies())
-	{
-		Term();
-
-		return 4;
-	}
-
-	w_SetupPointShade(&m_SubFC, m_pWorldName, &m_vMin, &m_vMax, &vScratch);
-
-	w_ReadWorldLights(pStream, this, &m_SubFC);
-
-#ifdef LT_SERVER_TIMERS
-	nPrecalcTicks += cnt_EndCounter(&counter);
-#endif
-
-	if (g_DebugLevel > 1)
-		dsi_ServerError("World load: %d ticks, precalculate: %d ticks",
-		                nLoadTicks, nPrecalcTicks);
-
-	pRequest->m_LoadHook(pRequest->m_Unknown0c);
-
-	if (pStream->ErrorStatus() != LT_OK)
-	{
-		Term();
-
-		return 2;
-	}
-
-	m_bLoaded = 1;
-
-	return 0;
-}
-
-// 0x10009e07 — every light the object list produced, handed to the
-// sub-object at +0x6c. IDENTICAL, 42 of 42 bytes.
-//
-// The walk is a plain circular-list loop off the head: `m_pNext` at +0x04,
-// and the terminator is the head itself, so the guard and the back edge are
-// the same `cmp %edi,%esi`. %ebx is pushed INSIDE the guard -- it holds
-// `&m_Sub6C`, which is hoisted out of the loop and copied into %ecx every
-// trip -- so an empty list costs two pops and nothing else. That is VC6's
-// own shrink-wrapping, not a source shape.
-//
-// Nothing here empties the list; the head is left tied off by whoever owns
-// it. The `1` is a literal at the one call site and its meaning is the
-// callee's.
-void CServerWorldFull::AddLights(LTLink* pHead)
-{
-	LTLink* pCur;
-
-	for (pCur = pHead->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-		m_Sub6C.sub_10039c43((CWorldLight*)pCur->m_pData, 1);
-}
-
-
-// 0x10009d39 — the polygon collector. Read off the bytes rather than
-// guessed:
-//
-//   * the count is the first statement in the function: the `andl $0x0` on
-//     the frame slot comes before even `mov %ecx,%esi`.
-//   * the counting pass carries no index at all — VC6 turns both of its
-//     loops into a walked pointer and a down-counter, because nothing in
-//     either body uses the subscript for anything else, and it hoists the
-//     poly run out of the inner loop. The storing pass keeps real indices
-//     and re-reads both the world table and the poly run every trip,
-//     because its store into the collection may have hit either. Same
-//     source shape, two schedules.
-//   * the count and the storing pass's outer index share the one frame
-//     dword: the count dies at the resize call and the index takes its
-//     slot.
-//   * the store is guarded by `nOut < m_nItems` as well as by the flag, so
-//     a world that gained a polygon between the two passes overflows
-//     nothing.
-//
-// Both of the world's tables are stdlith's CMoArray<T*, DefaultCache>, and
-// this function reaches them through collection.h's own accessors, not the
-// cut-down views' fields. That is what lithtech.exe (0x00424dd0, identical)
-// needs: GetSize()/Get() are inline expansions too, and with them spent
-// ahead of it the SetSize -> SetSize2 expansion keeps _DeleteAndDestroyArray
-// (0x00413050) and BaseNew (0x004131d0) as calls, as shipped. Read off the
-// views' fields directly, every helper expanded (339 bytes, the allocator's
-// two virtuals called in line). A reference local for either table hoists
-// its address into a register for the whole function instead. server.dll's
-// /O1 declines SetSize2 either way and still calls 0x1000c470.
-typedef CMoArray<CServerWorldRec*, DefaultCache> CWorldRecMoArray;
-typedef CMoArray<CWorldPolyRec*, DefaultCache>   CWorldPolyMoArray;
-
-int CServerWorldFull::CollectFlaggedPolies()
-{
-	CWorldGeom*    pData;
-	CWorldPolyRec* pPoly;
-	uint32         nCount;
-	uint32         nOut;
-	uint32         i;
-	uint32         j;
-
-	nCount = 0;
-
-	for (i = 0; i < ((CWorldRecMoArray*)&m_Worlds)->GetSize(); i++)
-	{
-		pData = ((CWorldRecMoArray*)&m_Worlds)->Get(i)->m_pWorldBsp;
-
-		for (j = 0; j < pData->m_nPolies; j++)
-		{
-			if (pData->m_pPolies[j]->m_pSurface->m_Flags & 0x10)
-				nCount++;
-		}
-	}
-
-	if (!((CWorldPolyMoArray*)&m_Polies)->SetSize(nCount))
-		return 0;
-
-	nOut = 0;
-
-	for (i = 0; i < ((CWorldRecMoArray*)&m_Worlds)->GetSize(); i++)
-	{
-		pData = ((CWorldRecMoArray*)&m_Worlds)->Get(i)->m_pWorldBsp;
-
-		for (j = 0; j < pData->m_nPolies; j++)
-		{
-			pPoly = pData->m_pPolies[j];
-
-			if ((pPoly->m_pSurface->m_Flags & 0x10) && nOut < ((CWorldPolyMoArray*)&m_Polies)->GetSize())
-			{
-				((CWorldPolyMoArray*)&m_Polies)->Get(nOut) = pPoly;
-				nOut++;
-			}
-		}
-	}
-
-	return 1;
-}
-
-// 0x1000a2e7 — resolve the key lists. Read off the bytes rather than
-// guessed:
-//
-//   * the model comes back from a virtual call on `this` (slot 2, the
-//     FindFlagged20 worldmodels.cpp already holds) and is spilled to the
-//     frame: three dwords, the model, the outer index and the outer byte
-//     offset, and the outer loop re-reads the base from the model and adds
-//     the offset every trip.
-//   * the key run's base is re-read from the record on every inner trip,
-//     because the store at the bottom of the body may have hit it.
-//   * the key's address is CSE'd off the first indexed read and then used
-//     for both the second read and the store; the poly's own pointer goes
-//     straight over the key.
-//   * all three failures share one `xor %eax,%eax` block, and it sits after
-//     the success return rather than before it.
-int CServerWorldFull::ResolvePolyKeys()
-{
-	CWorldGeom*       pData;
-	CGeomKeyList*     pList;
-	CWorldPolyKeyRec* pKey;
-	CWorldGeom*       pModel;
-	uint32            iModel;
-	uint32            iPoly;
-	uint32            i;
-	uint32            j;
-
-	pData = FindFlagged20();
-
-	if (!pData)
-		return 0;
-
-	for (i = 0; i < pData->m_nKeyLists; i++)
-	{
-		pList = &pData->m_pKeyLists[i];
-
-		for (j = 0; j < pList->m_nKeys; j++)
-		{
-			iModel = pList->m_pKeys[j].m_iModel;
-
-			if (iModel >= m_Worlds.m_nWorlds)
-				return 0;
-
-			pKey   = &pList->m_pKeys[j];
-			pModel = m_Worlds.m_pWorlds[iModel]->m_pWorldBsp;
-			iPoly  = pKey->m_iPoly;
-
-			if (iPoly >= pModel->m_nPolies)
-				return 0;
-
-			*(void**)pKey = pModel->m_pPolies[iPoly];
-		}
-	}
-
-	return 1;
-}
-
-// ======================================================================= //
-//  0x10007cf7, 150 bytes — every vertex of one polygon gets its texture
-//  coordinates.  svnew.cpp's MOVE-ME note asked for this file and the
-//  shipped layout agrees: 0x10007cf7 sits between w_ReadWorldHeader
-//  (0x100079cb) and w_FindPortalInWorld (0x10007da5), both of them here.
-//
-//  THE THREE `movsl` GROUPS ARE THE WHOLE FINDING.  ltvector.h's
-//  `operator-` and `Dot` both take their right operand BY VALUE, so each
-//  one costs a twelve-byte copy of the surface vector into a frame slot:
-//  m_vO into -0xc, m_vP into -0x18 and m_vQ into -0x24, which is exactly
-//  the 0x24 of locals the frame reserves.  Three vectors, three copies,
-//  and no other local.
-//
-//  The delta itself is never stored.  Its three components stay in %st
-//  across BOTH dot products -- the second one reuses %st(1)/%st(2)/%st(3)
-//  and the pair is popped with two `fstp %st(0)` at the bottom of the loop
-//  -- which is what says one named vector feeds two Dots rather than the
-//  subtraction being written twice.
-//
-//  The sums come out (y*v.y + z*v.z) + (x*v.x) against Dot's own
-//  (x*v.x) + (y*v.y) + (z*v.z); add order in an FPU sequence is the
-//  scheduler's choice and ltvector.h is not ours to respell.
-//
-//  The bound is a pointer, not an index: GetVertexCount's answer is
-//  multiplied by 24 into an END pointer (`lea (%eax,%eax,2),%eax` then
-//  `lea (%ebx,%eax,8),%edx`) and both the entry guard and the back edge
-//  compare against it with `je`/`jne`.  An indexed loop gives `jb`.
-//
-//  GetVertexCount itself stays where it is (svnew.cpp, 0x10007d8d) so that
-//  file keeps its match; the class is declared here under the same name so
-//  the call links.  The one field this view adds over svnew's copy is the
-//  surface pointer at +0x28, which pads over there.
-// ======================================================================= //
-
-// One vertex record of a world polygon, 0x18 bytes.  svnew.cpp's
-// WorldPolyVertexView is the same record with the two coordinates padded
-// over (names ours).
-class CWorldPolyVertexQT1
-{
-public:
-	LTVector* m_pPos;                        // 0x00
-	float     m_fU;                          // 0x04
-	float     m_fV;                          // 0x08
-	uint8     m_pad_0c[0x18 - 0x0c];
-};
-
-class CWorldPolyOwnerView
-{
-public:
-#ifdef LT_SERVER_BUILD
-	uint32 GetVertexCount();                 // 0x10007d8d, svnew.cpp
-#else
-	// lithtech.exe has no out-of-line copy of svnew.cpp's body (its bytes
-	// are nowhere in the image) and no svnew.cpp: the /O2 build expands it
-	// wherever it is used, so here it is that body, in the class.
-	uint32 GetVertexCount()
-	{
-		if (m_pVertexRun != m_Vertices)
-			return m_nVertices + m_nExtraVertices;
-
-		return m_nVertices;
-	}
-#endif
-
-	uint8  m_pad_000[0x28];
-	CWorldSurfaceRec* m_pSurface;            // 0x28
-	uint8  m_pad_02c[0x4c - 0x2c];
-	CWorldPolyVertexQT1* m_pVertexRun;       // 0x4c  (svnew.cpp's names)
-	uint16 m_nVertices;                      // 0x50
-	uint16 m_nExtraVertices;                 // 0x52
-	CWorldPolyVertexQT1 m_Vertices[1];       // 0x54
-};
-
-// worldbsp.cpp's w_LoadWorldModel calls the function below with a
-// `CWorldPart*`, so that is the parameter's type and it has to mangle that
-// way for the link. Empty single inheritance at offset zero: the base
-// conversion is free (cl 8447 spells a non-zero one `neg/sbb/and`, and
-// there is none here), and GetVertexCount still mangles as the base's, so
-// it reaches svnew.cpp's definition.
-class CWorldPart : public CWorldPolyOwnerView
-{
-};
-
-void w_SetupPolyTexCoordsQT1(CWorldPart* pPoly)
-{
-	CWorldPolyVertexQT1* pVert;
-	CWorldPolyVertexQT1* pEnd;
-	LTVector vDelta;
-
-	pVert = pPoly->m_Vertices;
-	pEnd  = pVert + pPoly->GetVertexCount();
-
-	while (pVert != pEnd)
-	{
-		vDelta = *pVert->m_pPos - pPoly->m_pSurface->m_vO;
-
-		pVert->m_fU = vDelta.Dot(pPoly->m_pSurface->m_vP);
-		pVert->m_fV = vDelta.Dot(pPoly->m_pSurface->m_vQ);
-
-		pVert++;
-	}
-}
-
-
-// 0x10007da5 — one world's portal table, by name: a run of 0x24-byte records
-// at CWorldBsp+0xb0 with the count at +0xb4 (what worldbsp.h calls m_pChunks
-// and m_nChunks), each record's first dword the portal's name. It writes the
-// portal's index through its third argument when that is not null and hands
-// back the record itself (name ours).
-//
-// The walk keeps both a byte offset (`add $0x24`) and an index it compares
-// against the count, which is VC6's strength reduction of a subscripted
-// source loop — write `m_pPortals[i]`, not a walked pointer. The record's
-// address is then recomputed from the base and the index for the return
-// rather than taken from the offset register. stricmp gets the record's name
-// first and the caller's second: `push pName` (the outer argument) comes
-// before `push (%ebx,%eax,1)`, and cdecl pushes right to left.
 WorldPortal* w_FindPortalInWorld(CWorldGeom* pBsp, char* pName, uint32* pnPortal)
 {
 	uint32 i;
 
-	for (i = 0; i < pBsp->m_nPortals; i++)
+	for (i = 0; i < pBsp->m_nChunks; i++)
 	{
-		if (strcmp(pBsp->m_pPortals[i].m_pName, pName) == 0)
+		if (strcmp(pBsp->m_pChunks[i].m_pName, pName) == 0)
 		{
 			if (pnPortal)
 				*pnPortal = i;
 
-			return (WorldPortal*)&pBsp->m_pPortals[i];
+			return (WorldPortal*)&pBsp->m_pChunks[i];
 		}
 	}
 
@@ -6395,12 +3904,12 @@ WorldPortal* w_FindPortalInWorld(CWorldGeom* pBsp, char* pName, uint32* pnPortal
 WorldPortal* w_FindPortal(CServerWorld* pWorld, char* pName,
                           uint32* pnWorld, uint32* pnPortal)
 {
-	CServerWorldFull* pThis = (CServerWorldFull*)pWorld;
+	CServerWorld* pThis = (CServerWorld*)pWorld;
 	uint32            i;
 
-	for (i = 0; i < pThis->m_Worlds.m_nWorlds; i++)
+	for (i = 0; i < pThis->m_Worlds.m_nElements; i++)
 	{
-		WorldPortal* pPortal = w_FindPortalInWorld(pThis->m_Worlds.m_pWorlds[i]->m_pWorldBsp,
+		WorldPortal* pPortal = w_FindPortalInWorld(pThis->m_Worlds.m_pArray[i]->m_pWorldBsp,
 		                                           pName, pnPortal);
 
 		if (pPortal)
@@ -6498,7 +4007,7 @@ void Model::CModelSub1D4::sub_10016501()
 	m_pOwner28 = 0;
 	m_pName    = "";
 
-	m_Array00.SetSize2(0, (LAlloc*)pModel->m_pDataBlock);
+	m_Array00.SetSize2(0, pModel ? pModel->GetAlloc() : &g_DefAlloc);
 }
 
 
@@ -6522,7 +4031,7 @@ AnimInfo::AnimInfo()
 // model back-pointer cleared. The vtable store between the member's
 // constructor and the body is the ordinary shape of a polymorphic class's
 // constructor and is what pairs this with the destructor below.
-Model::CModelSub20C::CModelSub20C()
+ModelNode::ModelNode()
 {
 	sub_10016a00();
 
@@ -6532,7 +4041,7 @@ Model::CModelSub20C::CModelSub20C()
 
 // 0x10016990 — the same record built against a model, and the constructor the
 // factory below runs on freshly allocated memory.
-Model::CModelSub20C::CModelSub20C(Model* pModel)
+ModelNode::ModelNode(Model* pModel)
 {
 	sub_10016a00();
 
@@ -6542,7 +4051,7 @@ Model::CModelSub20C::CModelSub20C(Model* pModel)
 
 // 0x10016971 — slot 0x04: `ret $0xc`, three dwords of arguments and nothing
 // done with them. The argument count is the only thing the bytes say.
-void Model::CModelSub20C::_v04(uint32 a, uint32 b, uint32 c)
+void ModelNode::_v04(uint32 a, uint32 b, uint32 c)
 {
 }
 
@@ -6550,9 +4059,9 @@ void Model::CModelSub20C::_v04(uint32 a, uint32 b, uint32 c)
 // 0x10016a37 — slot 0x08: one of these on the heap. The literal 0xb4 the
 // allocator is asked for is this class's own size, which is where the extent
 // in the header comes from, and the null arm is `new`'s own.
-Model::CModelSub20C* Model::CModelSub20C::Create(Model* pModel)
+ModelNode* ModelNode::Create(Model* pModel)
 {
-	return new CModelSub20C(pModel);
+	return new ModelNode(pModel);
 }
 
 
@@ -6562,7 +4071,7 @@ Model::CModelSub20C* Model::CModelSub20C::Create(Model* pModel)
 // is the function that names the collection at +0x18 as the child list, and
 // the reason the model can size its node tables before it has walked the
 // tree.
-uint32 Model::CModelSub20C::sub_10016a9b()
+uint32 ModelNode::sub_10016a9b()
 {
 	uint32 nNodes = 1;
 	uint32 i;
@@ -6578,7 +4087,7 @@ uint32 Model::CModelSub20C::sub_10016a9b()
 // model, re-home the name on it, and pass the same model down to every child
 // record. The walk is what identifies the collection's element type — it
 // calls slot 0x0c, which is this function.
-void Model::CModelSub20C::SetModel(Model* pModel)
+void ModelNode::SetModel(Model* pModel)
 {
 	uint32 i;
 
@@ -6594,9 +4103,9 @@ void Model::CModelSub20C::SetModel(Model* pModel)
 // because Model's own release (0x10017016) calls it too: the collection at
 // +0x18 goes back to the owning model's data block rather than to g_DefAlloc,
 // and then the record is reset to the state the constructor left it in.
-void Model::CModelSub20C::sub_100169dd()
+void ModelNode::sub_100169dd()
 {
-	FreeArrayElements(&m_Array18, (LAlloc*)m_pModel->m_pDataBlock);
+	FreeArrayElements(&m_Array18, m_pModel ? m_pModel->GetAlloc() : &g_DefAlloc);
 
 	sub_10016a00();
 }
@@ -6615,14 +4124,15 @@ void Model::CModelSub20C::sub_100169dd()
 // both; in other positions it was worse. The header still spells the three
 // as separate floats, hence the cast — an LTVector member at +0x04 is what
 // the source almost certainly had.
-void Model::CModelSub20C::sub_10016a00()
+void ModelNode::sub_10016a00()
 {
 	m_n10 = 0;
 	m_b12 = 0;
 
 	m_pName = "";
 
-	((LTVector*)&m_f04)->Init();
+	m_f04 = m_f08 = m_f0c = 0;
+    m_iParent = 0xffffffff;
 
 	m_Mat2c.Identity();
 	m_Mat6c.Identity();
@@ -6633,7 +4143,7 @@ void Model::CModelSub20C::sub_10016a00()
 // one body call, and then the collection at +0x18 destroyed by the compiler.
 // The vtable it restores is the one the constructor stores, which is what
 // pairs the two.
-Model::CModelSub20C::~CModelSub20C()
+ModelNode::~ModelNode()
 {
 	sub_100169dd();
 }
@@ -6648,28 +4158,6 @@ Model::CModelSub20C::~CModelSub20C()
 // The setter zeroes the first dword and takes the second by argument, and
 // answers 1 unconditionally -- `push $1; pop %eax`, which is a byte shorter
 // than moving the constant.
-Model::CModelSub14::CModelSub14()
-{
-	Init(0);
-}
-
-// 0x10024404 — the same five-byte tail `jmp` shape as CMoDataRef's.
-Model::CModelSub14::~CModelSub14()
-{
-	sub_10024419();
-}
-
-LTBOOL Model::CModelSub14::Init(uint32 nValue)
-{
-	m_Unknown00 = 0;
-	m_Unknown04 = nValue;
-
-	return LTTRUE;
-}
-
-
-
-
 // One row of the seven-entry name/float* table sub_100176dc builds on its
 // own stack (name ours).  It has to be a file-scope type: the two pointer
 // members and the eight-byte stride are read straight off the frame, and a
@@ -6806,7 +4294,7 @@ void Model::sub_100176dc()
 			// different statement.
 			for (i = 0; i < 7; i++)
 			{
-				if (stricmp(props[i].m_pName, parser.m_ArgPointers[0]) == 0)
+				if (nolf::ascii_compare(props[i].m_pName, parser.m_ArgPointers[0]) == 0)
 					*props[i].m_pValue = (float)atof(parser.m_ArgPointers[1]);
 			}
 
@@ -6822,11 +4310,11 @@ void Model::sub_100176dc()
 			// `fstps (%esp) ; mov %ebx,%ecx ; call`); /O2 keeps both
 			// copies (0x00447354 and 0x00447390).  That is the /O1-vs-/O2
 			// signature and it needs no source support.
-			if (stricmp("FadeRangeMin", parser.m_ArgPointers[0]) == 0)
+			if (nolf::ascii_compare("FadeRangeMin", parser.m_ArgPointers[0]) == 0)
 			{
 				sub_10017add((float)atof(parser.m_ArgPointers[1]), m_f0b8);
 			}
-			else if (stricmp("FadeRangeMax", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("FadeRangeMax", parser.m_ArgPointers[0]) == 0)
 			{
 				sub_10017add(m_f0b0, (float)atof(parser.m_ArgPointers[1]));
 			}
@@ -6843,7 +4331,7 @@ void Model::sub_100176dc()
 			// table name) FIRST: shipped pushes parser.m_ArgPointers[0]
 			// before the immediate (0x100177e1, 0x1001780e, 0x10017848)
 			// and before -0x4(%esi) in the table loop (0x100177b3).
-			else if (stricmp("FovXOffset", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("FovXOffset", parser.m_ArgPointers[0]) == 0)
 			{
 				m_f144 = (float)MATH_DEGREES_TO_RADIANS(
 				             (float)atof(parser.m_ArgPointers[1]));
@@ -6851,7 +4339,7 @@ void Model::sub_100176dc()
 			}
 			// -- 0x10017885; its flag store tail-merges into the one above
 			//    at 0x100178b7 `jmp 0x10017876`.
-			else if (stricmp("FovYOffset", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("FovYOffset", parser.m_ArgPointers[0]) == 0)
 			{
 				m_f148 = (float)MATH_DEGREES_TO_RADIANS(
 				             (float)atof(parser.m_ArgPointers[1]));
@@ -6867,19 +4355,19 @@ void Model::sub_100176dc()
 		// a source difference.
 		else if (parser.m_nArgs == 1)
 		{
-			if (stricmp("NoAnimation", parser.m_ArgPointers[0]) == 0)
+			if (nolf::ascii_compare("NoAnimation", parser.m_ArgPointers[0]) == 0)
 			{
 				m_Unknown0ac = 1;            // 0x100178da
 			}
-			else if (stricmp("ShadowEnable", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("ShadowEnable", parser.m_ArgPointers[0]) == 0)
 			{
 				m_Unknown0d4 = 1;            // 0x100178fb
 			}
-			else if (stricmp("SpecularEnable", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("SpecularEnable", parser.m_ArgPointers[0]) == 0)
 			{
 				m_Unknown14c = 1;            // 0x1001791c
 			}
-			else if (stricmp("Rigid", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("Rigid", parser.m_ArgPointers[0]) == 0)
 			{
 				m_Unknown150 = 1;            // 0x10017941
 			}
@@ -6889,7 +4377,7 @@ void Model::sub_100176dc()
 		{
 			// 0x10017959.  Two atof calls whose cdecl cleanups batch into
 			// two `pop %ecx` at 0x10017991 -- /Os spelling `add $0x8,%esp`.
-			if (stricmp("FadeSpriteSize", parser.m_ArgPointers[0]) == 0)
+			if (nolf::ascii_compare("FadeSpriteSize", parser.m_ArgPointers[0]) == 0)
 			{
 				m_f0c4 = (float)atof(parser.m_ArgPointers[1]);
 				m_f0c8 = (float)atof(parser.m_ArgPointers[2]);
@@ -6906,7 +4394,7 @@ void Model::sub_100176dc()
 			// 0x10017ac5`), which is nested `if`s and not an && chain: an
 			// && chain would have to evaluate FindAnim's arguments before
 			// m_n0f8 = -1 was stored.
-			else if (stricmp("NormalRef", parser.m_ArgPointers[0]) == 0)
+			else if (nolf::ascii_compare("NormalRef", parser.m_ArgPointers[0]) == 0)
 			{
 				m_Unknown13c = 0;
 				m_n0f4 = -1;
@@ -6956,7 +4444,7 @@ void Model::sub_100176dc()
 		{
 			// 0x10017a79.  Three atof calls, one cleanup (`add $0xc,%esp`
 			// at 0x10017ac2), components in x, y, z order.
-			if (stricmp("ShadowCenterOffset", parser.m_ArgPointers[0]) == 0)
+			if (nolf::ascii_compare("ShadowCenterOffset", parser.m_ArgPointers[0]) == 0)
 			{
 				m_Vec0e8.x = (float)atof(parser.m_ArgPointers[1]);
 				m_Vec0e8.y = (float)atof(parser.m_ArgPointers[2]);
@@ -6975,568 +4463,10 @@ void Model::sub_100176dc()
 // Both roots go through named locals: passed as bare member reads they fold
 // into `push 0x2c0(%reg)` (31 bytes), where shipped loads each into a
 // register first (0x10017b71, 0x10017b77).  IDENTICAL on both images.
-uint32 Model::sub_10017b69(Model* pModel, uint32* pOut)
+uint32 Model::sub_10017b69(Model* pModel, ModelNode** pOut)
 {
-	CModelSub20C* pMine   = m_pSub20c;
-	CModelSub20C* pTheirs = pModel->m_pSub20c;
+	ModelNode* pMine   = m_pSub20c;
+	ModelNode* pTheirs = pModel->m_pSub20c;
 
-	return mod_SameNodeTree(pMine, pTheirs, (CModelSub20C**)pOut);
-}
-
-
-// The two shade-grid views w_AddFastLight walks. shade.cpp carries the
-// same pair under Q3S names; they are .cpp-local there, so this file needs
-// its own copy. Offsets are identical.
-// src/engine/server/commonmodel.cpp:4368 verbatim.
-class CShadeSampleQB2
-{
-public:
-	uint8 m_b;                               // 0x00
-	uint8 m_g;                               // 0x01
-	uint8 m_r;                               // 0x02
-	uint8 m_a;                               // 0x03  never assigned
-};
-
-// src/engine/server/commonmodel.cpp:3416's CWorldSubFC with the two changes
-// REPORT item 1 asks for: the three clamp bounds SIGNED and INDEXABLE.
-//
-// What this function proves about the layout, over and above w_GetPointShade:
-//   +0x14  m_nMax[0..2]  walked as an array, `lea 0x14(%esi),%ebx` then
-//                        `add $0x4,%ebx` per axis (0x100099b2, 0x100099ec;
-//                        client 0x00424625, 0x0042465f)
-//   +0x08  the Y stride, +0x20 the Z stride -- 0x10009a93/0x10009a9a multiply
-//                        +0x08 by y and 0x10009a8b/0x10009a96 multiply +0x20
-//                        by z, which agrees with w_GetPointShade (0x1002d014
-//                        imuls +0x08 by iy, 0x1002d017 imuls +0x20 by iz).
-//   +0x24  the cell size (0x10009a18/0x10009a33/0x10009a48, one per axis)
-//   +0x30  its reciprocal (0x10009946/0x10009a04-ish per axis)
-//   +0x3c  the grid origin (0x10009943, 0x10009a1b, ...)
-class CWorldSubFCQB2
-{
-public:
-	CShadeSampleQB2* m_pData;                // 0x00
-	uint32   m_n04;                          // 0x04
-	int32    m_nYStride;                     // 0x08
-	uint32   m_n0c;                          // 0x0c
-	uint32   m_n10;                          // 0x10
-	int32    m_nMax[3];                      // 0x14, 0x18, 0x1c
-	int32    m_nZStride;                     // 0x20
-	// NOT volatile, and w_AddFastLight is what says so: the three cell
-	// walks spell `(float)n * m_v24?` and the shipped code reads that as
-	// `fildl <n>; fmuls 0x2?(%esi)`. A volatile member cannot be the
-	// memory operand of the multiply -- VC6 has to load it first and then
-	// integer-multiply the counter into it (`flds 0x2?(%esi); fimull <n>`),
-	// which is the same instruction count in the other order and three
-	// residual blocks. CWorldSubFC above reaches the same conclusion from
-	// its own Setup.
-	float    m_v24x, m_v24y, m_v24z;         // 0x24  the cell size
-	LTVector m_vScale;                       // 0x30  its reciprocal
-	LTVector m_vBase;                        // 0x3c  the grid origin
-};
-
-
-// ======================================================================= //
-//  server.dll 0x1000992d (695 bytes, cdecl, four arguments, one `ret`)
-//  lithtech.exe 0x00424590 (820 bytes, esp frame)
-//
-//  ADD ONE LIGHT STRAIGHT INTO THE POINT-SHADE GRID.
-//
-//  Declared commonmodel.cpp:4183 and called from w_ReadWorldLights
-//  (commonmodel.cpp:4328, shipped 0x100097d9 -- the only `call` edge to
-//  0x1000992d in the whole of .text) in the `bFast` arm, which is
-//  the only caller in either image (client 0x004243c1, inside the client's
-//  own w_ReadWorldLights at 0x00423e00).  Its 695 bytes sit immediately
-//  after w_ReadWorldLights' last byte, so its home in the file is directly
-//  below that function.
-//
-//  WHAT IT DOES.  Turn the light's bounding cube into an integer cell range,
-//  clamp that range to the grid, and for every cell inside the sphere add
-//  colour * (1 - d/r)^2 to the cell's three bytes, clamped to 0..255.
-//
-//  ---- THE FRAME, AND BOTH IMAGES AGREE ON THE DECLARATION ORDER --------
-//
-//  server `sub $0x58,%esp` (0x10009930); client `sub $0x58,%esp`
-//  (0x00424590) -- the same 0x58 of locals either way, which is the first
-//  sign the two frames decompose the same.  w_ReadWorldLights, the
-//  byte-identical neighbour in this same TU, grows UP (the worked
-//  example of "frame-growth direction is NOT constant"), so on the server the FIRST declaration takes the LOWEST
-//  address; on the client's esp frame the first declaration takes the
-//  HIGHEST offset.  Reading both:
-//
-//   server (ebp)                       client (esp)      what
-//    -0x58  nBox[3][2]                  0x50 .. 0x64     the six bounds
-//    -0x40  vScaled  (.x never stored)  0x38             colour * ratio
-//    -0x34  vCellPos (.z never stored)  0x2c             the cell's centre
-//    -0x28  vAdd                        0x44 (.z in st)  that * ratio again
-//    -0x1c  vSample                     0x20             the cell, as floats
-//    (0x14(%ebp), the dead pShade home) 0x18             CShadeSample sample
-//    -0x10  the int->float temp         0x70 (dead arg)  (compiler's)
-//    -0x0c  fRadiusSq                   0x14
-//    -0x08  x                           0x10
-//    -0x04  y                           0x78 (dead arg)
-//    (0x08(%ebp), the dead pPos home)   0x70 (dead arg)  z
-//
-//  server -0x58 .. -0x04 is 0x54 and the array is 0x18, which fills 0x58
-//  exactly with nothing left over; client 0x10 .. 0x67 is 0x58 with one
-//  4-byte hole at 0x1c (the slot the int->float temp would have taken had
-//  it not been coloured into the dead pColor home).  The two orders are
-//  mirror images of each other, which is what says the order is the
-//  source's and not the allocator's.
-//
-//  The three loop counters and the sample take DEAD ARGUMENT HOMES, and
-//  which one each takes differs between the images because the caching
-//  differs: the server caches pPos in %edi (0x10009939) and pShade in %esi
-//  (0x1000993c) and so has both homes free.
-//
-//  ---- WHY THE MULTIPLY HAPPENS TWICE ----------------------------------
-//
-//  0x10009adc..0x10009b05 (client 0x00424774..0x0042479d) computes
-//  colour*ratio into vScaled and then vScaled*ratio into vAdd -- TWO
-//  destinations, not one, so it is not `VEC_MULSCALAR(v, v, s)` twice.
-//  vScaled.x is never stored (its only reader is the next statement and it
-//  stays in %st), and on the client vAdd.z is never stored either, which is
-//  ordinary dead-store elimination over two named locals.  The attenuation
-//  is therefore (1 - d/r) SQUARED; that is in the shipped bytes and is not
-//  an inference.
-// ======================================================================= //
-
-void w_AddFastLight(LTVector* pPos, LTVector* pColor, float fRadius,
-                    CWorldSubFCQB2* pShade)
-{
-	int32        nBox[3][2];
-	LTVector     vScaled;
-	LTVector     vCellPos;
-	LTVector     vAdd;
-	LTVector     vSample;
-	CShadeSampleQB2 sample;
-	float        fRadiusSq;
-	int32        x, y, z;
-
-	int32        i;
-	float        fDistSq;
-	float        fRatio;
-	CShadeSampleQB2* pCell;
-
-	// -- 0x1000993f .. 0x100099ac, six `__ftol` calls (0x1003e0f0) ------ //
-	//
-	// The six stores land at -0x58, -0x54, -0x50, -0x4c, -0x48, -0x44 in
-	// that order, i.e. min,max per axis with an EIGHT-byte stride between
-	// axes -- which is what makes this one array of pairs and not two
-	// arrays of three (two arrays would walk with a stride of four in the
-	// clamp loop below, and it walks with eight).
-	//
-	// fRadius is hoisted into %st(0) by the very first FP instruction of
-	// the function (0x10009933 `flds 0x10(%ebp)`) and every `min` is
-	// `fsub %st(1),%st` against it while every `max` is `fld %st(0)` then
-	// `fadds`.  /O2, which has no such copy to hand, spells the same pair
-	// `flds pPos->x; fsubs fRadius` (0x0042459a) and `flds fRadius;
-	// fadds pPos->x` (0x004245b0).
-	//
-	// COIN-FLIP AT THIS SITE: both images load fRadius FIRST for the max,
-	// which under "fld the left operand" would make the source
-	// `fRadius + pPos->x`.  The float operand rule does NOT hold
-	// everywhere (it has been refuted elsewhere), and the matching
-	// neighbour w_GetAmbientLight offers no two-memory-operand `+` to
-	// recalibrate against, so the natural order is written and the
-	// alternative recorded here:
-	//     nBox[0][1] = (int32)((fRadius + pPos->x - ...) * ...);
-	nBox[0][0] = (int32)((pPos->x - fRadius - pShade->m_vBase.x) * pShade->m_vScale.x);
-	nBox[0][1] = (int32)((pPos->x + fRadius - pShade->m_vBase.x) * pShade->m_vScale.x);
-	nBox[1][0] = (int32)((pPos->y - fRadius - pShade->m_vBase.y) * pShade->m_vScale.y);
-	nBox[1][1] = (int32)((pPos->y + fRadius - pShade->m_vBase.y) * pShade->m_vScale.y);
-	nBox[2][0] = (int32)((pPos->z - fRadius - pShade->m_vBase.z) * pShade->m_vScale.z);
-	nBox[2][1] = (int32)((pPos->z + fRadius - pShade->m_vBase.z) * pShade->m_vScale.z);
-
-	// -- 0x100099af .. 0x100099f5 (client 0x00424621 .. 0x00424666) ----- //
-	//
-	// Strength-reduced to two pointers and a down-counter: %esi walks
-	// nBox by eight, %ebx walks pShade->m_nMax by four, and the trip count
-	// lives in the dead pShade home (`movl $0x3,0x14(%ebp)` at
-	// 0x100099b5; the client keeps it in %edi).  `for (i = 0; i < 3; i++)`
-	// is what VC6 turns into that.
-	//
-	// The clamp is LTCLAMP against a SIGNED bound: `test %ecx,%ecx; jge`
-	// then `cmp %edx,%ecx; jle` (0x100099be, 0x100099c8).  As uint32 the
-	// same source emits `jae`/`jbe`.  shade.cpp's REPORT asks for the same
-	// change from the other end.
-	for (i = 0; i < 3; i++)
-	{
-		nBox[i][0] = LTCLAMP(nBox[i][0], 0, pShade->m_nMax[i]);
-		nBox[i][1] = LTCLAMP(nBox[i][1], 0, pShade->m_nMax[i]);
-
-		// 0x100099e6 -- one compare and one store, no `else`.
-		if (nBox[i][0] > nBox[i][1])
-			nBox[i][0] = nBox[i][1];
-	}
-
-	// -- 0x100099f7 (client 0x00424668) -- between the loop and the walk. //
-	fRadiusSq = fRadius * fRadius;
-
-	// -- 0x100099f9 / 0x10009a06 / 0x10009bd4 --------------------------- //
-	for (x = nBox[0][0]; x <= nBox[0][1]; x++)
-	{
-		// 0x10009a0f -- the `fildl` is forced, so the operand order of the
-		// product is invisible here.
-		vCellPos.x = (float)x * pShade->m_v24x + pShade->m_vBase.x;
-
-		// -- 0x10009a12 / 0x10009a21 / 0x10009bc9 ----------------------- //
-		for (y = nBox[1][0]; y <= nBox[1][1]; y++)
-		{
-			vCellPos.y = (float)y * pShade->m_v24y + pShade->m_vBase.y;
-
-			// -- 0x10009a2d / 0x10009a3c / 0x10009bbe ------------------- //
-			for (z = nBox[2][0]; z <= nBox[2][1]; z++)
-			{
-				// 0x10009a45 -- vCellPos.z is computed and consumed
-				// without ever reaching its slot (-0x2c on the server,
-				// 0x34 on the client): its only reader is the line below
-				// and VC6 forwards it.  Both images elide the store.
-				vCellPos.z = (float)z * pShade->m_v24z + pShade->m_vBase.z;
-
-				// 0x10009a4e..0x10009a70.  The three differences are
-				// computed z, y, x (pushed deepest first) and then squared
-				// and summed x, y, z -- which is exactly how VC6 schedules
-				// ONE expression tree onto the x87 stack with the three
-				// repeated subtractions CSE'd, and is why this is the
-				// macro rather than three named deltas.
-				fDistSq = VEC_DISTSQR(vCellPos, *pPos);
-
-				// 0x10009a72 `fcoms -0xc(%ebp)` + `jae`: strictly less.
-				// The value stays in %st for the sqrt below and the skip
-				// path drops it with `fstp %st(0)` at 0x10009bbc.
-				if (fDistSq < fRadiusSq)
-				{
-					// 0x10009a83 calls the CRT sqrt (0x1003e424, a double
-					// pushed on the stack); the client has /Oi and spells
-					// the same source `fsqrt` inline at 0x0042470f.  That
-					// difference IS the /O1-vs-/O2 signature and confirms
-					// the two bodies are one source.
-					//
-					// THE `(float)` CAST IS LOAD-BEARING and the note
-					// that used to stand here had it backwards. `sqrt`
-					// returns a double, so without a cast the whole
-					// subtraction is double and VC6 spells the constant
-					// `fsubrl <8-byte 1.0>`; the shipped code has
-					// `fsubrs 0x1004d20c` (client 0x004a1a08), a FOUR-byte
-					// 1.0f, which only happens when the right operand is
-					// float. And the cast costs nothing: VC6 does NOT
-					// round-trip it through memory here -- `(float)sqrt(x)
-					// / r`, `(float)(sqrt(x) / r)` and a named float temp
-					// all emit the same `call _sqrt; fdivs; fsubrs` with
-					// no store in between (measured, three spellings).
-					fRatio = 1.0f - (float)sqrt(fDistSq) / fRadius;
-
-					// 0x10009a8b..0x10009aa4.  The tree the shipped code
-					// builds is ((x + z*zStride) + y*yStride) -- 0x10009a9e
-					// adds z*zStride onto x and 0x10009aa2 adds y*yStride
-					// onto that; the client agrees at 0x0042471e/0x00424725.
-					// w_GetPointShade, from the same grid, groups the other
-					// way (x + y*yStride) + z*zStride at 0x1002d033, so the
-					// grouping here is the source's and not a fixed idiom.
-					pCell = &pShade->m_pData[x + z * pShade->m_nZStride
-					                           + y * pShade->m_nYStride];
-
-					// 0x10009aad -- the cell is COPIED into a local (one
-					// dword move) and the three bytes are read back out of
-					// the copy at 0x16/0x15/0x14(%ebp), not off the cell.
-					//
-					// RESIDUAL (the whole of what is left in this
-					// function, 696 bytes against 695 and four mnemonic
-					// blocks): shipped reads this through pCell
-					// (`mov (%ebx),%eax`, two bytes) where ours re-folds
-					// the address (`mov (%eax,%ecx,4),%eax`, three), and
-					// the trailing `fsubrs` of the ratio above sinks three
-					// instructions less far -- ours lands between the two
-					// `imul`s and the adds, shipped between the `lea` and
-					// this load. The two go together: with the subtract
-					// out of the way the `lea`'s inputs are dead and the
-					// peephole takes %ebx.
-					//
-					// Measured and rejected: moving `fRatio = ...` BELOW
-					// the pCell statement does sink the subtract to the
-					// right place and makes the function size-exact at
-					// 695, but it drags the `sqrt` CALL and its `fdivs`
-					// down with it -- ten residual blocks instead of four,
-					// and the call is the one thing the shipped schedule
-					// pins early. Hoisting the index into its own int
-					// local changes nothing at all (696, same four).
-					sample = *pCell;
-
-					// 0x10009ab2..0x10009ad9 -- +2, +1, +0 into x, y, z.
-					// Each is a uint8 widened through the int->float temp
-					// at -0x10 (`mov %eax,-0x10; fildl -0x10; fstps`).
-					vSample.x = sample.m_r;
-					vSample.y = sample.m_g;
-					vSample.z = sample.m_b;
-
-					// 0x10009adc..0x10009b05 -- see the header note.
-					VEC_MULSCALAR(vScaled, *pColor, fRatio);
-					VEC_MULSCALAR(vAdd, vScaled, fRatio);
-
-					// 0x10009b07..0x10009b21.  All three adds come before
-					// any clamp, so the adds and the clamps are two
-					// statements and not three interleaved pairs.
-					//
-					// The shipped `flds vAdd.x; fadds vSample.x; fsts
-					// vSample.x` loads vAdd.x first, which is why vAdd is
-					// written as the macro's v1.  ALTERNATIVE AT THIS SITE,
-					// if a build says otherwise:
-					//     VEC_ADD(vSample, vSample, vAdd);
-					VEC_ADD(vSample, vAdd, vSample);
-
-					// 0x10009b22..0x10009b93.  This is the SDK's VEC_CLAMP
-					// and the shape is already proven in this same file:
-					// w_GetAmbientLight (0x10026261, reconstructed at
-					// commonmodel.cpp:4033 and matching) clamps a vector
-					// over the same two constants and emits the same
-					// hoisted 255.0f in %st with the second compare
-					// reversed into `fcomp %st(1)` (0x1002630f there,
-					// 0x10009b43 here).  0x1004d208 is 0.0f and 0x1004d374
-					// is 255.0f; the client's are 0x004a14d8 and
-					// 0x004a1a5c.
-					//
-					// The one difference from w_GetAmbientLight is that
-					// the pass-through arm here stores nothing, because
-					// the destination is a local VC6 knows already holds
-					// the value; there the destination is `*pColor` and
-					// all three arms share one `fstps`.
-					VEC_CLAMP(vSample, 0.0f, 255.0f);
-
-					// 0x10009b94..0x10009bb3 -- three `__ftol` calls, and
-					// only %al is stored each time, which is the (uint8).
-					sample.m_r = (uint8)vSample.x;
-					sample.m_g = (uint8)vSample.y;
-					sample.m_b = (uint8)vSample.z;
-
-					// 0x10009bb5 -- the whole four bytes go back, so the
-					// never-assigned m_a rides along.  Same as
-					// w_SetupPointShade's fill (commonmodel.cpp:4368's
-					// note).
-					*pCell = sample;
-				}
-			}
-		}
-	}
-}
-
-
-
-
-// ======================================================================= //
-//  lithtech.exe 0x004248d0 (746 bytes, thiscall, one argument, `ret 4`)
-//  CLIENT ONLY -- server.dll has no copy (nothing there stores 1 to a
-//  world's +0x1e8, and none of Term's seven callers is shaped like this).
-//
-//  BECOME A CHILD OF ANOTHER WORLD: share its geometry instead of loading
-//  any.  startload.cpp's DoLoadWorld reports "Inherit failed" when this
-//  answers false (name ours, from that).  The flag at +0x1e8 is the one
-//  Term (0x00424bc0) forks on: a child forgets the +0x04 array's pointers
-//  instead of freeing them, which is exactly what the CopyPointers below
-//  hands it.
-//
-//  Read off the bytes:
-//   * Term first, the child flag, then the tree copy (0x0048d930 on +0x6c
-//     with the source's +0x6c pushed).
-//   * the world table is SetSizeInit2(n, NULL) with the source's count --
-//     the call to 0x00414fa0 and the re-reading fill loop -- the same
-//     expansion Load carries.
-//   * the polygon list is a CopyArray2 call (0x00428bb0, &g_DefAlloc).
-//   * the +0x04 array is stdlith's CopyPointers expanded: its Term (a call,
-//     0x00414f00) and four dword copies.
-//   * per record: the source record is read BEFORE the `new`, the record is
-//     stored into the table only after its null test, and the geometry is
-//     re-created (0x150 bytes, 0x00426200, then 0x00426670 Inherit) only
-//     when the source's geometry answers its slot-7 question.
-//   * every failure is `Term(); return FALSE;`, one merged tail at the end
-//     (0x00424baa).  The first three tests are ONE `||` condition: as three
-//     separate refusals VC6 kept the first two tails apart (742 bytes); as
-//     gotos to one label it hoisted the tail in front of the loop.
-//   * the scalar tail, the light list handed to AddLights (0x00424ef0),
-//     and the link into the source's child list (dl_Insert, expanded).
-// ======================================================================= //
-#ifndef LT_SERVER_BUILD
-
-// The concrete world geometry, as far as `new` and its inherit reach it:
-// wgrid.cpp's CWorldBspQ43C (0x150 bytes) (view; name ours).
-class CWorldBspInheritView
-{
-public:
-	CWorldBspInheritView();                  // 0x00426200
-	LTBOOL Inherit(CWorldGeom* pSrc);        // 0x00426670
-
-	uint8 m_pad[0x150];
-};
-
-// The +0x04 array's four data dwords (stdlith CMoArray + DefaultCache).
-class CWorldArrayPtrsView
-{
-public:
-	void*  m_vptr;
-	void*  m_pArray;
-	uint32 m_nElements;
-	uint32 m_CacheSize;
-	uint32 m_WantedCache;
-};
-
-LTBOOL CServerWorldFull::InheritWorld(CServerWorldFull* pSrc)
-{
-	uint32           i;
-	CServerWorldRec* pSrcRec;
-	CServerWorldRec* pRec;
-	CWorldArrayPtrsView* pArr;
-	CWorldArrayPtrsView* pSrcArr;
-
-	Term();
-
-	m_n1e8 = 1;
-
-	if (!m_Sub6C.CopyFrom(&pSrc->m_Sub6C) ||
-		!m_Worlds.SetSizeInit2Inline(pSrc->m_Worlds.m_nWorlds, LTNULL) ||
-		!m_Polies.CopyArray2(pSrc->m_Polies, &g_DefAlloc))
-	{
-		Term();
-		return LTFALSE;
-	}
-
-	// CopyPointers.
-	((CWorldSub04Term*)&m_Sub04)->Term(0, (CMoAllocator*)&g_DefAlloc);
-	pArr = (CWorldArrayPtrsView*)&m_Sub04;
-	pSrcArr = (CWorldArrayPtrsView*)&pSrc->m_Sub04;
-	pArr->m_pArray = pSrcArr->m_pArray;
-	pArr->m_nElements = pSrcArr->m_nElements;
-	pArr->m_CacheSize = pSrcArr->m_CacheSize;
-	pArr->m_WantedCache = pSrcArr->m_WantedCache;
-
-	for (i = 0; i < m_Worlds.m_nWorlds; i++)
-	{
-		pSrcRec = pSrc->m_Worlds.m_pWorlds[i];
-
-		pRec = new CServerWorldRec;
-
-		if (!pRec)
-		{
-			Term();
-			return LTFALSE;
-		}
-
-		m_Worlds.m_pWorlds[i] = pRec;
-
-		pRec->m_pWorldBsp = pSrcRec->m_pWorldBsp;
-		pRec->m_pOriginal = pSrcRec->m_pOriginal;
-		pRec->m_Flags &= ~3;
-
-		if (pSrcRec->m_pWorldBsp->_v1c())
-		{
-			pRec->m_Flags |= 1;
-
-			pRec->m_pWorldBsp = (CWorldGeom*)new CWorldBspInheritView;
-
-			if (!pRec->m_pWorldBsp)
-			{
-				Term();
-				return LTFALSE;
-			}
-
-			if (!((CWorldBspInheritView*)pRec->m_pWorldBsp)->Inherit(pSrcRec->m_pWorldBsp))
-			{
-				Term();
-				return LTFALSE;
-			}
-		}
-
-		pRec->m_pCurrent = pRec->m_pOriginal ? pRec->m_pOriginal : pRec->m_pWorldBsp;
-	}
-
-	m_n068 = pSrc->m_n068;
-	m_vBoxMin = pSrc->m_vBoxMin;
-	m_vBoxMax = pSrc->m_vBoxMax;
-	m_LightHead = pSrc->m_LightHead;
-	m_n0f4 = pSrc->m_n0f4;
-	m_f0f8 = pSrc->m_f0f8;
-	m_SubFC = pSrc->m_SubFC;
-	m_vMin = pSrc->m_vMin;
-	m_vMax = pSrc->m_vMax;
-	m_v15c = pSrc->m_v15c;
-	m_n180 = pSrc->m_n180;
-	m_n1b0 = pSrc->m_n1b0;
-	m_n1b4 = pSrc->m_n1b4;
-	m_pWorldName = pSrc->m_pWorldName;
-	m_n184 = pSrc->m_n184;
-
-	AddLights(&pSrc->m_LightHead);
-
-	dl_Insert(&pSrc->m_Link1d0, &m_Link1dc);
-
-	m_bLoaded = 1;
-
-	return LTTRUE;
-}
-
-#endif // LT_SERVER_BUILD
-
-
-// Period source: src/LT2/lithshared/stdlith/dynarray.h:703, transcribed.
-//
-// DEFINED HERE RATHER THAN IN collection.h, and that is deliberate. In the
-// header it does its job -- 0x1001bb37 goes 289 -> 301 -- but it also
-// perturbs every other TU that includes collection.h through servermgr.h,
-// and it knocked TCPDriver::HandleConnPacket (1010 bytes, byte-identical)
-// off its match. Measured: header +1 near and -1 identical for a net -886
-// bytes across both images; here, the same gain and nothing else moves.
-// A template member defined in a .cpp serves only that .cpp, which is all
-// this caller needs.  It lived in src/engine/lithtech/modchunk.cpp until now,
-// which is a lithtech-only TU -- so server.dll's one caller
-// (CUnknownD974::sub_1001bb37) had a DECLARATION and no definition and
-// emitted an out-of-line call to a symbol this image never defines.  The
-// shipped /O1 server expands this body into that caller
-// (0x1001bba5..0x1001bbc5: the SetSize2 call, then the fill loop reloading
-// m_pArray off `this` in ebx on every trip), which is exactly what a
-// template member defined in the header gives /Ob1.  lithtech.exe's /O2
-// build keeps it out of line at 0x0044e5f0, 124 bytes.
-//
-// SERVER BUILD ONLY.  Visible here, /O2 EXPANDS it into sub_1001bb37 too
-// (444 bytes against 0x0044cd80's 455, where the shipped 0x0044ce31 is a
-// call) -- moving the definition above the caller changed nothing.  Hidden
-// from the client build, the caller calls it and is identical, and
-// src/engine/lithtech/modchunk.cpp (a client-only TU) supplies the
-// out-of-line body that matches 0x0044e5f0.
-#ifdef LT_SERVER_BUILD
-DYNA_TEMPLATE
-LTBOOL CMoArray<T, C>::SetSizeInit3( uint32 newSize, T &val, LAlloc *pAlloc )
-{
-	uint32 i;
-
-	if(!SetSize2(newSize, pAlloc))
-		return LTFALSE;
-
-	for(i=0; i < GetSize(); i++)
-	{
-		m_pArray[i] = val;
-	}
-
-	return LTTRUE;
-}
-#endif
-
-
-// dynarray.h:720's SetSizeInit4, which collection.h declares and nothing
-// defined.  Model::LoadSockets and Model::sub_1001c560 size and zero-fill
-// through it.  STAND-IN BODY: dynarray's is `return SetSizeInit3(newSize,
-// val, pAlloc);`, but SetSizeInit3's body is hidden from the lithtech build
-// above (sub_1001bb37 must call it), so this is SetSizeInit3's body written
-// out one level up.  Both callers are identical on both images with it.
-DYNA_TEMPLATE
-LTBOOL CMoArray<T, C>::SetSizeInit4( uint32 newSize, T val, LAlloc *pAlloc )
-{
-	uint32 i;
-
-	if(!SetSize2(newSize, pAlloc))
-		return LTFALSE;
-
-	for(i=0; i < GetSize(); i++)
-	{
-		m_pArray[i] = val;
-	}
-
-	return LTTRUE;
+	return mod_SameNodeTree(pMine, pTheirs, pOut);
 }

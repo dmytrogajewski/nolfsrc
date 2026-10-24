@@ -96,6 +96,7 @@ struct AniPlayerMain
 
 class CAnimatorPlayer : public CAnimator
 {
+    void RemovePlayerTrackers();
 	public :
 
 		// Constants

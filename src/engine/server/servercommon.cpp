@@ -8,26 +8,6 @@
 #include "packet.h"
 #endif
 
-LTRESULT ServerCommonLT::GetAttachmentObjects(HATTACHMENT hAttachment, HOBJECT& hParent, HOBJECT& hChild)
-{
-	static char* pFnName = "ServerCommonLT::GetAttachmentObjects";
-
-	if (!hAttachment)
-		RETURN_ERROR(1, pFnName, LT_INVALIDPARAMS);
-
-	// Both are looked up before either is checked, so the caller always gets
-	// whatever could be resolved. sm_FindObjectByID is servermgr.h's name for
-	// the 0x1002acd3 (lithtech 0x0046a380) definition.
-	Attachment* pAttach = (Attachment*)hAttachment;
-	hParent = sm_FindObjectByID(m_pServerMgr, pAttach->m_nParentID);
-	hChild = sm_FindObjectByID(m_pServerMgr, pAttach->m_nChildID);
-
-	if (!hParent || !hChild)
-		RETURN_ERROR(1, pFnName, LT_NOTINITIALIZED);
-
-	return LT_OK;
-}
-
 // WHY IT IS `inline` AND WHY IT IS UP HERE, ABOVE ITS ONE CALLER.
 // lithtech.exe (/O2) EXPANDS this into GetPolyTextureFlags below — 0x0046c6d0
 // is 137 bytes and carries the shift, the +0x190 bound check, the indexed
@@ -57,37 +37,14 @@ LTRESULT ServerCommonLT::GetAttachmentObjects(HATTACHMENT hAttachment, HOBJECT& 
 // The virtual is IWorldBsp's slot 0x0c, reached on the record's +0x04
 // pointer, and it is handed the whole handle — the low half it needs and the
 // high half it does not.
-class CWorldTrees
-{
-public:
-	uint8       m_pad_00[0x18c];
-	CFileTree** m_pFileTrees;                // +0x18c  = CServerMgr +0x330
-	uint32      m_nFileTrees;                // +0x190  = CServerMgr +0x334
-};
-
-inline WorldPoly* CServerWorld::FindPoly(HPOLY hPoly)
-{
-	CWorldTrees* pThis = (CWorldTrees*)this;
-
-	uint32 iWorld = hPoly >> 16;
-	if (iWorld >= pThis->m_nFileTrees)
-		return LTNULL;
-
-	CFileTree* pTree = pThis->m_pFileTrees[iWorld];
-	if (!pTree)
-		return LTNULL;
-
-	return ((IWorldBsp*)pTree->m_pList)->FindPoly(hPoly);
-}
-
 LTRESULT ServerCommonLT::GetPolyTextureFlags(HPOLY hPoly, uint32* pFlags)
 {
 	*pFlags = 0;
 
-	WorldPoly* pPoly = m_pServerMgr->m_World.FindPoly(hPoly);
+	WorldPolyOwner* pPoly = m_pServerMgr->m_World.FindPoly(hPoly);
 	if (pPoly)
 	{
-		*pFlags = pPoly->m_pSurface->m_nTextureFlags;
+		*pFlags = pPoly->m_pParent->m_nTextureFlags;
 		return LT_OK;
 	}
 
@@ -151,31 +108,11 @@ LTRESULT ServerCommonLT::SetObjectFlags(HOBJECT hObj, const ObjFlagType flagType
 	return LT_OK;
 }
 
-#ifndef LT_SERVER_BUILD
-// lithtech.exe 0x0046c440: the /O2 build EXPANDS the time reference's
-// constructor and Clear() into SetObjectFilenames -- `movl $-1` into
-// m_iWeightSet and six zero pushes onto a CALL of AnimTimeRef::Init
-// (0x00447080) -- which is the SDK's own in-class AnimTimeRef
-// (ltanimtracker.h). servercommon.h's CAnimTimeRef keeps both out of line
-// for server.dll's /O1 calls (0x1002da31, 0x100175fd), so lithtech's
-// record holds the SDK type. Same 0x38-byte layout: the tracker's first
-// 0x1c bytes, the AnimTimeRef at +0x1c, then the two file identifiers.
-struct CSavedFileStateLT
-{
-	LTAnimTracker m_Tracker;                 // 0x00  its AnimTimeRef at +0x1c
-	void*         m_pModelFile;              // 0x38
-	void*         m_pSkinFile;               // 0x3c
-};
-#endif
 
 LTRESULT ServerCommonLT::SetObjectFilenames(HOBJECT pObj, ObjectCreateStruct* pStruct)
 {
 	CMessageRef msg;
-#ifdef LT_SERVER_BUILD
 	CSavedFileState state;
-#else
-	CSavedFileStateLT state;
-#endif
 	Model* pOldModel;
 	LTRESULT dResult;
 	uint32 nFound;
@@ -204,13 +141,13 @@ LTRESULT ServerCommonLT::SetObjectFilenames(HOBJECT pObj, ObjectCreateStruct* pS
 			pIO->Release();
 	}
 
-	w_SaveObjectFileState(pObj, (CSavedFileState*)&state);
+	w_SaveObjectFileState(pObj, &state);
 	sm_RemoveFromWorldTree(m_pServerMgr, pObj);
 
 	dResult = w_ApplyObjectFilenames(m_pServerMgr, pObj, pStruct);
 	if (dResult != LT_OK)
 	{
-		w_RestoreObjectFileState(pObj, (CSavedFileState*)&state);
+		w_RestoreObjectFileState(pObj, &state);
 		return dResult;
 	}
 
@@ -228,7 +165,7 @@ LTRESULT ServerCommonLT::SetObjectFilenames(HOBJECT pObj, ObjectCreateStruct* pS
 	for (pCur = pListHead->m_pNext; pCur != pListHead; pCur = pCur->m_pNext)
 	{
 		Client* pClient = (Client*)pCur->m_pData;
-		if (pClient->m_pObjInfos[pObj->m_ObjectID].m_ChangeFlags & 0x1000)
+		if (pClient->m_ObjInfos[pObj->m_ObjectID].m_ChangeFlags & 0x1000)
 			sm_SendToClient(m_pServerMgr, pClient, 0xf, msg.m_pMsg, 0, 0x80);
 	}
 
@@ -299,11 +236,7 @@ LTRESULT ServerCommonLT::GetPointShade(LTVector* pPoint, LTVector* pColor)
 // Declared in the class and defined here rather than in the class body: /Ob1
 // would otherwise expand it into SetObjectFilenames, and the shipped build
 // calls it.
-CAnimTimeRef::CAnimTimeRef()
-{
-	m_iWeightSet = INVALID_MODEL_WEIGHTSET;
-	Clear();
-}
+
 
 // 0x100175fd — AnimTimeRef::Clear, which is Init(NULL,0,0,0,0,0.0f) with the
 // arguments folded (ltanimtracker.h has the era source). Shared with the
@@ -311,20 +244,7 @@ CAnimTimeRef::CAnimTimeRef()
 // inline stores at each site. The `fldz` leads the block: the FPU store is
 // scheduled first and the seven integer stores then follow declaration order
 // off one zero register.
-void CAnimTimeRef::Clear()
-{
-	m_pModel = LTNULL;
 
-	m_PrevAnim = 0;
-	m_PrevFrame = 0;
-	m_PrevTime = 0;
-
-	m_CurAnim = 0;
-	m_CurFrame = 0;
-	m_CurTime = 0;
-
-	m_Percent = 0.0f;
-}
 
 
 // ---- the world-side file swap -------------------------------------------- //
@@ -353,10 +273,10 @@ LTRESULT w_SaveObjectFileState(LTObject* pObj, CSavedFileState* pState)
 		RETURN_ERROR(1, "BackupExtraData", LT_INVALIDPARAMS);
 
 	pState->m_pModelFile = pObj->m_pSData->m_pModelFile;
-	pState->m_pSkinFile = pObj->m_pSData->m_pSkinFile;
+	for (uint32 i = 0; i < MAX_MODEL_TEXTURES; ++i) pState->m_SkinFiles[i] = pObj->m_pSData->m_SkinFiles[i];
 
 	if (pObj->m_ObjectType == OT_MODEL)
-		pState->m_Tracker = *(CSavedTracker*)&((ModelInstance*)pObj)->m_AnimTracker;
+		pState->m_Tracker = ((ModelInstance*)pObj)->m_AnimTracker;
 
 	return LT_OK;
 }
@@ -367,10 +287,10 @@ LTRESULT w_RestoreObjectFileState(LTObject* pObj, CSavedFileState* pState)
 		RETURN_ERROR(1, "RestoreExtraData", LT_INVALIDPARAMS);
 
 	pObj->m_pSData->m_pModelFile = pState->m_pModelFile;
-	pObj->m_pSData->m_pSkinFile = pState->m_pSkinFile;
+	for (uint32 i = 0; i < MAX_MODEL_TEXTURES; ++i) pObj->m_pSData->m_SkinFiles[i] = pState->m_SkinFiles[i];
 
 	if (pObj->m_ObjectType == OT_MODEL)
-		*(CSavedTracker*)&((ModelInstance*)pObj)->m_AnimTracker = pState->m_Tracker;
+		((ModelInstance*)pObj)->m_AnimTracker = pState->m_Tracker;
 
 	return LT_OK;
 }
@@ -400,38 +320,16 @@ LTRESULT w_RestoreObjectFileState(LTObject* pObj, CSavedFileState* pState)
 // expanded: the "CPacket::WriteType" overrun report and the Append loop
 // through 0x00412f50 appear twice, so both sites are WriteType<uint16>
 // there. server.dll calls ServerMessage::WriteWord (0x10014a53) at both.
-void sm_WriteObjectFiles(LTObject* pObj, ServerMessage* pMsg)
-{
-	uint16 i;
-
-#ifdef NOLFSRC_MODERN
-	// fixed: a missing first file sends 0xffff, as the other two do (RETAIL_BUGS.md)
-	for (i = 0; i < 3; i++)
-#else
-#ifdef LT_SERVER_BUILD
-	pMsg->WriteWord(((CObjFiles*)pObj->m_pSData)->m_pFiles[0]->m_FileID);
-#else
-	((CPacket*)pMsg)->WriteType(((CObjFiles*)pObj->m_pSData)->m_pFiles[0]->m_FileID);
-#endif
-
-	for (i = 1; i < 3; i++)
-#endif
-	{
-		CFileIdentifier* pFile = ((CObjFiles*)pObj->m_pSData)->m_pFiles[i];
-		uint16 nFileID;
-
-		if (pFile)
-			nFileID = pFile->m_FileID;
-		else
-			nFileID = 0xffff;
-
-#ifdef LT_SERVER_BUILD
-		pMsg->WriteWord(nFileID);
-#else
-		((CPacket*)pMsg)->WriteType(nFileID);
-#endif
-	}
+void sm_WriteObjectFiles(LTObject* object, ServerMessage* message) {
+    const auto* data = object->m_pSData;
+    const auto write = [&](void* handle) {
+        const auto* file = static_cast<CFileRef*>(handle);
+        message->WriteWord(file ? file->m_nFileID : uint16(0xffff));
+    };
+    write(data->m_pModelFile);
+    for (auto* skin : data->m_SkinFiles) write(skin);
 }
+
 
 
 // 0x1000f878 is `MatVMul_H` — and that is not a name of ours, it is
@@ -444,7 +342,7 @@ void sm_WriteObjectFiles(LTObject* pObj, ServerMessage* pMsg)
 // 0x10012c3a — is a point inside a BSP tree? Zero means it is (worldsim.h
 // carries the same declaration as bsp_PointInside; that header is not
 // included here).
-int bsp_PointInside(class BSPNode* pRoot, LTVector* pPoint);
+int bsp_PointInside(BSPNode* pRoot, LTVector* pPoint);
 
 // The LTObject virtual at slot 0x34 answers whether the object takes part in
 // the containment test at all. ltobject_internal.h declares the slot as
@@ -452,16 +350,6 @@ int bsp_PointInside(class BSPNode* pRoot, LTVector* pPoint);
 // redeclared on a layout-identical view whose only purpose is to give the
 // slot a return value (names ours; the view's vptr is the object's own, at
 // offset 0, which is where the shipped `mov (%esi),%eax` reads it).
-class IObjInsideTestView
-{
-public:
-	virtual void _p00()=0; virtual void _p04()=0; virtual void _p08()=0;
-	virtual void _p0c()=0; virtual void _p10()=0; virtual void _p14()=0;
-	virtual void _p18()=0; virtual void _p1c()=0; virtual void _p20()=0;
-	virtual void _p24()=0; virtual void _p28()=0; virtual void _p2c()=0;
-	virtual void _p30()=0;
-	virtual LTBOOL TakesPartInPointTest()=0;   // 0x34
-};
 
 // 0x10012c9c — the callback world_IsPointInside installs. One object gets
 // to veto the point, and only ever in that direction.
@@ -496,7 +384,7 @@ void world_PointInsideCB(LTObject* pObj, CPointQuery* pQuery)
 	if (pObj->m_Unknown54 != 0)
 		return;
 
-	if (!((IObjInsideTestView*)pObj)->TakesPartInPointTest())
+	if (!pObj->_v34())
 		return;
 
 	LTVector* pSrc = &pQuery->m_vPoint;
@@ -524,8 +412,7 @@ LTBOOL world_IsPointInside(CUnknown210* pWorld, LTVector* pPoint)
 	query.m_vPoint = *pPoint;
 	query.m_bInside = 1;
 
-	((IPointQueryWorld*)pWorld)->FindObjectsAtPoint(pPoint, world_PointInsideCB,
-	                                                &query, 0);
+	pWorld->QueryPoint(*pPoint, [&](LTObject* object) { world_PointInsideCB(object, &query); });
 
 	return query.m_bInside;
 }

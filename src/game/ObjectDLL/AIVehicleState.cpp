@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIVehicle.h"
 #include "AIVehicleState.h"
 #include "AIVehicleStrategy.h"
@@ -281,12 +284,12 @@ void CAIHelicopterStateGoto::HandleNameValuePair(char *szName, char *szValue)
 {
 	CAIHelicopterState::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "PT") )
+	if ( !nolf::ascii_compare(szName, "PT") )
 	{
 		sscanf(szValue, "%f,%f,%f", &m_vDest.x, &m_vDest.y, &m_vDest.z);
 		m_cNodes = 0;
 	}
-	else if ( !_stricmp(szName, "PTS") )
+	else if ( !nolf::ascii_compare(szName, "PTS") )
 	{
 		m_cNodes = 0;
 
@@ -312,7 +315,7 @@ void CAIHelicopterStateGoto::HandleNameValuePair(char *szName, char *szValue)
 			szPoint = strtok(NULL, ",");
 		}
 	}
-	else if ( !_stricmp(szName, "LOOP") )
+	else if ( !nolf::ascii_compare(szName, "LOOP") )
 	{
 		m_bLoop = IsTrueChar(*szValue);
 	}
@@ -512,7 +515,7 @@ void CAIHelicopterStateAttack::HandleModelString(ArgList* pArgList)
 	char* szKey = pArgList->argv[0];
 	if ( !szKey ) return;
 
-	if ( !_stricmp(szKey, c_szKeyFireWeapon) )
+	if ( !nolf::ascii_compare(szKey, c_szKeyFireWeapon) )
 	{
 		if ( pArgList->argc == 3 )
 		{
@@ -523,7 +526,7 @@ void CAIHelicopterStateAttack::HandleModelString(ArgList* pArgList)
 		{
 			for ( int iWeaponPosition = 0 ; iWeaponPosition < GetAI()->GetNumWeapons() ; iWeaponPosition++ )
 			{
-				if ( pArgList->argv[iArg] && !_stricmp(pArgList->argv[iArg], GetAI()->GetWeaponPosition(iWeaponPosition)->GetName()) )
+				if ( pArgList->argv[iArg] && !nolf::ascii_compare(pArgList->argv[iArg], GetAI()->GetWeaponPosition(iWeaponPosition)->GetName()) )
 				{
 					m_pStrategyShoot->FireWeapon(iWeaponPosition);
 				}
@@ -542,7 +545,7 @@ void CAIHelicopterStateAttack::HandleModelString(ArgList* pArgList)
 
 LTBOOL CAIHelicopterStateAttack::HandleCommand(char** pTokens, int nArgs)
 {
-	_ASSERT(pTokens && (nArgs >= 1));
+	GAME_ASSERT(pTokens && (nArgs >= 1));
     if (!pTokens || nArgs < 1) return LTFALSE;
 
 	if ( CAIHelicopterState::HandleCommand(pTokens, nArgs) )
@@ -550,11 +553,11 @@ LTBOOL CAIHelicopterStateAttack::HandleCommand(char** pTokens, int nArgs)
         return LTTRUE;
 	}
 
-	if ( !_stricmp(pTokens[0], "ON") )
+	if ( !nolf::ascii_compare(pTokens[0], "ON") )
 	{
 		for ( int iWeapon = 0 ; iWeapon < GetAI()->GetNumWeapons() ; iWeapon++ )
 		{
-			if ( !_stricmp(pTokens[1], GetAI()->GetWeaponPosition(iWeapon)->GetName()) )
+			if ( !nolf::ascii_compare(pTokens[1], GetAI()->GetWeaponPosition(iWeapon)->GetName()) )
 			{
 				m_pStrategyShoot->ActivateWeapon(iWeapon);
 			}
@@ -562,11 +565,11 @@ LTBOOL CAIHelicopterStateAttack::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "OFF") )
+	else if ( !nolf::ascii_compare(pTokens[0], "OFF") )
 	{
 		for ( int iWeapon = 0 ; iWeapon < GetAI()->GetNumWeapons() ; iWeapon++ )
 		{
-			if ( !_stricmp(pTokens[1], GetAI()->GetWeaponPosition(iWeapon)->GetName()) )
+			if ( !nolf::ascii_compare(pTokens[1], GetAI()->GetWeaponPosition(iWeapon)->GetName()) )
 			{
 				m_pStrategyShoot->DeactivateWeapon(iWeapon);
 			}
@@ -608,25 +611,25 @@ void CAIHelicopterStateAttack::HandleNameValuePair(char *szName, char *szValue)
 {
 	CAIHelicopterState::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "FIRE") )
+	if ( !nolf::ascii_compare(szName, "FIRE") )
 	{
-		if ( !_stricmp(szValue, "FULL") )
+		if ( !nolf::ascii_compare(szValue, "FULL") )
 		{
 			m_pStrategyShoot->SetFire(CAnimatorAIVehicle::eFireFull);
 		}
-		else if ( !_stricmp(szValue, "FIRE1") )
+		else if ( !nolf::ascii_compare(szValue, "FIRE1") )
 		{
 			m_pStrategyShoot->SetFire(CAnimatorAIVehicle::eFire1);
 		}
-		else if ( !_stricmp(szValue, "FIRE2") )
+		else if ( !nolf::ascii_compare(szValue, "FIRE2") )
 		{
 			m_pStrategyShoot->SetFire(CAnimatorAIVehicle::eFire2);
 		}
-		else if ( !_stricmp(szValue, "FIRE3") )
+		else if ( !nolf::ascii_compare(szValue, "FIRE3") )
 		{
 			m_pStrategyShoot->SetFire(CAnimatorAIVehicle::eFire3);
 		}
-		else if ( !_stricmp(szValue, "FIRE4") )
+		else if ( !nolf::ascii_compare(szValue, "FIRE4") )
 		{
 			m_pStrategyShoot->SetFire(CAnimatorAIVehicle::eFire4);
 		}
@@ -635,7 +638,7 @@ void CAIHelicopterStateAttack::HandleNameValuePair(char *szName, char *szValue)
             g_pLTServer->CPrint("CAIHelicopterStateAttack - FIRE=%s is not a valid fire type", szValue);
 		}
 	}
-	else if ( !_stricmp(szName, "TARGET") )
+	else if ( !nolf::ascii_compare(szName, "TARGET") )
 	{
 		GetAI()->Unlink(m_hTarget);
 		m_hTarget = LTNULL;

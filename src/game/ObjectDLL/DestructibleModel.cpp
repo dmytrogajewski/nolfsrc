@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "DestructibleModel.h"
 #include "ClientServerShared.h"
 #include "ServerUtilities.h"
@@ -41,7 +43,7 @@ LTRESULT CDestructibleModelPlugin::PreHook_EditStringList(const char* szRezPath,
 	{
 		return LT_OK;
 	}
-	else if (_strcmpi("SurfaceOverride", szPropName) == 0)
+	else if (nolf::ascii_compare("SurfaceOverride", szPropName) == 0)
 	{
 		m_SurfaceMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
@@ -286,7 +288,8 @@ uint32 CDestructibleModel::ObjectMessageFn(LPBASECLASS pObject, HOBJECT hSender,
 
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
 			// ConParse does not destroy szMsg, so this is safe
 			ConParse parse;
@@ -298,19 +301,19 @@ uint32 CDestructibleModel::ObjectMessageFn(LPBASECLASS pObject, HOBJECT hSender,
 				{
 					if (!IsDead())
 					{
-						if (_stricmp(parse.m_Args[0], "FIRE") == 0)
+						if (nolf::ascii_compare(parse.m_Args[0], "FIRE") == 0)
 						{
 							char* pTargetName = parse.m_nArgs > 1 ? parse.m_Args[1] : LTNULL;
 							DoExplosion(pTargetName);
 						}
-						else if (_stricmp(parse.m_Args[0], "HIDDEN") == 0)
+						else if (nolf::ascii_compare(parse.m_Args[0], "HIDDEN") == 0)
 						{
 							uint32 dwFlags = g_pLTServer->GetObjectFlags(m_hObject);
 
 							if (parse.m_nArgs > 1 && parse.m_Args[1])
 							{
-								if ((_stricmp(parse.m_Args[1], "1") == 0) ||
-									(_stricmp(parse.m_Args[1], "TRUE") == 0))
+								if ((nolf::ascii_compare(parse.m_Args[1], "1") == 0) ||
+									(nolf::ascii_compare(parse.m_Args[1], "TRUE") == 0))
 								{
 									dwFlags = 0;
 
@@ -322,8 +325,8 @@ uint32 CDestructibleModel::ObjectMessageFn(LPBASECLASS pObject, HOBJECT hSender,
 								}
 								else
 								{
-									if ((_stricmp(parse.m_Args[1], "0") == 0) ||
-										(_stricmp(parse.m_Args[1], "FALSE") == 0))
+									if ((nolf::ascii_compare(parse.m_Args[1], "0") == 0) ||
+										(nolf::ascii_compare(parse.m_Args[1], "FALSE") == 0))
 									{
 										dwFlags = m_dwOriginalFlags;
 										dwFlags |= FLAG_VISIBLE;

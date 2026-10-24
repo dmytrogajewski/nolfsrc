@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "CharacterFX.h"
 #include "GameClientShell.h"
 #include "ParticleTrailFX.h"
@@ -1459,13 +1462,13 @@ void CCharacterFX::OnModelKey(HLOCALOBJ hObj, ArgList *pArgs)
         g_pLTClient->CPrint("%s ModelKey: '%s'", (m_cs.bIsPlayer ? "Player" : "AI"), pKey);
 	}
 
-	if (stricmp(pKey, KEY_FOOTSTEP_SOUND) == 0)
+	if (nolf::ascii_compare(pKey, KEY_FOOTSTEP_SOUND) == 0)
 	{
 		if (pArgs->argc > 1)
 		{
 			// See if this is the left (2) or right (1) foot...
 
-			if (stricmp(pArgs->argv[1], "1") == 0)
+			if (nolf::ascii_compare(pArgs->argv[1], "1") == 0)
 			{
                 m_bLeftFoot = LTFALSE;
 			}
@@ -2135,56 +2138,56 @@ LTBOOL CCharacterFX::OnServerMessage(HMESSAGEREAD hMessage)
 
 		case CFX_SMOKEPUFF_CREATE_MSG:
 		{
-			_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eSmokepuffs));
+			GAME_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eSmokepuffs));
 			m_cs.byFXFlags |= CHARCREATESTRUCT::eSmokepuffs;
 		}
 		break;
 
 		case CFX_SMOKEPUFF_DESTROY_MSG:
 		{
-			_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eSmokepuffs);
+			GAME_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eSmokepuffs);
 			m_cs.byFXFlags &= ~CHARCREATESTRUCT::eSmokepuffs;
 		}
 		break;
 
 		case CFX_ZZZ_CREATE_MSG:
 		{
-			_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eZzz));
+			GAME_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eZzz));
 			m_cs.byFXFlags |= CHARCREATESTRUCT::eZzz;
 		}
 		break;
 
 		case CFX_ZZZ_DESTROY_MSG:
 		{
-			_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eZzz);
+			GAME_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eZzz);
 			m_cs.byFXFlags &= ~CHARCREATESTRUCT::eZzz;
 		}
 		break;
 
 		case CFX_CIGARETTESMOKE_CREATE_MSG:
 		{
-			_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eCigaretteSmoke));
+			GAME_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eCigaretteSmoke));
 			m_cs.byFXFlags |= CHARCREATESTRUCT::eCigaretteSmoke;
 		}
 		break;
 
 		case CFX_CIGARETTESMOKE_DESTROY_MSG:
 		{
-			_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eCigaretteSmoke);
+			GAME_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eCigaretteSmoke);
 			m_cs.byFXFlags &= ~CHARCREATESTRUCT::eCigaretteSmoke;
 		}
 		break;
 
 		case CFX_CIGARETTE_CREATE_MSG:
 		{
-			_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eCigarette));
+			GAME_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eCigarette));
 			m_cs.byFXFlags |= CHARCREATESTRUCT::eCigarette;
 		}
 		break;
 
 		case CFX_CIGARETTE_DESTROY_MSG:
 		{
-			_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eCigarette);
+			GAME_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eCigarette);
 			m_cs.byFXFlags &= ~CHARCREATESTRUCT::eCigarette;
 			m_cs.byFXFlags &= ~CHARCREATESTRUCT::eCigaretteSmoke;
 		}
@@ -2192,14 +2195,14 @@ LTBOOL CCharacterFX::OnServerMessage(HMESSAGEREAD hMessage)
 
 		case CFX_HEART_CREATE_MSG:
 		{
-			_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eHearts));
+			GAME_ASSERT(!(m_cs.byFXFlags & CHARCREATESTRUCT::eHearts));
 			m_cs.byFXFlags |= CHARCREATESTRUCT::eHearts;
 		}
 		break;
 
 		case CFX_HEART_DESTROY_MSG:
 		{
-			_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eHearts);
+			GAME_ASSERT(m_cs.byFXFlags & CHARCREATESTRUCT::eHearts);
 			m_cs.byFXFlags &= ~CHARCREATESTRUCT::eHearts;
 		}
 		break;
@@ -2269,7 +2272,7 @@ HLTSOUND CCharacterFX::PlayLipSyncSound(char* szSound, LTFLOAT fRadius, LTBOOL &
 
 		// Okay, make sure that id we got really is a dialogue sound...
 
-		if (!csSound.IsEmpty() && (strcmpi(szSound, csSound) == 0))
+		if (!csSound.IsEmpty() && (nolf::ascii_compare(szSound, csSound) == 0))
 		{
 			// If we're in a cinematic use the cinematic radius, else
 			// use the conversation radius...
@@ -2851,7 +2854,7 @@ LTBOOL CCharacterFX::NextMarkerState()
 		}
 		else
 		{
-			_ASSERT(0);
+			GAME_ASSERT(0);
 			return LTFALSE;
 		}
 	}
@@ -2972,7 +2975,7 @@ void CCharacterFX::InitLocalPlayer()
 		// M-P5-06: an invalid style would index past the style table
 		ms = P5_ValidModelStyle(ms);
 #endif
-		if (_stricmp(g_pModelButeMgr->GetStyleName(ms),"Undercover2") == 0)
+		if (nolf::ascii_compare(g_pModelButeMgr->GetStyleName(ms),"Undercover2") == 0)
 		{
 			g_pInterfaceMgr->BeginSpacesuit();
 		}

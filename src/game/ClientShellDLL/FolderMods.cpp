@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMods.h"
 #include "FolderCommands.h"
 #include "MissionData.h"
@@ -606,7 +606,7 @@ void CFolderMods::FillArray()
 		CModData* currMods[255];
 
 		numCurrMods = pData->GetMods(currMods,255);
-		for (i=0; i< numCurrMods; i++)
+		for (int i=0; i< numCurrMods; i++)
 		{
 			nMID = currMods[i]->m_nID;
 			m_nMods[nMID] = SEL_DEFAULT;
@@ -616,14 +616,14 @@ void CFolderMods::FillArray()
 	else
 	{
 
-		for (i=0; i < pMission->nNumDefaultMods; i++)
+		for (int i=0; i < pMission->nNumDefaultMods; i++)
 		{
 			nMID = pMission->aDefaultMods[i];
 			m_nMods[nMID] = SEL_DEFAULT;
 		}
 	}
 
-	for (i=0; i < pMission->nNumRequiredMods; i++)
+	for (int i=0; i < pMission->nNumRequiredMods; i++)
 	{
 		nMID = pMission->aRequiredMods[i];
 		m_nMods[nMID] = SEL_REQUIRED;
@@ -636,7 +636,7 @@ void CFolderMods::FillArray()
 	{
 		WEAPON* pWeapon = g_pWeaponMgr->GetWeapon(wid);
 		// for each weapon, step through all of its mods
-		for (i = 0; i < pWeapon->nNumModTypes; i++)
+		for (int i = 0; i < pWeapon->nNumModTypes; i++)
 		{
 			nMID = pWeapon->aModTypes[i];
 			if (!g_pWeaponMgr->IsValidModType(nMID))

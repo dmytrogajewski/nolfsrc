@@ -1,9 +1,13 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 
-#include "stdafx.h"
-#include "SprinklesFX.h"
+#include "Stdafx.h"
+#include "sprinklesfx.h"
 #include "FXButeMgr.h"
 #include "ClientServerShared.h"
-#include "commonutilities.h"
+#include "CommonUtilities.h"
 
 
 class ModelObjControl : public FXObjControl
@@ -242,7 +246,7 @@ LTBOOL SprinklesFX::Init(SFXCREATESTRUCT* psfxCreateStruct)
         pTemp = g_pLTClient->GetStringData(pConstruct->m_hSkinName);
 		strncpy(ocs.m_SkinName,pTemp,ARRAY_LEN(ocs.m_SkinName));
 
-		strupr(tempFilename);
+		nolf::ascii_uppercase(tempFilename);
 		if(strstr(tempFilename, ".ABC"))
 		{
 			pType->m_ObjType = FXObj_Model;

@@ -12,7 +12,8 @@
 
 // Includes...
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "ltserverobj.h"
 #include "DebrisFuncs.h"
 #include "SFXMsgIds.h"
@@ -100,7 +101,7 @@ LTRESULT CDebrisPlugin::PreHook_EditStringList(const char* szRezPath, const char
 {
 	// See if we can handle the property...
 
-	if (_strcmpi(DEBRIS_PROPERTY_NAME, szPropName) == 0)
+	if (nolf::ascii_compare(DEBRIS_PROPERTY_NAME, szPropName) == 0)
 	{
 		s_DebrisMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);

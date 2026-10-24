@@ -2,7 +2,7 @@
 #ifndef __ILTSTREAM_H__
 #define __ILTSTREAM_H__
 
-	#include "ltbasetypes.h"
+	#include "ltintegertypes.h"
 
 	// Helper macro to read/write data if your stream pointer is called pStream.
 	#define STREAM_READ(_x_) pStream->Read(&(_x_), sizeof(_x_));
@@ -26,15 +26,15 @@
 		// Read in data.  Returns LT_ERROR if you read past the end.  ALWAYS fills in
 		// pData with 0's if it returns an error so you can safely read everything
 		// in without checking the return value every time and check ErrorStatus() at the end.
-		virtual LTRESULT	Read(void *pData, unsigned long size)=0;
-		virtual LTRESULT	ReadString(char *pStr, unsigned long maxBytes)=0;
+		virtual LTRESULT	Read(void *pData, uint32 size)=0;
+		virtual LTRESULT	ReadString(char *pStr, uint32 maxBytes)=0;
 		
 		// LT_OK = no errors, otherwise an error occured.
 		virtual LTRESULT	ErrorStatus()=0;
 		
-		virtual LTRESULT	SeekTo(unsigned long offset)=0;
-		virtual LTRESULT	GetPos(unsigned long *offset)=0;
-		virtual LTRESULT	GetLen(unsigned long *len)=0;
+		virtual LTRESULT	SeekTo(uint32 offset)=0;
+		virtual LTRESULT	GetPos(uint32 *offset)=0;
+		virtual LTRESULT	GetLen(uint32 *len)=0;
 
 		// Reads the data in dsSource and writes it to this stream.
 		// Returns LT_ERROR if either stream has an ErrorStatus() != LT_OK or
@@ -42,20 +42,20 @@
 		// You can specify the range of dsSource to read, or leave it at 
 		// WRITESTREAM_DEFAULT and it will write ALL or dsSource.
 		virtual LTRESULT	WriteStream(ILTStream &dsSource, 
-			unsigned long dwMin=WRITESTREAM_DEFAULT,
-			unsigned long dwMax=WRITESTREAM_DEFAULT)=0;
+			uint32 dwMin=WRITESTREAM_DEFAULT,
+			uint32 dwMax=WRITESTREAM_DEFAULT)=0;
 
 		// Helpers to make it easy..
-		unsigned long		GetPos()
+		uint32		GetPos()
 		{
-			unsigned long pos;
+			uint32 pos;
 			GetPos(&pos);
 			return pos;
 		}
 
-		unsigned long		GetLen()
+		uint32		GetLen()
 		{
-			unsigned long len;
+			uint32 len;
 			GetLen(&len);
 			return len;
 		}
@@ -70,7 +70,7 @@
 	// Only enabled in writeable streams.
 	public:
 		
-		virtual LTRESULT	Write(const void *pData, unsigned long size)=0;
+		virtual LTRESULT	Write(const void *pData, uint32 size)=0;
 		virtual LTRESULT	WriteString(char *pStr)=0;
 
 		template<class T>
@@ -97,8 +97,19 @@
 	READWRITE_FN(unsigned short);
 	READWRITE_FN(int);
 	READWRITE_FN(unsigned int);
-	READWRITE_FN(long);
-	READWRITE_FN(unsigned long);
+	// A Windows long on disk is 32 bits, including on LP64 hosts.
+	inline void LTStream_Read(ILTStream *stream, long &value) {
+		int32 wire = 0; stream->Read(&wire, 4); value = wire;
+	}
+	inline void LTStream_Write(ILTStream *stream, const long &value) {
+		int32 wire = (int32)value; stream->Write(&wire, 4);
+	}
+	inline void LTStream_Read(ILTStream *stream, unsigned long &value) {
+		uint32 wire = 0; stream->Read(&wire, 4); value = wire;
+	}
+	inline void LTStream_Write(ILTStream *stream, const unsigned long &value) {
+		uint32 wire = (uint32)value; stream->Write(&wire, 4);
+	}
 	READWRITE_FN(float);
 	READWRITE_FN(double);
 

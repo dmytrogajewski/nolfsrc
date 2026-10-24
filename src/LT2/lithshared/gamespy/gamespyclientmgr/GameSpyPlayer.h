@@ -11,15 +11,14 @@
 ****************************************************************************/
 
 #pragma once
+#include "ltbasetypes.h"
+#include <cstdint>
 
 
 // Includes...
 
-#ifdef GSCM_LOCAL_BUILD
-#include "..\cengine\goaceng.h"
-#else
-#include "..\gamespy\cengine\goaceng.h"
-#endif
+#include "../cengine/goaceng.h"
+
 
 
 // Classes...
@@ -32,15 +31,15 @@ public:
 	CGameSpyPlayer() { Clear(); }
 	~CGameSpyPlayer() { Term(); }
 
-	BOOL				Init(GServer pGServer, int nIndex);
+	LTBOOL				Init(GServer pGServer, int nIndex);
 	void				Term();
 
-	BOOL				IsInitialized() { return(m_bInit); }
+	LTBOOL				IsInitialized() { return(m_bInit); }
 
 	char*				GetName();
 	int					GetPing();
 	int					GetFrags();
-	void*				GetHandle() { return((void*)m_nIndex); }
+	void*				GetHandle() { return(reinterpret_cast<void*>(static_cast<std::uintptr_t>(m_nIndex))); }
 
 	char*				GetStringValue(char* sKey, char* sDefault = "");
 	int					GetIntValue(char* sKey, int nDefault = 0);
@@ -55,7 +54,7 @@ protected:
 private:
 	GServer				m_pGServer;
 	int					m_nIndex;
-	BOOL				m_bInit;
+	LTBOOL				m_bInit;
 };
 
 

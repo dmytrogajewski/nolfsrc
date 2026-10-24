@@ -27,6 +27,9 @@ src/game/ObjectDLL/AnimationLex.cpp
 src/game/ObjectDLL/AnimationParse.cpp
 src/game/ObjectDLL/animationparse.cpp
 src/game/ObjectDLL/AnimationLexSymbols.h
-
+exlude/
+/exclude/
+/excluded/
+/CMakeUserPresets.json
 __pycache__/
 *.log

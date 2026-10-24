@@ -11,8 +11,17 @@
 // engine keeps one window across renderer restarts), resolved into the
 // window's back buffer before a swap or a read.
 
-#include "../mr.h"
-#include <GL/gl.h>
+#include "../rdev.h"
+#include "platform/gl_context.h"
+#include "platform/opengl.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <unordered_set>
+#include <stdexcept>
+#include <limits>
+#include <string>
+#include <vector>
 
 const char g_RDDll[] = "opengl.ren";
 const char g_RDLog[] = "opengl.log";
@@ -66,22 +75,22 @@ RDCaps g_RDCaps;
 #define GL_FRAMEBUFFER_COMPLETE         0x8CD5
 #define GL_MAX_SAMPLES                  0x8D57
 
-typedef void (APIENTRY* PFN_glActiveTexture)(GLenum);
-typedef void (APIENTRY* PFN_glMultiTexCoord2f)(GLenum, GLfloat, GLfloat);
-typedef void (APIENTRY* PFN_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei,
+typedef void (NOLF_GL_CALL* PFN_glActiveTexture)(GLenum);
+typedef void (NOLF_GL_CALL* PFN_glMultiTexCoord2f)(GLenum, GLfloat, GLfloat);
+typedef void (NOLF_GL_CALL* PFN_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei,
                                                      GLsizei, GLint, GLsizei, const void*);
 static PFN_glActiveTexture        s_glActiveTexture;
 static PFN_glMultiTexCoord2f      s_glMultiTexCoord2f;
 static PFN_glCompressedTexImage2D s_glCompressedTexImage2D;
 
 // Framebuffer objects (GL 3.0 / ARB_framebuffer_object), for antialiasing.
-typedef void (APIENTRY* PFN_glGenObjects)(GLsizei, GLuint*);
-typedef void (APIENTRY* PFN_glDeleteObjects)(GLsizei, const GLuint*);
-typedef void (APIENTRY* PFN_glBindObject)(GLenum, GLuint);
-typedef void (APIENTRY* PFN_glRenderbufferStorageMultisample)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
-typedef void (APIENTRY* PFN_glFramebufferRenderbuffer)(GLenum, GLenum, GLenum, GLuint);
-typedef GLenum (APIENTRY* PFN_glCheckFramebufferStatus)(GLenum);
-typedef void (APIENTRY* PFN_glBlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint,
+typedef void (NOLF_GL_CALL* PFN_glGenObjects)(GLsizei, GLuint*);
+typedef void (NOLF_GL_CALL* PFN_glDeleteObjects)(GLsizei, const GLuint*);
+typedef void (NOLF_GL_CALL* PFN_glBindObject)(GLenum, GLuint);
+typedef void (NOLF_GL_CALL* PFN_glRenderbufferStorageMultisample)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+typedef void (NOLF_GL_CALL* PFN_glFramebufferRenderbuffer)(GLenum, GLenum, GLenum, GLuint);
+typedef GLenum (NOLF_GL_CALL* PFN_glCheckFramebufferStatus)(GLenum);
+typedef void (NOLF_GL_CALL* PFN_glBlitFramebuffer)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint,
                                               GLbitfield, GLenum);
 static struct {
     PFN_glGenObjects                    GenFramebuffers, GenRenderbuffers;
@@ -96,67 +105,27 @@ static GLuint s_nFBO, s_nColorRB, s_nDepthRB;   // the multisampled target, 0 wi
 static GLuint s_nNearList;                       // rd_NearDepth's batch, made at its first use
 static int    s_nWidth;
 
-static HWND  s_hWnd;
-static HDC   s_hDC;
-static HGLRC s_hRC;
-static int   s_nHeight;                 // rdev.h's rects are from the top, GL's from the bottom
-
-// ---- the device -------------------------------------------------------------------
+static NolfGLContext s_Context{};
+static bool s_bCurrent{};
+static uint64_t s_nGeneration{};
+static std::unordered_set<GLuint> s_Textures;
+static int s_nHeight;
 
 static void gl_DestroyContext(void)
 {
-    if (s_hRC)
-    {
-        wglMakeCurrent(NULL, NULL);
-        wglDeleteContext(s_hRC);
-        s_hRC = NULL;
-        s_nNearList = 0;                // went with the context
+    if (s_bCurrent) {
+        if (s_nNearList) glDeleteLists(s_nNearList, 1);
+        s_Context.release(s_Context.user);
     }
-    if (s_hDC)
-    {
-        ReleaseDC(s_hWnd, s_hDC);
-        s_hDC = NULL;
-    }
+    s_bCurrent = false;
+    s_nNearList = 0;
 }
-
-// A double-buffered RGBA context with depth and stencil, made current.
 static bool gl_CreateContext(void)
 {
-    s_hDC = GetDC(s_hWnd);
-    if (!s_hDC)
-        return false;
-
-    // A window keeps its pixel format for life, and the engine reloads the
-    // renderer on every focus change: reuse the one an earlier Init set.
-    int nFormat = GetPixelFormat(s_hDC);
-    if (!nFormat)
-    {
-        PIXELFORMATDESCRIPTOR pfd;
-        memset(&pfd, 0, sizeof(pfd));
-        pfd.nSize = sizeof(pfd);
-        pfd.nVersion = 1;
-        pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-        pfd.iPixelType = PFD_TYPE_RGBA;
-        pfd.cColorBits = 32;
-        pfd.cAlphaBits = 8;
-        pfd.cDepthBits = 24;
-        pfd.cStencilBits = 8;
-        pfd.iLayerType = PFD_MAIN_PLANE;
-        nFormat = ChoosePixelFormat(s_hDC, &pfd);
-        if (!nFormat || !SetPixelFormat(s_hDC, nFormat, &pfd))
-        {
-            mr_Print("opengl.ren: no usable OpenGL pixel format");
-            return false;
-        }
-    }
-    s_hRC = wglCreateContext(s_hDC);
-    if (!s_hRC || !wglMakeCurrent(s_hDC, s_hRC))
-    {
-        mr_Print("opengl.ren: could not create an OpenGL context");
-        return false;
-    }
-    return true;
+    s_bCurrent = s_Context.make_current(s_Context.user);
+    return s_bCurrent;
 }
+static void* gl_Symbol(const char* name) { return s_Context.symbol(s_Context.user, name); }
 
 static void gl_DestroyTarget(void)
 {
@@ -173,7 +142,7 @@ static void gl_DestroyTarget(void)
 // The multisampled colour and depth/stencil target everything draws into.
 static int gl_CreateTarget(int nSamples)
 {
-#define GL_FBO_PROC(name) (s_fbo.name = (decltype(s_fbo.name))wglGetProcAddress("gl" #name))
+#define GL_FBO_PROC(name) (s_fbo.name = (decltype(s_fbo.name))gl_Symbol("gl" #name))
     if (!GL_FBO_PROC(GenFramebuffers) || !GL_FBO_PROC(GenRenderbuffers) || !GL_FBO_PROC(DeleteFramebuffers) ||
         !GL_FBO_PROC(DeleteRenderbuffers) || !GL_FBO_PROC(BindFramebuffer) || !GL_FBO_PROC(BindRenderbuffer) ||
         !GL_FBO_PROC(RenderbufferStorageMultisample) || !GL_FBO_PROC(FramebufferRenderbuffer) ||
@@ -199,7 +168,7 @@ static int gl_CreateTarget(int nSamples)
     s_fbo.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s_nDepthRB);
     if (s_fbo.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
     {
-        mr_Print("opengl.ren: no %dx multisampled target; antialiasing off", nSamples);
+        fprintf(stderr, "OpenGL: no %dx multisampled target; antialiasing off\n", nSamples);
         gl_DestroyTarget();
         return 1;
     }
@@ -226,7 +195,10 @@ bool rd_CreateDevice(void* hWnd, uint32_t nWidth, uint32_t nHeight, bool bWindow
                      int nSamples)
 {
     (void)bWindowed;
-    s_hWnd = (HWND)hWnd;
+    if (!hWnd || !nWidth || !nHeight || nWidth>16384 || nHeight>16384) return false;
+    if (s_bCurrent) rd_DestroyDevice();
+    if (s_nGeneration==std::numeric_limits<uint64_t>::max()) return false;
+    s_Context = nolf_gl_context(hWnd);
     s_nWidth = (int)nWidth;
     s_nHeight = (int)nHeight;
     if (!gl_CreateContext())
@@ -240,9 +212,9 @@ bool rd_CreateDevice(void* hWnd, uint32_t nWidth, uint32_t nHeight, bool bWindow
         pExt = "";
     memset(&g_RDCaps, 0, sizeof(g_RDCaps));
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &g_RDCaps.nMaxTextureSize);
-    s_glActiveTexture = (PFN_glActiveTexture)wglGetProcAddress("glActiveTextureARB");
-    s_glMultiTexCoord2f = (PFN_glMultiTexCoord2f)wglGetProcAddress("glMultiTexCoord2fARB");
-    s_glCompressedTexImage2D = (PFN_glCompressedTexImage2D)wglGetProcAddress("glCompressedTexImage2DARB");
+    s_glActiveTexture = (PFN_glActiveTexture)gl_Symbol("glActiveTextureARB");
+    s_glMultiTexCoord2f = (PFN_glMultiTexCoord2f)gl_Symbol("glMultiTexCoord2fARB");
+    s_glCompressedTexImage2D = (PFN_glCompressedTexImage2D)gl_Symbol("glCompressedTexImage2DARB");
     GLint nUnits = 1;
     if (s_glActiveTexture && s_glMultiTexCoord2f)
         glGetIntegerv(GL_MAX_TEXTURE_UNITS_ARB, &nUnits);
@@ -256,14 +228,28 @@ bool rd_CreateDevice(void* hWnd, uint32_t nWidth, uint32_t nHeight, bool bWindow
     g_RDCaps.bDepthClamp = strstr(pExt, "GL_ARB_depth_clamp") || strstr(pExt, "GL_NV_depth_clamp");
     g_RDCaps.bNearDepth = g_RDCaps.bDepthClamp;
 
-    typedef BOOL (APIENTRY* PFN_wglSwapInterval)(int);
-    PFN_wglSwapInterval pSwapInterval = (PFN_wglSwapInterval)wglGetProcAddress("wglSwapIntervalEXT");
-    if (pSwapInterval)
-        pSwapInterval(nSwapInterval);
+    s_Context.swap_interval(s_Context.user, nSwapInterval);
 
     g_RDCaps.nSamples = nSamples > 1 ? gl_CreateTarget(nSamples) : 1;
 
     // The state every draw starts from (r_SetStartingRenderStates).
+    glDisable(GL_BLEND);
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDepthMask(GL_TRUE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    for (int unit = 0; unit < g_RDCaps.nTextureUnits; ++unit) {
+        if (s_glActiveTexture) s_glActiveTexture(GL_TEXTURE0_ARB + unit);
+        glDisable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        glMatrixMode(GL_TEXTURE);
+        glLoadIdentity();
+    }
+    if (s_glActiveTexture) s_glActiveTexture(GL_TEXTURE0_ARB);
+    glMatrixMode(GL_PROJECTION); glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW); glLoadIdentity();
+    rd_NearDepth(0, 0, 0, 1);
     glViewport(0, 0, nWidth, nHeight);
     glDisable(GL_LIGHTING);
     glDisable(GL_CULL_FACE);
@@ -281,13 +267,17 @@ bool rd_CreateDevice(void* hWnd, uint32_t nWidth, uint32_t nHeight, bool bWindow
     glClearDepth(1.0);
     glClearStencil(0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    ++s_nGeneration;
     return true;
 }
 
+uint64_t rd_DeviceGeneration(void) { return s_bCurrent ? s_nGeneration : 0; }
 void rd_DestroyDevice(void)
 {
-    if (s_hRC)
+    if (s_bCurrent)
     {
+        for (const auto texture : s_Textures) glDeleteTextures(1,&texture);
+        s_Textures.clear();
         gl_DestroyTarget();
         glFlush();
         glFinish();
@@ -297,10 +287,10 @@ void rd_DestroyDevice(void)
 
 void rd_Present(void)
 {
-    if (!s_hDC)
+    if (!s_bCurrent)
         return;
     gl_Resolve();
-    SwapBuffers(s_hDC);
+    s_Context.present(s_Context.user);
 }
 
 const char* rd_Describe(void)
@@ -463,15 +453,26 @@ void rd_TexCombine(const RDCombine& c)
 
 // ---- textures -----------------------------------------------------------------------
 
+static void gl_CheckError(const char* operation)
+{
+    const auto error=glGetError();
+    if (error!=GL_NO_ERROR) throw std::runtime_error(std::string(operation)+": OpenGL error "+std::to_string(error));
+}
+
 uint32_t rd_GenTexture(void)
 {
+    if (!s_bCurrent) throw std::logic_error("texture creation without a render device");
     GLuint n = 0;
     glGenTextures(1, &n);
+    if (!n) throw std::runtime_error("OpenGL texture allocation failed");
+    try { gl_CheckError("allocate texture"); s_Textures.insert(n); }
+    catch (...) { glDeleteTextures(1,&n); throw; }
     return n;
 }
 
 void rd_DeleteTexture(uint32_t nTex)
 {
+    if (!s_bCurrent || !s_Textures.erase(nTex)) return;
     GLuint n = nTex;
     glDeleteTextures(1, &n);
 }
@@ -486,6 +487,7 @@ static void gl_Pixels(RDPixels ePixels, GLenum* pFormat, GLenum* pType)
     case RD_PIX_RGBA: *pFormat = GL_RGBA; *pType = GL_UNSIGNED_BYTE; break;
     case RD_PIX_RGB:  *pFormat = GL_RGB;  *pType = GL_UNSIGNED_BYTE; break;
     case RD_PIX_565:  *pFormat = GL_RGB;  *pType = GL_UNSIGNED_SHORT_5_6_5; break;
+    default: throw std::invalid_argument("invalid texture pixel format");
     }
 }
 
@@ -500,6 +502,7 @@ void rd_TexImage(int nLevel, RDFormat eFormat, int w, int h, RDPixels ePixels, c
     glTexImage2D(GL_TEXTURE_2D, nLevel, nInternal, w, h, 0, nFormat, nType, pData);
     if (nRowPixels)
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    gl_CheckError("upload texture");
 }
 
 void rd_TexSubImage(int nLevel, int x, int y, int w, int h, RDPixels ePixels, const void* pData)
@@ -507,15 +510,18 @@ void rd_TexSubImage(int nLevel, int x, int y, int w, int h, RDPixels ePixels, co
     GLenum nFormat, nType;
     gl_Pixels(ePixels, &nFormat, &nType);
     glTexSubImage2D(GL_TEXTURE_2D, nLevel, x, y, w, h, nFormat, nType, pData);
+    gl_CheckError("update texture");
 }
 
 void rd_CompressedTexImage(int nLevel, RDFormat eFormat, int w, int h, uint32_t nBytes, const void* pData)
 {
+    if (!s_glCompressedTexImage2D) throw std::logic_error("compressed texture upload is unavailable");
     GLenum nFormat = eFormat == RD_FMT_DXT1  ? GL_COMPRESSED_RGB_S3TC_DXT1_EXT :
                      eFormat == RD_FMT_DXT1A ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT :
                      eFormat == RD_FMT_DXT3  ? GL_COMPRESSED_RGBA_S3TC_DXT3_EXT :
                                                GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
     s_glCompressedTexImage2D(GL_TEXTURE_2D, nLevel, nFormat, w, h, 0, nBytes, pData);
+    gl_CheckError("upload compressed texture");
 }
 
 void rd_TexFilter(RDFilter eMin, RDFilter eMag)
@@ -602,6 +608,10 @@ void rd_Clear(uint32_t nWhat)
 // GL reads bottom-up: read, then turn the rows over in place.
 void rd_ReadPixels(int x, int y, int w, int h, RDPixels ePixels, void* pDest, bool bFront)
 {
+    if (!s_bCurrent || !pDest || x<0 || y<0 || w<=0 || h<=0 || w>s_nWidth-x || h>s_nHeight-y)
+        throw std::invalid_argument("invalid framebuffer read extent");
+    const std::size_t nPitch=std::size_t(w)*(ePixels==RD_PIX_565 ? 2 : ePixels==RD_PIX_RGB ? 3 : 4);
+    std::vector<uint8_t> row(nPitch);
     GLenum nFormat, nType;
     gl_Pixels(ePixels, &nFormat, &nType);
     if (s_nFBO)
@@ -616,16 +626,12 @@ void rd_ReadPixels(int x, int y, int w, int h, RDPixels ePixels, void* pDest, bo
     glReadBuffer(GL_BACK);
     if (s_nFBO)
         s_fbo.BindFramebuffer(GL_READ_FRAMEBUFFER, s_nFBO);
-    uint32_t nPitch = w * (ePixels == RD_PIX_565 ? 2 : 4);
-    uint8_t* pRow = (uint8_t*)malloc(nPitch);
-    if (!pRow)
-        return;
-    uint8_t* p = (uint8_t*)pDest;
+    gl_CheckError("read framebuffer");
+    uint8_t* p = static_cast<uint8_t*>(pDest);
     for (int i = 0; i < h / 2; i++)
     {
-        memcpy(pRow, p + i * nPitch, nPitch);
-        memcpy(p + i * nPitch, p + (h - 1 - i) * nPitch, nPitch);
-        memcpy(p + (h - 1 - i) * nPitch, pRow, nPitch);
+        memcpy(row.data(),p+std::size_t(i)*nPitch,nPitch);
+        memcpy(p+std::size_t(i)*nPitch,p+std::size_t(h-1-i)*nPitch,nPitch);
+        memcpy(p+std::size_t(h-1-i)*nPitch,row.data(),nPitch);
     }
-    free(pRow);
 }

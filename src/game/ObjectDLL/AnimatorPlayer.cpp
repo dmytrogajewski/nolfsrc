@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "ObjectMsgs.h"
 #include "MsgIDs.h"
 #include "SFXMsgIds.h"
@@ -35,28 +37,21 @@ CAnimatorPlayer::CAnimatorPlayer()
 
 // ----------------------------------------------------------------------- //
 //
-//	ROUTINE:	CAnimatorPlayer::~CAnimatorPlayer()
-//
-//	PURPOSE:	Destructor
-//
+// Tracker ownership is shared by reset and destruction.
+
+void CAnimatorPlayer::RemovePlayerTrackers() {
+    if (!m_bInitialized) return;
+    for (const auto tracker : {m_eAniTrackerUpper,m_eAniTrackerLower,m_eAniTrackerPitchUp,m_eAniTrackerPitchDown}) {
+        if (tracker <= eAniTrackerMain || tracker >= m_cAniTrackers) continue;
+        const auto result = g_pModelLT->RemoveTracker(m_hObject,m_aAniTrackers[tracker].m_pAnimTracker);
+        GAME_ASSERT(result == LT_OK);
+    }
+    m_bInitialized = LTFALSE;
+}
+
 // ----------------------------------------------------------------------- //
 
-CAnimatorPlayer::~CAnimatorPlayer()
-{
-    LTRESULT dwResult;
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerUpper].m_pAnimTracker);
-	_ASSERT(LT_OK == dwResult);
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerLower].m_pAnimTracker);
-	_ASSERT(LT_OK == dwResult);
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerPitchUp].m_pAnimTracker);
-	_ASSERT(LT_OK == dwResult);
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerPitchDown].m_pAnimTracker);
-	_ASSERT(LT_OK == dwResult);
-}
+CAnimatorPlayer::~CAnimatorPlayer() { RemovePlayerTrackers(); }
 
 // ----------------------------------------------------------------------- //
 
@@ -90,19 +85,7 @@ void CAnimatorPlayer::Load(HMESSAGEREAD hRead)
 
 void CAnimatorPlayer::Reset(HOBJECT hObject)
 {
-    LTRESULT dwResult;
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerUpper].m_pAnimTracker);
-    _ASSERT(LT_OK == dwResult);
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerLower].m_pAnimTracker);
-    _ASSERT(LT_OK == dwResult);
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerPitchUp].m_pAnimTracker);
-    _ASSERT(LT_OK == dwResult);
-
-    dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerPitchDown].m_pAnimTracker);
-    _ASSERT(LT_OK == dwResult);
+    RemovePlayerTrackers();
 
 	m_cAniTrackers = 1;
 
@@ -126,7 +109,7 @@ void CAnimatorPlayer::Reset(HOBJECT hObject)
 
 void CAnimatorPlayer::Init(ILTCSBase* pInterface, HOBJECT hObject)
 {
-	_ASSERT(!m_bInitialized);
+	GAME_ASSERT(!m_bInitialized);
 	if ( m_bInitialized )
 	{
 		g_pLTServer->CPrint("CAnimatorPlayer already initialized!");
@@ -348,8 +331,8 @@ void CAnimatorPlayer::Update()
 {
 	CAnimator::Update();
 
-	_ASSERT(m_eAniTrackerUpper != eAniTrackerInvalid);
-	_ASSERT(m_eAniTrackerLower != eAniTrackerInvalid);
+	GAME_ASSERT(m_eAniTrackerUpper != eAniTrackerInvalid);
+	GAME_ASSERT(m_eAniTrackerLower != eAniTrackerInvalid);
 
 	// Set the upper/lower or fully body anis
 
@@ -540,7 +523,7 @@ void CAnimatorPlayer::UpdateDims()
 	{
 		LTVector vDims;
 		LTRESULT dResult = g_pLTServer->GetModelAnimUserDims(m_hObject, &vDims, hAni);
-		_ASSERT(dResult == LT_OK);
+		GAME_ASSERT(dResult == LT_OK);
 
 		CPlayerObj* pPlayer = (CPlayerObj*)g_pLTServer->HandleToObject(m_hObject);
 
@@ -579,7 +562,7 @@ LTBOOL CAnimatorPlayer::SetDims(HMODELANIM hAni)
 {
     LTVector vDims;
     LTRESULT dResult = g_pLTServer->GetModelAnimUserDims(m_hObject, &vDims, hAni);
-    _ASSERT(dResult == LT_OK);
+    GAME_ASSERT(dResult == LT_OK);
 
     CPlayerObj* pPlayer = (CPlayerObj*)g_pLTServer->HandleToObject(m_hObject);
 

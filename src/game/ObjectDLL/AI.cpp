@@ -1,6 +1,10 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AI.h"
 #include "Destructible.h"
 #include "Weapons.h"
@@ -144,14 +148,14 @@ LTBOOL CAI::DefaultFilterFn(HOBJECT hObj, void *pUserData)
     if ( !hObj ) return LTFALSE;
     if ( hObj == s_hFilterAI ) return LTFALSE;
 
-    static HCLASS hBody = g_pLTServer->GetClass("Body");
+    const HCLASS hBody = g_pLTServer->GetClass("Body");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hBody))
 	{
         return LTFALSE;
 	}
 
-    static HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
+    const HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hHitbox))
 	{
@@ -166,7 +170,7 @@ LTBOOL CAI::BodyFilterFn(HOBJECT hObj, void *pUserData)
     if (!hObj ) return LTFALSE;
     if ( hObj == s_hFilterAI ) return LTFALSE;
 
-    static HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
+    const HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hHitbox))
 	{
@@ -186,14 +190,14 @@ LTBOOL CAI::ShootThroughFilterFn(HOBJECT hObj, void *pUserData)
         return LTTRUE;
 	}
 
-    static HCLASS hBody = g_pLTServer->GetClass("Body");
+    const HCLASS hBody = g_pLTServer->GetClass("Body");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hBody))
 	{
         return LTFALSE;
 	}
 
-    static HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
+    const HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hHitbox))
 	{
@@ -232,14 +236,14 @@ LTBOOL CAI::SeeThroughFilterFn(HOBJECT hObj, void *pUserData)
         return LTTRUE;
 	}
 
-    static HCLASS hBody = g_pLTServer->GetClass("Body");
+    const HCLASS hBody = g_pLTServer->GetClass("Body");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hBody))
 	{
         return LTFALSE;
 	}
 
-    static HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
+    const HCLASS hHitbox = g_pLTServer->GetClass("CCharacterHitBox");
 
     if (g_pLTServer->IsKindOf(g_pLTServer->GetObjectClass(hObj), hHitbox))
 	{
@@ -587,7 +591,8 @@ uint32 CAI::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD hRea
 
 		case MID_TRIGGER:
 		{
-            const char* szMessage = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+            const auto szMessageStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+            const char* szMessage = szMessageStorage.c_str();
 			HandleTrigger(hSender, szMessage);
 		}
 		break;
@@ -1110,7 +1115,7 @@ void CAI::HandleTouch(HOBJECT hObj)
 
 void CAI::HandleTrigger(HOBJECT hSender, const char* szMessage)
 {
-	if ( !strcmpi(szMessage, c_szActivate) )
+	if ( !nolf::ascii_compare(szMessage, c_szActivate) )
 	{
 		if ( m_bAlwaysActivate || (m_pState && m_pState->CanActivate()) )
 		{
@@ -1317,9 +1322,9 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 		}
 	}
 
-	if ( !_stricmp(pTokens[0], "GRAVITY") )
+	if ( !nolf::ascii_compare(pTokens[0], "GRAVITY") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -1331,7 +1336,8 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 			}
 			else
 			{
-                g_pLTServer->SetVelocity(m_hObject, &LTVector(0,0,0));
+                LTVector stopped(0,0,0);
+                g_pLTServer->SetVelocity(m_hObject, &stopped);
 
 				dwFlags &= ~FLAG_GRAVITY;
 			}
@@ -1341,18 +1347,18 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	if ( !_stricmp(pTokens[0], "ALWAYSACTIVATE") )
+	if ( !nolf::ascii_compare(pTokens[0], "ALWAYSACTIVATE") )
 	{
 		m_bAlwaysActivate = IsTrueChar(*pTokens[1]);
 		UpdateUserFlagCanActivate();
 	}
-	if ( !_stricmp(pTokens[0], "DEBUG") )
+	if ( !nolf::ascii_compare(pTokens[0], "DEBUG") )
 	{
 		m_nDebugLevel = (uint32)atoi(pTokens[1]);
 	}
-	if ( !_stricmp(pTokens[0], "SENSES") )
+	if ( !nolf::ascii_compare(pTokens[0], "SENSES") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -1361,7 +1367,7 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	if ( !_stricmp(pTokens[0], "MOVE") )
+	if ( !nolf::ascii_compare(pTokens[0], "MOVE") )
 	{
         LTVector vPos;
 		sscanf(pTokens[1], "%f,%f,%f", &vPos.x, &vPos.y, &vPos.z);
@@ -1370,7 +1376,7 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
         g_pLTServer->MoveObject(m_hObject, &vPos);
         return LTTRUE;
 	}
-	if ( !_stricmp(pTokens[0], "TELEPORT") )
+	if ( !nolf::ascii_compare(pTokens[0], "TELEPORT") )
 	{
 		if ( IsVector(pTokens[1]) )
 		{
@@ -1381,9 +1387,9 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
             return LTTRUE;
 		}
 	}
-	if ( !_stricmp(pTokens[0], "SHOOTTHROUGH") )
+	if ( !nolf::ascii_compare(pTokens[0], "SHOOTTHROUGH") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -1396,9 +1402,9 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
             g_pLTServer->CPrint("SHOOTTHROUGH missing argument");
 		}
 	}
-	if ( !_stricmp(pTokens[0], "SEETHROUGH") )
+	if ( !nolf::ascii_compare(pTokens[0], "SEETHROUGH") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -1411,9 +1417,9 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
             g_pLTServer->CPrint("SEETHROUGH missing argument");
 		}
 	}
-	if ( !_stricmp(pTokens[0], "FOVBIAS") )
+	if ( !nolf::ascii_compare(pTokens[0], "FOVBIAS") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -1426,9 +1432,9 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
             g_pLTServer->CPrint("FOVBIAS missing argument");
 		}
 	}
-	if ( !_stricmp(pTokens[0], "PLAYSOUND") )
+	if ( !nolf::ascii_compare(pTokens[0], "PLAYSOUND") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] )
 		{
@@ -1441,12 +1447,12 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "ATP") )
+	else if ( !nolf::ascii_compare(pTokens[0], "ATP") )
 	{
         SendTriggerMsgToObject(this, m_hObject, LTFALSE, "TARGETPLAYER;ATTACK");
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "FACEOBJECT") )
+	else if ( !nolf::ascii_compare(pTokens[0], "FACEOBJECT") )
 	{
 		HOBJECT hObject;
 		if ( LT_OK == FindNamedObject(pTokens[1], hObject) )
@@ -1456,7 +1462,7 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "FACEPOS") )
+	else if ( !nolf::ascii_compare(pTokens[0], "FACEPOS") )
 	{
         LTVector vPos;
 		sscanf(pTokens[1], "%f,%f,%f", &vPos.x, &vPos.y, &vPos.z);
@@ -1464,7 +1470,7 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "FACEDIR") )
+	else if ( !nolf::ascii_compare(pTokens[0], "FACEDIR") )
 	{
         LTVector vDir;
 		sscanf(pTokens[1], "%f,%f,%f", &vDir.x, &vDir.y, &vDir.z);
@@ -1472,15 +1478,15 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "FACETARGET") )
+	else if ( !nolf::ascii_compare(pTokens[0], "FACETARGET") )
 	{
 		FaceTarget();
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "TARGET") )
+	else if ( !nolf::ascii_compare(pTokens[0], "TARGET") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 		if ( !pTokens[1] )
 		{
             g_pLTServer->CPrint("TARGET missing argument");
@@ -1496,7 +1502,7 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "TARGETPLAYER") )
+	else if ( !nolf::ascii_compare(pTokens[0], "TARGETPLAYER") )
 	{
 		CPlayerObj *pPlayer = g_pCharacterMgr->FindPlayer();
 		if ( pPlayer )
@@ -1506,29 +1512,29 @@ LTBOOL CAI::HandleCommand(char** pTokens, int nArgs)
 
         return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "PING") )
+	else if ( !nolf::ascii_compare(pTokens[0], "PING") )
 	{
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "PRESERVEACTIVATECMDS") )
+	else if ( !nolf::ascii_compare(pTokens[0], "PRESERVEACTIVATECMDS") )
 	{
 		m_bPreserveActiveCmds = LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "DELCMD") )
+	else if ( !nolf::ascii_compare(pTokens[0], "DELCMD") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 		if ( !pTokens[1] )
 		{
             g_pLTServer->CPrint("DELCMD missing argument");
 		}
 		else
 		{
-			if ( !_stricmp(pTokens[1], "ACTIVATEON") )
+			if ( !nolf::ascii_compare(pTokens[1], "ACTIVATEON") )
 			{
 				FREE_HSTRING(m_hstrCmdActivateOn);
 				UpdateUserFlagCanActivate();
 			}
-			else if ( !_stricmp(pTokens[1], "ACTIVATEOFF") )
+			else if ( !nolf::ascii_compare(pTokens[1], "ACTIVATEOFF") )
 			{
 				FREE_HSTRING(m_hstrCmdActivateOff);
 				UpdateUserFlagCanActivate();
@@ -2262,7 +2268,7 @@ LTBOOL CAI::FacePos(const LTVector& vTargetPos)
 		// Facing the same position... this would be a divide by zero case
 		// when we normalize. So just return.
 
-        //_ASSERT(LTFALSE);
+        //GAME_ASSERT(LTFALSE);
         return LTTRUE;
 	}
 
@@ -2309,7 +2315,7 @@ void CAI::HandleModelString(ArgList* pArgList)
 	char* pKey = pArgList->argv[0];
 	if (!pKey) return;
 
-	if (stricmp(pKey, c_szKeyBodySlump) == 0)
+	if (nolf::ascii_compare(pKey, c_szKeyBodySlump) == 0)
 	{
 		// Hitting the ground noise
 
@@ -2332,7 +2338,7 @@ void CAI::HandleModelString(ArgList* pArgList)
         g_pLTServer->GetObjectPos(m_hObject, &vPos);
 
 		SURFACE* pSurf = g_pSurfaceMgr->GetSurface(eSurface);
-		_ASSERT(pSurf);
+		GAME_ASSERT(pSurf);
 		if (pSurf && pSurf->szBodyFallSnd[0])
 		{
 			g_pServerSoundMgr->PlaySoundFromPos(vPos, pSurf->szBodyFallSnd, pSurf->fBodyFallSndRadius, SOUNDPRIORITY_MISC_LOW);
@@ -2566,14 +2572,14 @@ void CAI::Load(HMESSAGEREAD hRead, uint32 dwLoadFlags)
 
 LTBOOL CAI::FaceTarget()
 {
-	_ASSERT(HasTarget());
+	GAME_ASSERT(HasTarget());
 
 	return FaceObject(GetTarget()->GetObject());
 }
 
 CAITarget* CAI::GetTarget()
 {
-	_ASSERT(m_pTarget->IsValid()); return m_pTarget;
+	GAME_ASSERT(m_pTarget->IsValid()); return m_pTarget;
 }
 
 LTBOOL CAI::HasTarget()
@@ -2616,7 +2622,7 @@ void CAI::Target(HOBJECT hObject)
 {
 	if ( !IsCharacter(hObject) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -2663,13 +2669,13 @@ void CAI::Target(HOBJECT hObject)
 
 void CAI::UpdateTarget()
 {
-    if ( !m_pTarget->IsValid() ) { _ASSERT(LTFALSE); return; }
+    if ( !m_pTarget->IsValid() ) { GAME_ASSERT(LTFALSE); return; }
 
 	HOBJECT hObject = m_pTarget->GetObject();
-	_ASSERT(hObject);
+	GAME_ASSERT(hObject);
 
     CCharacter *pCharacter = (CCharacter*)g_pLTServer->HandleToObject(m_pTarget->GetObject());
-	_ASSERT(pCharacter);
+	GAME_ASSERT(pCharacter);
 
 	if ( pCharacter->IsDead() )
 	{
@@ -2989,7 +2995,7 @@ void CAI::UnlinkCinematicTrigger(HOBJECT hCinematicTrigger)
 {
 	if (!m_hCinematicTrigger) return;
 
-	_ASSERT(hCinematicTrigger == m_hCinematicTrigger);
+	GAME_ASSERT(hCinematicTrigger == m_hCinematicTrigger);
 	if ( hCinematicTrigger != m_hCinematicTrigger )
 	{
 		g_pLTServer->CPrint("AI ''%s'' was unlinked from cinematic trigger it was not linked to!", GetName());
@@ -3039,7 +3045,7 @@ LTRESULT CAIPlugin::PreHook_EditStringList(const char* szRezPath, const char* sz
 
 	// See if the model style plugin will handle the property
 
-	if (_strcmpi("ModelStyle", szPropName) == 0)
+	if (nolf::ascii_compare("ModelStyle", szPropName) == 0)
 	{
 		m_ModelStylePlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings,	cMaxStringLength);

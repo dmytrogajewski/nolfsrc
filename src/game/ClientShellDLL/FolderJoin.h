@@ -5,12 +5,10 @@
 #ifndef _FOLDER_JOIN_H_
 #define _FOLDER_JOIN_H_
 
-#if _MSC_VER > 1000
 #pragma once
-#endif // _MSC_VER > 1000
 
 #include "BaseFolder.h"
-#include "gamespyclientmgr.h"
+#include "GameSpyClientMgr.h"
 
 
 // Defines...
@@ -100,7 +98,7 @@ public:
 
 protected:
     uint32  OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwParam2);
-	void	SetDummyStatusState(HSTRING hStr, DWORD dwWaitTime, int nNextState = FSS_IDLE);
+	void	SetDummyStatusState(HSTRING hStr, uint32 dwWaitTime, int nNextState = FSS_IDLE);
 	int		AddServerCtrl(CGameSpyServer* pGame);
 	int		AddPlayerCtrl(CGameSpyPlayer* pPlr);
 	int		AddOptionCtrl(int nID, int nStringId);
@@ -122,8 +120,8 @@ private:
     LTBOOL                   m_bNeedServerSorting;
     uint32                  m_timeNextSelPing;
     uint32                  m_timeNextAllData;
-    uint32                  m_timeStateStart;
-    uint32                  m_timeDummyEnd;
+    uint64                  m_timeStateStart;
+    uint64                  m_timeDummyEnd;
 	HSTRING					m_hServersShown;
 	HSTRING					m_hDummyStatus;
 	HSTRING					m_hStatus;

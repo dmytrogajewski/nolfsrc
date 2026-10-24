@@ -10,13 +10,21 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include <cassert>
+#include "engine/portable/string.h"
+#include <cstdio>
+#include "platform/logging.h"
+#include "platform/system.h"
+#ifdef NOLFSRC_NATIVE
+#include <random>
+#endif
 #include "GameClientShell.h"
-#include "MsgIds.h"
-#include "CommandIds.h"
+#include "MsgIDs.h"
+#include "CommandIDs.h"
 #include "WeaponModel.h"
 #include "ClientUtilities.h"
-#include "vkdefs.h"
+#include "VKDefs.h"
 #include "ClientRes.h"
 #include "SoundTypes.h"
 #include "Music.h"
@@ -30,10 +38,12 @@
 #include "iltphysics.h"
 #include "VarTrack.h"
 #include "GameButes.h"
-#include "LTWnd.h"
+#include "LtWnd.h"
 #include "LTMaskedWnd.h"
 #include "AssertMgr.h"
-#include "SystemDependant.h"
+#include "engine/client/client_window.h"
+#include <algorithm>
+#include <cmath>
 #include "SurfaceFunctions.h"
 #include "VehicleMgr.h"
 #include "BodyFX.h"
@@ -62,12 +72,6 @@
 #ifdef NOLFSRC_MODERN
 // M-P7: controller support
 #include "cshell/p7_pad.h"
-#endif
-
-#ifdef STRICT
-	WNDPROC g_pfnMainWndProc = NULL;
-#else
-	FARPROC	g_pfnMainWndProc = NULL;
 #endif
 
 #define min(a,b)	((a) < (b) ? (a) : (b))
@@ -102,8 +106,6 @@ uint32              g_dwSpecial         = 2342349;
 LTBOOL              g_bScreenShotMode   = LTFALSE;
 HLTCOLOR            g_hColorTransparent = LTNULL;
 
-HWND				g_hMainWnd = NULL;
-RECT*				g_prcClip = NULL;
 
 CGameClientShell*   g_pGameClientShell = LTNULL;
 
@@ -192,8 +194,6 @@ BOOL HookWindow();
 void UnhookWindow();
 void QuickLoadCallBack(LTBOOL bReturn, void *pData);
 
-BOOL OnSetCursor(HWND hwnd, HWND hwndCursor, UINT codeHitTest, UINT msg);
-LRESULT CALLBACK HookedWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 extern void CalcNonClipPos(LTVector & vPos, LTRotation & rRot);
 
@@ -210,10 +210,10 @@ IClientShell* CreateClientShell(ILTClient *pClientDE)
 	// Get our ClientDE pointer
 
     g_pLTClient  = pClientDE;
-    _ASSERT(g_pLTClient);
+    GAME_ASSERT(g_pLTClient);
 
 	CGameClientShell* pShell = debug_new(CGameClientShell);
-	_ASSERT(pShell);
+	GAME_ASSERT(pShell);
 
 	// Init our LT subsystems
 
@@ -632,12 +632,6 @@ CGameClientShell::~CGameClientShell()
         g_pLTClient->DeleteObject(m_hBoundingBox);
 	}
 
-	if (g_prcClip)
-	{
-		debug_delete(g_prcClip);
-        g_prcClip = LTNULL;
-	}
-
 	if (m_pDisconnectMsg)
 	{
 		debug_deletea(m_pDisconnectMsg);
@@ -666,7 +660,7 @@ void CGameClientShell::InitSound()
 	ReverbProperties reverbProperties;
 	HCONSOLEVAR hVar;
     uint32 dwProviderID;
-	char sz3dSoundProviderName[_MAX_PATH + 1];
+	char sz3dSoundProviderName[LT_MAX_PATH + 1];
 	int nError;
 
 	m_resSoundInit = LT_ERROR;
@@ -724,7 +718,7 @@ void CGameClientShell::InitSound()
 			// If the provider is selected by name, then compare the names.
 			if (  dwProviderID == SOUND3DPROVIDERID_UNKNOWN )
 			{
-				if ( _mbscmp(( const unsigned char * )sz3dSoundProviderName, ( const unsigned char * )pSound3DProvider->m_szProvider ) == 0 )
+				if ( std::strcmp(sz3dSoundProviderName,pSound3DProvider->m_szProvider) == 0 )
 					break;
 			}
 			// Or compare by the id's.
@@ -909,10 +903,10 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 	float fStartTime = CWinUtil::GetTime();
 
 
-	if (!g_hMainWnd)
-	{
-		HookWindow();
-	}
+	if (!m_WindowReady) {
+        m_WindowReady = HookWindow();
+        if (!m_WindowReady) return LT_ERROR;
+    }
 
 	// Initialize all the global bute mgrs...
 
@@ -1193,7 +1187,7 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 	theStruct.m_ObjectType = OT_CAMERA;
 
     m_hCamera = g_pLTClient->CreateObject(&theStruct);
-	_ASSERT(m_hCamera);
+	GAME_ASSERT(m_hCamera);
 
     g_pLTClient->SetCameraRect(m_hCamera, LTFALSE, 0, 0, dwWidth, dwHeight);
 	SetCameraFOV(DEG2RAD(g_vtFOVXNormal.GetFloat()), DEG2RAD(g_vtFOVYNormal.GetFloat()));
@@ -1201,7 +1195,7 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 	// Create the Interface camera...
 
     m_hInterfaceCamera = g_pLTClient->CreateObject(&theStruct);
-	_ASSERT(m_hInterfaceCamera);
+	GAME_ASSERT(m_hInterfaceCamera);
 
     g_pLTClient->SetCameraRect(m_hInterfaceCamera, LTFALSE, 0, 0, dwWidth, dwHeight);
     g_pLTClient->SetCameraFOV(m_hInterfaceCamera, DEG2RAD(g_vtInterfceFOVX.GetFloat()), DEG2RAD(g_vtInterfceFOVY.GetFloat()));
@@ -1457,6 +1451,7 @@ void CGameClientShell::OnEvent(uint32 dwEventID, uint32 dwParam)
         case LTEVENT_LOSTFOCUS:
 		{
 			m_bMainWindowFocus = FALSE;
+            ClearClientKeys();
 		}
 		break;
 
@@ -1469,6 +1464,7 @@ void CGameClientShell::OnEvent(uint32 dwEventID, uint32 dwParam)
         case LTEVENT_RENDERTERM:
 		{
 			m_bMainWindowFocus = FALSE;
+            ClearClientKeys();
 		}
 		break;
 
@@ -1476,34 +1472,7 @@ void CGameClientShell::OnEvent(uint32 dwEventID, uint32 dwParam)
 		{
 			m_bMainWindowFocus = TRUE;
 
-			if (!g_hMainWnd)
-			{
-				HookWindow();
-			}
-
-			// Clip the cursor if we're NOT in a window...
-
-            HCONSOLEVAR hVar = g_pLTClient->GetConsoleVar("Windowed");
-			BOOL bClip = TRUE;
-			if (hVar)
-			{
-                float fVal = g_pLTClient->GetVarValueFloat(hVar);
-				if (fVal == 1.0f)
-				{
-					bClip = FALSE;
-				}
-			}
-
-			if (bClip)
-			{
-				if (!g_prcClip)
-				{
-					g_prcClip = debug_new(RECT);
-				}
-
-				GetWindowRect(g_hMainWnd, g_prcClip);
-				ClipCursor(g_prcClip);
-			}
+            m_WindowReady = HookWindow();
 
 			g_pInterfaceMgr->InitCursor();
 		}
@@ -4148,7 +4117,12 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 		    g_pLTClient->WriteToMessageWord(hResponse, GAME_HANDSHAKE_VER);
 			// GOTY: reconstructed from the Game of the Year CShell.dll --
 			// send them our key (this client's own salt)
+#ifdef NOLFSRC_NATIVE
+			m_HandshakeNonce = std::random_device{}();
+			g_pLTClient->WriteToMessageDWord(hResponse, m_HandshakeNonce);
+#else
 			g_pLTClient->WriteToMessageDWord(hResponse, (uint32)this);
+#endif
 			g_pLTClient->EndMessage(hResponse);
 		}
 		break;
@@ -4163,7 +4137,9 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 			char szPlayerName[255];
 			szPlayerName[0] = szPlayerName[1] = szPlayerName[2] = szPlayerName[3] = 0;
 			SAFE_STRCPY(szPlayerName, g_vtPlayerName.GetStr());
-			uint32 nNameKey = *((uint32*)szPlayerName);
+			uint32 nNameKey = 0;
+			for (unsigned i = 0; i < 4 && szPlayerName[i]; ++i)
+				nNameKey |= uint32(static_cast<unsigned char>(szPlayerName[i])) << (i * 8);
 
 			// NEAR (648 vs 644). Shipped computes the shift once and the
 			// rotation twice: the second's shift is an expression that only
@@ -4176,7 +4152,11 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 			uint32 nXORMask = GAME_HANDSHAKE_ROTATE(nNameKey & 0xf);
 			nXORMask ^= GAME_HANDSHAKE_ROTATE((uint8)nNameKey & 0xf);
 			nXORMask ^= nServerKey;
+#ifdef NOLFSRC_NATIVE
+			nXORMask ^= m_HandshakeNonce;
+#else
 			nXORMask ^= (uint32)this;
+#endif
 
 			uint32 nPassword = nXORMask ^ nNameKey;
 
@@ -4186,6 +4166,15 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 			nWeaponCRC ^= nXORMask;
 
 			// Get the client shell file CRC
+#ifdef NOLFSRC_NATIVE
+			uint32 nClientCRC;
+			if (!CRC32::ClientShellCompatibilityCRC(nClientCRC))
+			{
+				g_pLTClient->CPrint("Retail client shell identity is missing; reimport original game assets");
+				m_bForceDisconnect = LTTRUE;
+				return;
+			}
+#else
 			char aClientShellName[MAX_PATH + 1];
 			// Just in case getting the file name fails
 			aClientShellName[0] = 0; 
@@ -4194,6 +4183,7 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 			g_pLTClient->GetEngineHook("cshell_hinstance", (void**)&hClientShell);
 			DWORD nResult = GetModuleFileName(hClientShell, aClientShellName, sizeof(aClientShellName));
 			uint32 nClientCRC = CRC32::CalcFileCRC(aClientShellName);
+#endif
 			
 			// Mask that up too
 			nClientCRC ^= nXORMask;
@@ -4516,6 +4506,7 @@ void CGameClientShell::OnCommandOff(int command)
 
 void CGameClientShell::OnKeyDown(int key, int rep)
 {
+    ClientKeyEvent(key,true);
 
 #define __ALLOW_EDIT_MODE__
 #ifdef __ALLOW_EDIT_MODE__
@@ -4623,6 +4614,7 @@ void CGameClientShell::OnKeyDown(int key, int rep)
 // ----------------------------------------------------------------------- //
 void CGameClientShell::OnKeyUp(int key)
 {
+    ClientKeyEvent(key,false);
 	m_InterfaceMgr.OnKeyUp(key);
 }
 
@@ -6178,7 +6170,7 @@ LTBOOL CGameClientShell::DoLoadWorld(char* pWorldFile, char* pCurWorldSaveFile,
 
 
 	CMissionData* pMissionData = m_InterfaceMgr.GetMissionData();
-	_ASSERT(pMissionData);
+	GAME_ASSERT(pMissionData);
     if (!pMissionData) return LTFALSE;
 
 
@@ -6896,7 +6888,7 @@ void CGameClientShell::MirrorSConVar(char *pSVarName, char *pCVarName)
     fVal = g_pLTClient->GetServerConVarValueFloat(pSVarName);
 
 	// Special case, make all farz calls go through this function...
-	if (stricmp(pCVarName, "FarZ") == 0)
+	if (nolf::ascii_compare(pCVarName, "FarZ") == 0)
 	{
 		SetFarZ((int)fVal);
 	}
@@ -7447,7 +7439,7 @@ void CGameClientShell::InitMultiPlayer()
 		if ( strchr(szTemp, ',') )
 		{
 			*strchr(szTemp, ',') = '_';
-			_strlwr(szTemp);
+			nolf::ascii_lowercase(szTemp);
 			strcpy(sSkin, g_pModelButeMgr->GetButeMgr()->GetString(szTemp, "Skin0"));
 			strcpy(sHead, g_pModelButeMgr->GetButeMgr()->GetString(szTemp, "Head0"));
 		} 
@@ -7968,20 +7960,21 @@ LTBOOL CGameClientShell::GetNiceWorldName(char* pWorldFile, char* pRetName, int 
 {
     if (!pWorldFile || !pRetName || nRetLen < 2) return LTFALSE;
 
-	char buf[_MAX_PATH];
+	char buf[LT_MAX_PATH];
 	buf[0] = '\0';
 	uint32 len;
 
-	char buf2[_MAX_PATH];
-	sprintf(buf2, "%s.dat", pWorldFile);
+	char buf2[LT_MAX_PATH];
+	const int filenameLength = std::snprintf(buf2, sizeof(buf2), "%s.dat", pWorldFile);
+    if (filenameLength < 0 || filenameLength >= int(sizeof(buf2))) return LTFALSE;
 
-    LTRESULT dRes = g_pLTClient->GetWorldInfoString(buf2, buf, _MAX_PATH, &len);
+    LTRESULT dRes = g_pLTClient->GetWorldInfoString(buf2, buf, LT_MAX_PATH, &len);
 
 	if (dRes != LT_OK || !buf[0] || len < 1)
 	{
 		// try pre-pending "worlds\" to the filename to see if it will find it then...
 		// sprintf (buf2, "worlds\\%s.dat", pWorldFile);
-        // dRes = g_pLTClient->GetWorldInfoString(buf2, buf, _MAX_PATH, &len);
+        // dRes = g_pLTClient->GetWorldInfoString(buf2, buf, LT_MAX_PATH, &len);
 
 		if (dRes != LT_OK || !buf[0] || len < 1)
 		{
@@ -7990,8 +7983,8 @@ LTBOOL CGameClientShell::GetNiceWorldName(char* pWorldFile, char* pRetName, int 
 	}
 
 
-	char tokenSpace[5*(PARSE_MAXTOKENSIZE + 1)];
-	char *pTokens[5];
+	char tokenSpace[PARSE_MAXTOKENS*PARSE_MAXTOKENSIZE];
+	char *pTokens[PARSE_MAXTOKENS];
 	int nArgs;
 
 	char* pCurPos = buf;
@@ -8003,9 +7996,10 @@ LTBOOL CGameClientShell::GetNiceWorldName(char* pWorldFile, char* pRetName, int 
         bMore = g_pLTClient->Parse(pCurPos, &pNextPos, tokenSpace, pTokens, &nArgs);
 		if (nArgs < 2) break;
 
-		if (_stricmp(pTokens[0], "WORLDNAME") == 0)
+		if (nolf::ascii_compare(pTokens[0], "WORLDNAME") == 0)
 		{
-			strncpy(pRetName, pTokens[1], nRetLen);
+			strncpy(pRetName, pTokens[1], nRetLen-1);
+            pRetName[nRetLen-1] = 0;
             return LTTRUE;
 		}
 
@@ -8474,184 +8468,64 @@ void DefaultModelHook (ModelHookData *pData, void *pUser)
 //
 // --------------------------------------------------------------------------- //
 
-LRESULT CALLBACK HookedWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+void CGameClientShell::HandleWindowInput(const nolf::platform::InputEvent& event)
 {
-#ifdef NOLFSRC_MODERN
-	// M-P1-13: during shutdown a message can arrive after UnhookWindow
-	// cleared the engine's procedure; calling through NULL crashed
-	if (!g_pfnMainWndProc)
-	{
-		return DefWindowProc(hWnd, uMsg, wParam, lParam);
-	}
-#endif
-#ifdef NOLFSRC_MODERN
-	// M-P1-03: raw mouse input (WM_INPUT), the cursor while captured
-	P1Input_OnWindowMessage(hWnd, uMsg, wParam, lParam);
-#endif
-	switch(uMsg)
-	{
-		HANDLE_MSG(hWnd, WM_LBUTTONUP, CGameClientShell::OnLButtonUp);
-		HANDLE_MSG(hWnd, WM_LBUTTONDOWN, CGameClientShell::OnLButtonDown);
-		HANDLE_MSG(hWnd, WM_LBUTTONDBLCLK, CGameClientShell::OnLButtonDblClick);
-		HANDLE_MSG(hWnd, WM_RBUTTONUP, CGameClientShell::OnRButtonUp);
-		HANDLE_MSG(hWnd, WM_RBUTTONDOWN, CGameClientShell::OnRButtonDown);
-		HANDLE_MSG(hWnd, WM_RBUTTONDBLCLK, CGameClientShell::OnRButtonDblClick);
-		HANDLE_MSG(hWnd, WM_MOUSEMOVE, CGameClientShell::OnMouseMove);
-		HANDLE_MSG(hWnd, WM_CHAR, CGameClientShell::OnChar);
-		HANDLE_MSG(hWnd, WM_SETCURSOR, OnSetCursor);
-	}
-	_ASSERT(g_pfnMainWndProc);
-	return(CallWindowProc(g_pfnMainWndProc,hWnd,uMsg,wParam,lParam));
+    using nolf::platform::InputType;
+    if (event.type == InputType::focus) {
+        OnEvent(event.pressed ? LTEVENT_GAINEDFOCUS : LTEVENT_LOSTFOCUS,0);
+        return;
+    }
+    if (!g_pInterfaceMgr) return;
+    if (event.type == InputType::text) {
+        for (char character : event.text) OnChar(character);
+        return;
+    }
+    if (!std::isfinite(event.pointer_x) || !std::isfinite(event.pointer_y)) return;
+    const auto x=int(std::clamp(event.pointer_x,-1000000.0f,1000000.0f));
+    const auto y=int(std::clamp(event.pointer_y,-1000000.0f,1000000.0f));
+    if (event.type == InputType::mouse_motion) OnMouseMove(x,y);
+    else if (event.type == InputType::mouse_button) {
+        if (event.code == int(nolf::platform::MouseButton::Left)) {
+            if (!event.pressed) OnLButtonUp(x,y);
+            else if (event.clicks >= 2) OnLButtonDblClick(x,y);
+            else OnLButtonDown(x,y);
+        } else if (event.code == int(nolf::platform::MouseButton::Right)) {
+            if (!event.pressed) OnRButtonUp(x,y);
+            else if (event.clicks >= 2) OnRButtonDblClick(x,y);
+            else OnRButtonDown(x,y);
+        }
+    }
 }
-
-void CGameClientShell::OnChar(HWND hWnd, char c, int rep)
-{
-	g_pInterfaceMgr->OnChar(c);
-}
-
-
-void CGameClientShell::OnLButtonUp(HWND hWnd, int x, int y, UINT keyFlags)
-{
-	g_pInterfaceMgr->OnLButtonUp(x,y);
-}
-
-void CGameClientShell::OnLButtonDown(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
-{
-	/*if (!g_tmrDblClick.Stopped() &&
-		(g_mouseMgr.GetClickPosX() == x) && (g_mouseMgr.GetClickPosY() == y))
-	{
-		g_tmrDblClick.Stop();
-		OnLButtonDblClick(hwnd,fDoubleClick,x,y,keyFlags);
-	}
-	else
-	{
-		g_mouseMgr.SetClickPos(x,y);
-		g_tmrDblClick.Start(.5);
-	}*/
-
-	g_pInterfaceMgr->OnLButtonDown(x,y);
-}
-
-void CGameClientShell::OnLButtonDblClick(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
-{
-	g_pInterfaceMgr->OnLButtonDblClick(x,y);
-}
-
-void CGameClientShell::OnRButtonUp(HWND hwnd, int x, int y, UINT keyFlags)
-{
-	g_pInterfaceMgr->OnRButtonUp(x,y);
-}
-
-void CGameClientShell::OnRButtonDown(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
-{
-	g_pInterfaceMgr->OnRButtonDown(x,y);
-}
-
-void CGameClientShell::OnRButtonDblClick(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags)
-{
-	g_pInterfaceMgr->OnRButtonDblClick(x,y);
-}
-
-void CGameClientShell::OnMouseMove(HWND hwnd, int x, int y, UINT keyFlags)
-{
-	//g_mouseMgr.SetMousePos(x,y);
-
-	g_pInterfaceMgr->OnMouseMove(x,y);
-}
-
-BOOL OnSetCursor(HWND hwnd, HWND hwndCursor, UINT codeHitTest, UINT msg)
-{
-	return TRUE;
-}
-
-
-// --------------------------------------------------------------------------- //
-//
-//	ROUTINE:	HookWindow
-//
-//	PURPOSE:	HOOK IT!
-//
-// --------------------------------------------------------------------------- //
+void CGameClientShell::OnChar(char character) { g_pInterfaceMgr->OnChar(character); }
+void CGameClientShell::OnLButtonUp(int x,int y) { g_pInterfaceMgr->OnLButtonUp(x,y); }
+void CGameClientShell::OnLButtonDown(int x,int y) { g_pInterfaceMgr->OnLButtonDown(x,y); }
+void CGameClientShell::OnLButtonDblClick(int x,int y) { g_pInterfaceMgr->OnLButtonDblClick(x,y); }
+void CGameClientShell::OnRButtonUp(int x,int y) { g_pInterfaceMgr->OnRButtonUp(x,y); }
+void CGameClientShell::OnRButtonDown(int x,int y) { g_pInterfaceMgr->OnRButtonDown(x,y); }
+void CGameClientShell::OnRButtonDblClick(int x,int y) { g_pInterfaceMgr->OnRButtonDblClick(x,y); }
+void CGameClientShell::OnMouseMove(int x,int y) { g_pInterfaceMgr->OnMouseMove(x,y); }
 
 BOOL HookWindow()
 {
-	// Get the screen dimz
-    HSURFACE hScreen = g_pLTClient->GetScreenSurface();
-	if(!hScreen)
-		return FALSE;
-
-	// Hook the window
-    if(g_pLTClient->GetEngineHook("HWND",(void **)&g_hMainWnd) != LT_OK)
-	{
-		TRACE("HookWindow - ERROR - could not get the engine window!\n");
-		return FALSE;
-	}
-
-	// Get the window procedure
-#ifdef STRICT
-	g_pfnMainWndProc = (WNDPROC)GetWindowLong(g_hMainWnd,GWL_WNDPROC);
-#else
-	g_pfnMainWndProc = (FARPROC)GetWindowLong(g_hMainWnd,GWL_WNDPROC);
-#endif
-
-	if(!g_pfnMainWndProc)
-	{
-		TRACE("HookWindow - ERROR - could not get the window procedure from the engine window!\n");
-		return FALSE;
-	}
-
-	// Replace it with ours
-	if(!SetWindowLong(g_hMainWnd,GWL_WNDPROC,(LONG)HookedWindowProc))
-	{
-		TRACE("HookWindow - ERROR - could not set the window procedure!\n");
-		return FALSE;
-	}
-
-	// Clip the cursor if we're NOT in a window
-    HCONSOLEVAR hVar = g_pLTClient->GetConsoleVar("Windowed");
-	BOOL bClip = TRUE;
-	if(hVar)
-	{
-        float fVal = g_pLTClient->GetVarValueFloat(hVar);
-		if(fVal == 1.0f)
-			bClip = FALSE;
-	}
-
-	if(bClip)
-	{
-        uint32 dwScreenWidth = g_pGameClientShell->GetScreenWidth();
-        uint32 dwScreenHeight = g_pGameClientShell->GetScreenHeight();
-
-		SetWindowLong(g_hMainWnd,GWL_STYLE,WS_VISIBLE);
-		SetWindowPos(g_hMainWnd,HWND_TOPMOST,0,0,dwScreenWidth,dwScreenHeight,SWP_FRAMECHANGED);
-		RECT wndRect;
-		GetWindowRect(g_hMainWnd, &wndRect);
-		ClipCursor(&wndRect);
-	}
-
-	return TRUE;
+    try {
+        nolf::client_window(*g_pLTClient).text_input(true);
+        return TRUE;
+    } catch (const std::exception& error) {
+        g_pLTClient->CPrint("Client window initialization failed: %s",error.what());
+        return FALSE;
+    }
 }
-
-// --------------------------------------------------------------------------- //
-//
-//	ROUTINE:	UnhookWindow
-//
-//	PURPOSE:	Unhook the window
-//
-// --------------------------------------------------------------------------- //
-
 void UnhookWindow()
 {
-#ifdef NOLFSRC_MODERN
-	// M-P1-03: stop raw mouse input, free the cursor
-	P1Input_OnWindowUnhooked();
-#endif
-	if(g_pfnMainWndProc && g_hMainWnd)
-	{
-		SetWindowLong(g_hMainWnd, GWL_WNDPROC, (LONG)g_pfnMainWndProc);
-		g_hMainWnd = 0;
-		g_pfnMainWndProc = NULL;
-	}
+    ClearClientKeys();
+    P1Input_OnWindowUnhooked();
+    try {
+        auto& window = nolf::client_window(*g_pLTClient);
+        window.text_input(false);
+        window.confine_cursor(std::nullopt);
+    } catch (const std::exception& error) {
+        nolf::platform::log("client window",error.what());
+    }
 }
 
 // --------------------------------------------------------------------------- //
@@ -9135,7 +9009,7 @@ LTBOOL CGameClientShell::CheckServerAddress(char *pszTestAddress, int nPort)
 {
 	if (!pszTestAddress) return LTFALSE;
 	if (nPort != m_nServerPort) return LTFALSE;
-	return (stricmp(pszTestAddress,m_szServerAddress) == 0);
+	return (nolf::ascii_compare(pszTestAddress,m_szServerAddress) == 0);
 }
 
 
@@ -9254,7 +9128,7 @@ LTBOOL CGameClientShell::DoJoinGame(char* sIp)
 #endif
 
 		// Wait a sec and try again.
-		Sleep(1000);
+		if (nRetries > 0) nolf::platform::sleep_for(std::chrono::seconds(1));
 		nRetries--;
 	}
 

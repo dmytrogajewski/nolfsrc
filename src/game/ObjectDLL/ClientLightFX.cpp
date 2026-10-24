@@ -10,11 +10,13 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include <stdio.h>
 #include "iltserver.h"
 #include "ClientLightFX.h"
-#include "SfxMsgIds.h"
+#include "SFXMsgIds.h"
 #include "ClientServerShared.h"
 #include "ServerUtilities.h"
 #include "ObjectMsgs.h"
@@ -398,12 +400,13 @@ uint32 ClientLightFX::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAG
 // ----------------------------------------------------------------------- //
 void ClientLightFX::HandleTrigger( HOBJECT hSender, HMESSAGEREAD hRead )
 {
-	const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+	const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+	const char* szMsg = szMsgStorage.c_str();
 
     uint32 dwUsrFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
     uint32 dwFlags    = g_pLTServer->GetObjectFlags(m_hObject);
 
-    if ( _stricmp(szMsg, "TOGGLE") == 0)
+    if ( nolf::ascii_compare(szMsg, "TOGGLE") == 0)
     {
 		// Toggle the flag
 		if (dwUsrFlags & USRFLG_VISIBLE)
@@ -415,11 +418,11 @@ void ClientLightFX::HandleTrigger( HOBJECT hSender, HMESSAGEREAD hRead )
 			dwUsrFlags |= USRFLG_VISIBLE;
 		}
     }
-    else if ( _stricmp(szMsg, "ON") == 0)
+    else if ( nolf::ascii_compare(szMsg, "ON") == 0)
     {
 		dwUsrFlags |= USRFLG_VISIBLE;
     }
-    else if ( _stricmp(szMsg, "OFF") == 0)
+    else if ( nolf::ascii_compare(szMsg, "OFF") == 0)
     {
 		dwUsrFlags &= ~USRFLG_VISIBLE;
     }

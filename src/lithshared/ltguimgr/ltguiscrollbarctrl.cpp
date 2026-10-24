@@ -3,7 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "ltguimgr.h"
-#include "ltguiscrollbarctrl.h"
+#include "LTGUIScrollBarCtrl.h"
 
 // Time delay before the up/down arrows begin repeating
 static LTFLOAT REPEAT_DELAY = 0.75f;

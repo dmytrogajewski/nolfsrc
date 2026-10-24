@@ -10,7 +10,11 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
+#include "engine/portable/string.h"
 #include "Attachments.h"
 #include "Body.h"
 #include "iltserver.h"
@@ -21,7 +25,7 @@
 #include "ObjectMsgs.h"
 #include "SoundMgr.h"
 #include "MsgIDs.h"
-#include "SFXMsgIDs.h"
+#include "SFXMsgIds.h"
 #include "SharedFXStructs.h"
 #include "CharacterHitBox.h"
 #include "AIVolumeMgr.h"
@@ -305,8 +309,9 @@ void Body::TriggerMsg(HOBJECT hSender, const char* szMsg)
 	{
 		int nArgs;
         bMore = g_pLTServer->Parse(pCommand, &s_pCommandPos, s_tokenSpace, s_pTokens, &nArgs);
+        if (!nArgs) { pCommand = s_pCommandPos; continue; }
 
-		if ( !_stricmp(s_pTokens[0], "SPLASH") )
+		if ( !nolf::ascii_compare(s_pTokens[0], "SPLASH") )
 		{
 			SetState(eBodyStateNormal);
 			g_pLTServer->SetModelAnimation(m_hObject, g_pLTServer->GetAnimIndex(m_hObject, "DSharkSplash"));
@@ -338,8 +343,8 @@ void Body::HandleModelString(ArgList* pArgList)
 	char* pKey = pArgList->argv[0];
 	if (!pKey) return;
 
-	LTBOOL bSlump = !_stricmp(pKey, s_szKeyNoise);
-	LTBOOL bLand = !_stricmp(pKey, s_szKeyLand);
+	LTBOOL bSlump = !nolf::ascii_compare(pKey, s_szKeyNoise);
+	LTBOOL bLand = !nolf::ascii_compare(pKey, s_szKeyLand);
 
 	if ( bSlump || bLand )
 	{
@@ -398,7 +403,7 @@ void Body::HandleModelString(ArgList* pArgList)
 		}
 
 		SURFACE* pSurf = g_pSurfaceMgr->GetSurface(eSurface);
-		_ASSERT(pSurf);
+		GAME_ASSERT(pSurf);
 		if (!pSurf) return;
 
 		// Update the noise info. We use a time in the future so AI's don't *instantly* react to the sound
@@ -947,7 +952,7 @@ void Body::HandleDamage(const DamageStruct& damage)
 
 void Body::CreateDeathScene(CCharacter *pChar)
 {
-	_ASSERT(pChar);
+	GAME_ASSERT(pChar);
 	if ( !pChar ) return;
 
 	m_DeathScene.Set(pChar, this);
@@ -1142,7 +1147,7 @@ void Body::Load(HMESSAGEREAD hRead, uint32 dwLoadFlags)
 
 		m_pAttachments = CAttachments::Create(dwAttachmentsType);
 
-		_ASSERT(m_pAttachments);
+		GAME_ASSERT(m_pAttachments);
 
 		if (m_pAttachments)
 		{

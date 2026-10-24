@@ -1,551 +1,177 @@
-// mfcs_string.cpp - implementation for the MFC stub CString class
-
-#include "stdafx.h"
+// Portable implementation of the game's MFC substitute string.
 #include "mfcs_string.h"
+#include "engine/portable/string.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdio.h>
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-#ifndef min
-#define min(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-#ifndef max
-#define max(a,b) (((a) > (b)) ? (a) : (b))
-#endif
-
-CString::CString() :
-	m_pBuffer(NULL)
-{
+namespace {
+DWORD string_size(std::size_t size) {
+    // Capacity includes a terminating byte in the fixed-width public API.
+    if (size >= std::numeric_limits<DWORD>::max())
+        throw std::length_error("CString exceeds its capacity limit");
+    return static_cast<DWORD>(size);
+}
 }
 
-CString::~CString() 
-{
-	Empty();
+CString::CString() : m_pBuffer(nullptr) {}
+CString::~CString() { Empty(); }
+CString::CString(LPCTSTR text) : m_pBuffer(nullptr) { CopyString(text); }
+CString::CString(const CString& text) : m_pBuffer(nullptr) { CopyString(text); }
+
+void CString::FormatV(LPCTSTR format, va_list args) {
+    if (!format) return;
+    // Both the format and string arguments may point into this CString.
+    // Finish formatting before replacing its storage. Each pass owns its list.
+    va_list measure;
+    va_copy(measure, args);
+    const int length = std::vsnprintf(nullptr, 0, format, measure);
+    va_end(measure);
+    if (length < 0) throw std::runtime_error("Invalid CString format");
+    std::vector<char> output(static_cast<std::size_t>(length) + 1);
+    va_list render;
+    va_copy(render, args);
+    const int written = std::vsnprintf(output.data(), output.size(), format, render);
+    va_end(render);
+    if (written != length) throw std::runtime_error("CString formatting failed");
+    CopyString(output.data());
 }
 
-CString::CString(LPCTSTR pString) :
-	m_pBuffer(NULL)
-{
-	CopyString(pString);
+void CString::Format(LPCTSTR format, ...) {
+    va_list args;
+    va_start(args, format);
+    try { FormatV(format, args); }
+    catch (...) { va_end(args); throw; }
+    va_end(args);
 }
 
-CString::CString(const CString &cString) :
-	m_pBuffer(NULL)
-{
-	CopyString(cString);
+int CString::Replace(LPCTSTR oldText, LPCTSTR newText) {
+    if (!oldText || !*oldText) return 0;
+    const std::string needle(oldText), replacement(newText ? newText : "");
+    std::string result(static_cast<LPCTSTR>(*this));
+    std::size_t position = 0;
+    int count = 0;
+    while ((position = result.find(needle, position)) != std::string::npos) {
+        result.replace(position, needle.size(), replacement);
+        position += replacement.size();
+        if (count == std::numeric_limits<int>::max())
+            throw std::length_error("Too many CString replacements");
+        ++count;
+    }
+    if (count) CopyString(result.c_str());
+    return count;
 }
 
-
-// CString Functions
-
-// Note : This function is basically a non-MFC version of what's in MFC
-void CString::FormatV(LPCTSTR pFormat, va_list args)
-{
-	// Don't step on the momeraths
-	if (!pFormat)
-		return;
-
-	va_list argListSave = args;
-
-	// make a guess at the maximum length of the resulting string
-	int nMaxLen = 0;
-	for (LPCTSTR lpsz = pFormat; *lpsz != '\0'; lpsz++)
-	{
-		// handle '%' character, but watch out for '%%'
-		if (*lpsz != '%' || *(++lpsz) == '%')
-		{
-			nMaxLen++;
-			continue;
-		}
-
-		int nItemLen = 0;
-
-		// handle '%' character with format
-		int nWidth = 0;
-		for (; *lpsz != '\0'; lpsz++)
-		{
-			// check for valid flags
-			if (*lpsz == '#')
-				nMaxLen += 2;   // for '0x'
-			else if (*lpsz == '*')
-				nWidth = va_arg(args, int);
-			else if (*lpsz == '-' || *lpsz == '+' || *lpsz == '0' ||
-				*lpsz == ' ')
-				;
-			else // hit non-flag character
-				break;
-		}
-		// get width and skip it
-		if (nWidth == 0)
-		{
-			// width indicated by
-			nWidth = atoi(lpsz);
-			for (; *lpsz != '\0' && isdigit(*lpsz); lpsz++)
-				;
-		}
-		ASSERT(nWidth >= 0);
-
-		int nPrecision = 0;
-		if (*lpsz == '.')
-		{
-			// skip past '.' separator (width.precision)
-			lpsz++;
-
-			// get precision and skip it
-			if (*lpsz == '*')
-			{
-				nPrecision = va_arg(args, int);
-				lpsz++;
-			}
-			else
-			{
-				nPrecision = atoi(lpsz);
-				for (; *lpsz != '\0' && isdigit(*lpsz); lpsz++)
-					;
-			}
-			ASSERT(nPrecision >= 0);
-		}
-
-		// should be on type modifier or specifier
-		if (strncmp(lpsz, "I64", 3) == 0)
-			lpsz += 3;
-		else
-		{
-			switch (*lpsz)
-			{
-				// modifiers that affect size (or would if they weren't ignored
-				case 'h':
-				case 'l':
-
-				// modifiers that do not affect size
-				case 'F':
-				case 'N':
-				case 'L':
-					lpsz++;
-					break;
-			}
-		}
-
-		// now should be on specifier
-		switch (*lpsz)
-		{
-			// single characters
-			case 'c':
-			case 'C':
-				nItemLen = 2;
-				va_arg(args, char);
-				break;
-
-			case 's':
-			case 'S':
-				{
-					LPCTSTR pstrNextArg = va_arg(args, LPCTSTR );
-					if (pstrNextArg == NULL)
-					   nItemLen = 6; // "(null)"
-					else
-					{
-					   nItemLen = strlen(pstrNextArg);
-					   nItemLen = max(1, nItemLen);
-					}
-				}
-				break;
-		}
-
-		// adjust nItemLen for strings
-		if (nItemLen != 0)
-		{
-			if (nPrecision != 0)
-				nItemLen = min(nItemLen, nPrecision);
-			nItemLen = max(nItemLen, nWidth);
-		}
-		else
-		{
-			switch (*lpsz)
-			{
-			// integers
-			case 'd':
-			case 'i':
-			case 'u':
-			case 'x':
-			case 'X':
-			case 'o':
-				va_arg(args, int);
-				nItemLen = 32;
-				nItemLen = max(nItemLen, nWidth+nPrecision);
-				break;
-
-			case 'e':
-			case 'g':
-			case 'G':
-				va_arg(args, double);
-				nItemLen = 128;
-				nItemLen = max(nItemLen, nWidth+nPrecision);
-				break;
-
-			case 'f':
-				{
-					double f;
-					// 312 == strlen("-1+(309 zeroes).")
-					// 309 zeroes == max precision of a double
-					// 6 == adjustment in case precision is not specified,
-					//   which means that the precision defaults to 6
-					char pszTemp[312 + 6 + 1];
-
-					f = va_arg(args, double);
-					sprintf( pszTemp, "%*.*f", nWidth, nPrecision+6, f );
-					nItemLen = strlen(pszTemp);
-				}
-				break;
-
-			case 'p':
-				va_arg(args, void*);
-				nItemLen = 32;
-				nItemLen = max(nItemLen, nWidth+nPrecision);
-				break;
-
-			// no output
-			case 'n':
-				va_arg(args, int*);
-				break;
-
-			default:
-				break;	// unknown formatting option
-			}
-		}
-
-		// adjust nMaxLen for output nItemLen
-		nMaxLen += nItemLen;
-	}
-
-	vsprintf(GetBuffer(nMaxLen), pFormat, argListSave);
-	ReleaseBuffer();
-
-	va_end(argListSave);
+int CString::Find(char ch, DWORD start) const {
+    if (start > GetLength()) return -1;
+    const char* found = std::strchr(GetBuffer() + start, ch);
+    return found ? static_cast<int>(found - GetBuffer()) : -1;
 }
 
-void CString::Format(LPCTSTR pFormat, ...)
-{
-	va_list v;
-	va_start(v, pFormat);
-	FormatV(pFormat, v);
-	va_end(v);
+int CString::Find(LPCTSTR substring, DWORD start) const {
+    if (!substring || start > GetLength()) return -1;
+    const char* found = std::strstr(GetBuffer() + start, substring);
+    return found ? static_cast<int>(found - GetBuffer()) : -1;
 }
 
-// Note : This function is basically a non-MFC version of what's in MFC
-// Also note : I'm not 100% sure this is going to work correctly 100% of the time...
-int CString::Replace(LPCTSTR pOld, LPCTSTR pNew)
-{
-	// can't have empty or NULL pOld
-
-	int nSourceLen = strlen(pOld);
-	if (nSourceLen == 0)
-		return 0;
-	int nReplacementLen = strlen(pNew);
-
-	// loop once to figure out the size of the result string
-	int nCount = 0;
-	char *lpszStart = GetBuffer();
-	char *lpszEnd = lpszStart + GetBufferSize();
-	char *lpszTarget;
-	while ((lpszTarget = strstr(lpszStart, pOld)) != NULL)
-	{
-		if (lpszTarget >= lpszEnd)
-			break;
-		nCount++;
-		lpszStart = lpszTarget + nSourceLen;
-	}
-
-	// if any changes should be made, make them
-	if (nCount > 0)
-	{
-		// Make sure the changes are going to fit
-		int nOldLength = GetLength();
-		int nNewLength =  nOldLength + (nReplacementLen-nSourceLen)*nCount;
-		if (!ExpandBuffer(nNewLength + 1))
-			return 0;
-
-		lpszStart = GetBuffer();
-		lpszEnd = lpszStart + GetBufferSize();
-
-		// loop again to actually do the work
-		while ( (lpszTarget = strstr(lpszStart, pOld)) != NULL)
-		{
-			// Stay inside the buffer...
-			if (lpszTarget >= lpszEnd)
-				break;
-
-			int nBalance = nOldLength - (lpszTarget - GetBuffer() + nSourceLen);
-			memmove(lpszTarget + nReplacementLen, lpszTarget + nSourceLen, nBalance);
-			memcpy(lpszTarget, pNew, nReplacementLen);
-			lpszStart = lpszTarget + nReplacementLen;
-			lpszStart[nBalance] = '\0';
-			nOldLength += (nReplacementLen - nSourceLen);
-		}
-		SetLength(nNewLength);
-	}
-
-	return nCount;
+void CString::ReleaseBuffer(SDWORD length) {
+    if (!m_pBuffer) return;
+    const auto capacity = GetBufferSize();
+    if (length < 0) {
+        // A caller may have filled every byte. Always leave a terminator.
+        m_pBuffer[capacity - 1] = '\0';
+        SetLength(static_cast<DWORD>(std::strlen(m_pBuffer)));
+    } else {
+        const auto size = std::min(static_cast<DWORD>(length), capacity - 1);
+        m_pBuffer[size] = '\0';
+        SetLength(size);
+    }
 }
 
-#if 0  // added after LT2-era mfcstub; not in the shipped LT2 lib
-int CString::Replace(char chOld, char chNew)
-{
-	int nCount = 0;
-
-	// short-circuit the nop case
-	if (chOld != chNew)
-	{
-		// otherwise modify each character that matches in the string
-		char* psz = GetBuffer( );
-		char* pszEnd = psz + GetBufferSize();
-		while (psz < pszEnd)
-		{
-			// replace instances of the specified character only
-			if (*psz == chOld)
-			{
-				*psz = chNew;
-				nCount++;
-			}
-			psz++;
-		}
-	}
-
-	return nCount;
-}
-#endif
-
-int CString::Find(char ch, DWORD start) const
-{
-	if (start >= GetLength())
-		return -1;
-
-	char *pResult = strchr(&(GetBuffer()[start]), ch);
-
-	return (pResult) ? pResult - GetBuffer() : -1;
+void CString::CopyString(LPCTSTR text) {
+    if (!text) { Empty(); return; }
+    // Assignment from our own buffer or a suffix survives reallocation.
+    const std::string copy(text);
+    const auto size = string_size(copy.size());
+    ExpandBuffer(size + 1);
+    std::memcpy(m_pBuffer, copy.c_str(), static_cast<std::size_t>(size) + 1);
+    SetLength(size);
 }
 
-int CString::Find(LPCTSTR pSub, DWORD start) const
-{
-	if (start >= GetLength())
-		return -1;
-
-	char *pResult = strstr(&(GetBuffer()[start]), pSub);
-
-	return (pResult) ? pResult - GetBuffer() : -1;
+BOOL CString::ExpandBuffer(DWORD capacity) {
+    if (GetBufferSize() >= capacity) return TRUE;
+    auto* storage = new char[sizeof(CStringData) + static_cast<std::size_t>(capacity)];
+    auto* data = ::new (storage) CStringData;
+    data->m_BufferSize = capacity;
+    data->m_Length = GetLength();
+    char* buffer = data->data();
+    if (m_pBuffer) std::memcpy(buffer, m_pBuffer, static_cast<std::size_t>(GetLength()) + 1);
+    else buffer[0] = '\0';
+    delete[] reinterpret_cast<char*>(GetData());
+    m_pBuffer = buffer;
+    return TRUE;
 }
 
-void CString::ReleaseBuffer(SDWORD length)
-{
-	// Calculate the length if they don't give us one
-	if (length < 0)
-		SetLength((DWORD)strlen(GetBuffer()));
-	else if ((DWORD)length < GetBufferSize()) 
-	{
-		// Just force it..
-		SetLength((DWORD)length);
-		GetBuffer()[(DWORD)length] = 0;
-	}
-	else if (GetBufferSize())
-	{
-		SetLength(GetBufferSize() - 1);
-		GetBuffer()[GetBufferSize() - 1] = 0;
-	}
+BOOL CString::ShrinkBuffer(DWORD capacity) {
+    if (capacity >= GetBufferSize()) return TRUE;
+    if (!capacity) {
+        delete[] reinterpret_cast<char*>(GetData());
+        m_pBuffer = nullptr;
+        return TRUE;
+    }
+    const auto length = std::min(GetLength(), capacity - 1);
+    auto* storage = new char[sizeof(CStringData) + static_cast<std::size_t>(capacity)];
+    auto* data = ::new (storage) CStringData;
+    data->m_BufferSize = capacity;
+    data->m_Length = length;
+    std::memcpy(data->data(), m_pBuffer, length);
+    data->data()[length] = '\0';
+    delete[] reinterpret_cast<char*>(GetData());
+    m_pBuffer = data->data();
+    return TRUE;
 }
 
-void CString::CopyString(LPCTSTR pString)
-{
-	if (pString)
-	{
-		DWORD newLength = (DWORD)strlen(pString);
-		memcpy(GetBuffer(newLength + 1), pString, newLength + 1);
-		SetLength(newLength);
-	}
-	else
-		Empty();
+char* CString::GetBuffer(DWORD minLength) {
+    if (minLength == std::numeric_limits<DWORD>::max())
+        throw std::length_error("CString capacity overflow");
+    ExpandBuffer(minLength + 1);
+    return m_pBuffer;
 }
 
-BOOL CString::ExpandBuffer(DWORD minLength)
-{
-	// Make sure it's not already big enough
-	if (GetBufferSize() >= minLength)
-		return TRUE;
-
-	// Allocate the new buffer
-	CStringData *pNewBuffer = (CStringData *)(new char[sizeof(CStringData) + minLength]);
-	if (!pNewBuffer)
-		return FALSE;
-
-	// Save the old information
-	char *pOldBuffer = GetBuffer();
-	DWORD oldLength = GetLength();
-
-	// Set up the new data structure
-	pNewBuffer->m_BufferSize = minLength;
-	pNewBuffer->m_Length = oldLength;
-	m_pBuffer = (LPSTR)(pNewBuffer + 1);
-
-	if (pOldBuffer)
-	{
-		// Copy the old string
-		if (GetLength())
-			memcpy(GetBuffer(), pOldBuffer, oldLength);
-		// Delete the old buffer
-		pOldBuffer -= sizeof(CStringData);
-		delete pOldBuffer;
-	}
-
-	// Make sure the string is terminated
-	GetBuffer()[oldLength] = 0;
-
-	return TRUE;
+void CString::Concat(LPCTSTR text) {
+    if (!text || !*text) return;
+    const std::string copy(text);
+    const auto length = GetLength();
+    const auto size = string_size(static_cast<std::size_t>(length) + copy.size());
+    ExpandBuffer(size + 1);
+    std::memcpy(m_pBuffer + length, copy.c_str(), copy.size() + 1);
+    SetLength(size);
 }
 
-BOOL CString::ShrinkBuffer(DWORD maxLength)
-{
-	if (maxLength >= GetBufferSize())
-		return TRUE;
-
-	// Get the old values
-	char *pOldBuffer = GetBuffer();
-	DWORD oldLength = min(GetLength(), maxLength - 1);
-
-	// Allocate the new buffer
-	if (maxLength)
-	{
-		CStringData *pNewBuffer = (CStringData *)(new char[sizeof(CStringData) + maxLength]);
-		if (!pNewBuffer)
-			return FALSE;
-
-		// Set up the new data structure
-		pNewBuffer->m_BufferSize = maxLength;
-		pNewBuffer->m_Length = oldLength;
-		m_pBuffer = (LPSTR)(pNewBuffer + 1);
-
-		// Copy the old string
-		if (pOldBuffer && oldLength)
-			memcpy(GetBuffer(), pOldBuffer, oldLength);
-
-		// Terminate the string
-		GetBuffer()[oldLength] = 0;
-	}
-	else // Set the data structure to empty
-		m_pBuffer = NULL;
-
-	// Delete the old buffer
-	if (pOldBuffer)
-	{
-		pOldBuffer -= sizeof(CStringData);
-		delete pOldBuffer;
-	}
-
-	return TRUE;
+void CString::Concat(char ch) {
+    const auto length = GetLength();
+    const auto size = string_size(static_cast<std::size_t>(length) + 1);
+    ExpandBuffer(size + 1);
+    m_pBuffer[length] = ch;
+    m_pBuffer[size] = '\0';
+    SetLength(size);
 }
 
-char *CString::GetBuffer(DWORD minLength)
-{
-	if (!ExpandBuffer(minLength + 1)) 
-		return NULL; 
-
-	return m_pBuffer; 
+CString CString::Mid(DWORD first, DWORD count) const {
+    if (first >= GetLength()) return CString("");
+    count = std::min(count, GetLength() - first);
+    return CString(std::string(GetBuffer() + first, count).c_str());
 }
-
-void CString::Concat(LPCTSTR pString)
-{
-	DWORD otherLength = (DWORD)strlen(pString);
-	if (!ExpandBuffer(GetLength() + otherLength + 1))
-		return;
-	// The shipped code stops here: it never calls SetLength, so the stored
-	// length stays whatever ExpandBuffer carried over. That is a bug in the
-	// shipped library — appending leaves GetLength() short — and it is what
-	// the bytes say, so it is what this reconstructs.
-	memcpy(&(GetBuffer()[GetLength()]), pString, otherLength + 1);
-#ifdef NOLFSRC_MODERN
-	// fixed: CString::Concat(LPCTSTR) leaves the length short (RETAIL_BUGS.md).
-	SetLength(GetLength() + otherLength);
-#endif
+CString CString::Mid(DWORD first) const { return Mid(first, GetLength()); }
+CString CString::Left(DWORD count) const { return Mid(0, count); }
+CString CString::Right(DWORD count) const {
+    count = std::min(count, GetLength());
+    return Mid(GetLength() - count, count);
 }
-
-void CString::Concat(char ch)
-{
-	if (!ExpandBuffer(GetLength() + 16))
-	{
-		if (!ExpandBuffer(GetLength() + 1 + 1))
-			return;
-	}
-	GetBuffer()[GetLength()] = ch;
-	GetBuffer()[GetLength() + 1] = 0;
-	SetLength(GetLength() + 1);
-}
-
-CString CString::Mid(DWORD nFirst, DWORD nCount) const
-{
-	if (nFirst + nCount > GetLength())
-		nCount = GetLength() - nFirst;
-	if (nFirst > GetLength())
-		nCount = 0;
-
-	// optimize case of returning entire string
-	if ((nFirst == 0) && (nFirst + nCount == GetLength()))
-		return *this;
-
-	CString dest(&(GetBuffer()[nFirst]));
-	dest.GetBuffer(nCount + 1)[nCount] = 0;
-	return dest;
-}
-
-CString CString::Mid(DWORD nFirst) const
-{
-	return Mid(nFirst, GetLength() - nFirst);
-}
-
-CString CString::Left(DWORD nCount) const
-{
-	if (nCount < 0)
-		nCount = 0;
-	if (nCount >= GetLength())
-		return *this;
-
-	CString dest(GetBuffer());
-	dest.GetBuffer(nCount + 1)[nCount] = 0;
-	return dest;
-}
-
-CString CString::Right(DWORD nCount) const
-{
-	if (nCount < 0)
-		nCount = 0;
-	if (nCount >= GetLength())
-		return *this;
-
-	CString dest(&(GetBuffer()[GetLength() - nCount]));
-	return dest;
-}
-
-int CString::Compare(LPCTSTR lpsz) const 
-{ 
-	return strcmp(GetBuffer(), lpsz); 
-}
-
-int CString::CompareNoCase(LPCTSTR lpsz) const 
-{ 
-	return stricmp(GetBuffer(), lpsz); 
-}
-
-#if 0  // added after LT2-era mfcstub; not in the shipped LT2 lib
-void CString::MakeUpper()
-{
-	_strupr( GetBuffer( ));
-}
-
-void CString::MakeLower()
-{
-	_strlwr( GetBuffer( ));
-}
-
-void CString::MakeReverse()
-{
-	_strrev( GetBuffer( ));
-}
-#endif
+int CString::Compare(LPCTSTR text) const { return std::strcmp(GetBuffer(), text ? text : ""); }
+int CString::CompareNoCase(LPCTSTR text) const { return nolf::ascii_compare(GetBuffer(), text ? text : ""); }

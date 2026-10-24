@@ -1,3 +1,6 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <atomic>
 //*********************************************************************************
 //*********************************************************************************
 // Project:		Lith Tech Font Manager
@@ -13,6 +16,8 @@
 
 LithFont::LithFont()
 {
+	static std::atomic<uint64> next_generation{1};
+	m_FontGeneration = next_generation.fetch_add(1,std::memory_order_relaxed);
 	m_pClient = LTNULL;
 	memset(m_szRefName, 0, LTF_REF_NAME_SIZE);
 	m_nHeight = 0;
@@ -32,15 +37,17 @@ LTBOOL LithFont::Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS)
 	if (!pClient || !lfCS)
 		return LTFALSE;
 
-	// Setup the reference name for this font
-	if (lfCS->szRefName)
-		strcpy(m_szRefName, lfCS->szRefName);
-	else if (lfCS->szFontBitmap)
-		GetFilename(lfCS->szFontBitmap, m_szRefName);
-	else
-		strcpy(m_szRefName, lfCS->szFontName);
+    const char* source = lfCS->szRefName ? lfCS->szRefName : lfCS->szFontBitmap ? lfCS->szFontBitmap : lfCS->szFontName;
+    if (!source) return LTFALSE;
+    std::string_view name(source);
+    if (!lfCS->szRefName && lfCS->szFontBitmap) {
+        if (const auto slash = name.find_last_of("/\\"); slash != name.npos) name.remove_prefix(slash+1);
+        name = name.substr(0,name.find('.'));
+    }
+    if (name.empty() || name.size() >= sizeof(m_szRefName)) return LTFALSE;
+    std::memcpy(m_szRefName,name.data(),name.size()); m_szRefName[name.size()] = 0;
 
-	strupr(m_szRefName);
+	nolf::ascii_uppercase(m_szRefName);
 
 	m_pClient = pClient;
 
@@ -52,6 +59,31 @@ LTBOOL LithFont::Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS)
 void LithFont::Free()
 {
 	m_pClient = LTNULL;
+}
+
+char* LithFont::PrepareText(const char* source, int index)
+{
+    if (!source) { m_StringStorage.clear(); return m_StringStorage.data(); }
+    const auto* end = index >= 0 ? nolf::text::advance(source,std::size_t(index)) : source+std::strlen(source);
+    m_StringStorage = std::string(source,static_cast<std::size_t>(end-source));
+    return m_StringStorage.data();
+}
+
+bool LithFont::UpdateLayoutIdentity(LITHFONTSAVEDATA& saved, const LITHFONTDRAWDATA& draw, uint32 flags)
+{
+    if (!draw.bForceFormat && saved.szPrevString && saved.previousText == m_StringStorage &&
+        saved.fontGeneration == m_FontGeneration && saved.formatWidth == draw.dwFormatWidth &&
+        saved.formatFlags == flags && saved.nLastLetterSpace == draw.nLetterSpace &&
+        saved.letterDelay == draw.fLetterDelay && saved.lineDelay == draw.fLineDelay &&
+        saved.scrollTime == draw.fLineScrollTime && saved.waitLines == draw.nNumWaitLines) return false;
+    saved.szPrevString = m_StringStorage.data();
+    saved.previousText = m_StringStorage;
+    saved.fontGeneration = m_FontGeneration;
+    saved.formatWidth = draw.dwFormatWidth; saved.formatFlags = flags;
+    saved.nLastLetterSpace = draw.nLetterSpace;
+    saved.letterDelay = draw.fLetterDelay; saved.lineDelay = draw.fLineDelay;
+    saved.scrollTime = draw.fLineScrollTime; saved.waitLines = draw.nNumWaitLines;
+    return true;
 }
 
 //*********************************************************************************
@@ -85,28 +117,3 @@ void LithFont::GetPositionFromIndex(HSTRING szString, LITHFONTDRAWDATA *lfDD, in
 }
 
 //*********************************************************************************
-
-void LithFont::GetFilename(char *szFullPath, char *szName)
-{
-	// Find the start of the filename
-	char *pStart = szFullPath;
-	char *pTemp = strstr(szFullPath, "\\");
-
-	while (pTemp)
-	{
-		pTemp++;
-		pStart = pTemp;
-		pTemp = strstr(pTemp, "\\");
-	}
-
-	// Copy the filename up to the extension
-	int i = 0;
-	while (pStart[i] != 0)
-	{
-		if (pStart[i] == '.')
-			break;
-
-		szName[i] = pStart[i];
-		i++;
-	}
-}

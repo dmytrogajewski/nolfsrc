@@ -116,6 +116,8 @@ int GetCommandKey(int nActionCode);
 //get the name of the key bound to an action, "" if no binding can be found.
 void GetCommandKeyStr(int nActionCode, char *pBuf, int nBufLen);
 
-#define IsKeyDown(key)		(GetAsyncKeyState(key) & 0x80000000)
+bool IsKeyDown(int logical_key);
+void ClientKeyEvent(int logical_key,bool pressed);
+void ClearClientKeys();
 
 #endif // __CLIENT_UTILITIES_H__

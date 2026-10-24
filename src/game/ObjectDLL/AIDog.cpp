@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIDog.h"
 #include "CharacterHitBox.h"
 
@@ -126,7 +129,7 @@ AI_Dog::AI_Dog() : CAIAnimal()
 
 	if ( !m_SteeringMgr.Init(this) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
         g_pLTServer->CPrint("could not initialize dog's steeringmgr");
 	}
 
@@ -169,14 +172,14 @@ void AI_Dog::HandleModelString(ArgList* pArgList)
 	char* pKey = pArgList->argv[0];
 	if (!pKey) return;
 
-	if (stricmp(pKey, c_szKeyBark) == 0)
+	if (nolf::ascii_compare(pKey, c_szKeyBark) == 0)
 	{
         m_bBarked = LTTRUE;
 
 		PlaySound(aisBark);
 	}
 
-	if (stricmp(pKey, c_szKeyBite) == 0)
+	if (nolf::ascii_compare(pKey, c_szKeyBite) == 0)
 	{
         LTFLOAT fBiteDistance = 100.0f;  // TODO: Bute
         LTFLOAT fBiteDamage = 10.0f;     // TODO: Bute
@@ -196,7 +199,7 @@ void AI_Dog::HandleModelString(ArgList* pArgList)
 				if ( IsKindOf(IInfo.m_hObject, "CCharacterHitBox") )
 				{
                     CCharacterHitBox* pHitBox = (CCharacterHitBox*)g_pLTServer->HandleToObject(IInfo.m_hObject);
-					_ASSERT(pHitBox);
+					GAME_ASSERT(pHitBox);
 					if ( !pHitBox ) return;
 
 					DamageStruct damage;
@@ -326,7 +329,7 @@ LTBOOL AI_Dog::HandleCommand(char** pTokens, int nArgs)
 
 	for ( int iState = 0 ; iState < s_cStateMaps ; iState++ )
 	{
-		if ( !_stricmp(pTokens[0], s_aStateMaps[iState].szState) )
+		if ( !nolf::ascii_compare(pTokens[0], s_aStateMaps[iState].szState) )
 		{
 			// Change states
 
@@ -375,7 +378,7 @@ void AI_Dog::SetState(CAIDogState::AIDogStateType eState)
 
 	if ( !m_pDogState )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -383,7 +386,7 @@ void AI_Dog::SetState(CAIDogState::AIDogStateType eState)
 
 	if ( !m_pDogState->Init(this) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		FACTORY_DELETE(m_pDogState);
         m_pDogState = LTNULL;
 	}
@@ -429,7 +432,7 @@ void AI_Dog::UpdateMovement()
 
 	if ( !m_SteeringMgr.Update() )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 	}
 }
 

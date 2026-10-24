@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "InterfaceMgr.h"
 #include "GameClientShell.h"
 #include "MsgIDs.h"
@@ -488,7 +489,7 @@ LTBOOL CInterfaceMgr::Init()
 LTBOOL CInterfaceMgr::InitCursor()
 {
 
-	if (g_pLTClient->Cursor()->LoadCursorBitmapResource(MAKEINTRESOURCE(IDC_POINTER), m_hCursor) != LT_OK)
+	if (g_pLTClient->Cursor()->LoadCursorBitmapResource(static_cast<uint32>(IDC_POINTER), m_hCursor) != LT_OK)
 	{
 		g_pLTClient->CPrint("can't load cursor resource.");
         return LTFALSE;
@@ -1075,6 +1076,7 @@ void CInterfaceMgr::UpdatePopupState()
 
 void CInterfaceMgr::UpdateLoadingLevelState()
 {
+    if (m_LoadingScreen.IsActive()) m_LoadingScreen.Update();
     HLOCALOBJ hPlayerObj = g_pLTClient->GetClientObject();
 	if ((g_pGameClientShell->IsInWorld() && (m_nOldLoadWorldCount != m_nLoadWorldCount)) &&
 		hPlayerObj)
@@ -1416,7 +1418,7 @@ LTBOOL CInterfaceMgr::SetMenuMusic(LTBOOL bMusicOn)
 
 		if (pMusic->IsPlaying())
 		{
-			if (stricmp((char *)(LPCSTR)strFile, pMState->szControlFile) == 0)
+			if (nolf::ascii_compare((char *)(LPCSTR)strFile, pMState->szControlFile) == 0)
 			{
 				// Make sure we're using the correct intensity...
 

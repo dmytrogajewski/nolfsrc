@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AINode.h"
 #include "ServerUtilities.h"
 #include "AIUtils.h"
@@ -696,8 +698,8 @@ void CAINode::Load(HMESSAGEREAD hRead)
 
 void CAINode::Search()
 {
-	_ASSERT(IsSearchable());
-	_ASSERT(!m_bSearched);
+	GAME_ASSERT(IsSearchable());
+	GAME_ASSERT(!m_bSearched);
 
 	m_bSearched = LTTRUE;
 }
@@ -712,7 +714,7 @@ void CAINode::Search()
 
 SearchStatus CAINode::GetSearchStatus(const LTVector& vPos, HOBJECT hThreat) const
 {
-	_ASSERT(IsSearchable());
+	GAME_ASSERT(IsSearchable());
 
 	if ( m_bSearched )
 	{
@@ -732,7 +734,7 @@ SearchStatus CAINode::GetSearchStatus(const LTVector& vPos, HOBJECT hThreat) con
 
 CoverStatus CAINode::GetCoverStatus(const LTVector& vPos, HOBJECT hThreat) const
 {
-	_ASSERT(IsCover());
+	GAME_ASSERT(IsCover());
 
 	LTVector vThreatPos;
     g_pLTServer->GetObjectPos(hThreat, &vThreatPos);
@@ -767,7 +769,7 @@ CoverStatus CAINode::GetCoverStatus(const LTVector& vPos, HOBJECT hThreat) const
 
 LTBOOL CAINode::IsPanicFromThreat(const LTVector& vPos, HOBJECT hThreat) const
 {
-	_ASSERT(IsPanic());
+	GAME_ASSERT(IsPanic());
 
 	return LTTRUE;
 }
@@ -782,7 +784,7 @@ LTBOOL CAINode::IsPanicFromThreat(const LTVector& vPos, HOBJECT hThreat) const
 
 VantageStatus CAINode::GetVantageStatus(const LTVector& vPos, HOBJECT hThreat) const
 {
-	_ASSERT(IsVantage());
+	GAME_ASSERT(IsVantage());
 
 	LTVector vThreatPos;
     g_pLTServer->GetObjectPos(hThreat, &vThreatPos);

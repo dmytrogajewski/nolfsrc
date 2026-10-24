@@ -1,173 +1,41 @@
-#include "stdafx.h"
-#include "stdio.h"
-#include "sys\stat.h"
-#include "winutil.h"
-#include <time.h>
-#include <direct.h>
-#include "ltbasedefs.h"
-#ifdef NOLFSRC_MODERN
-// M-P1-05: high-resolution game clock
+#include "Stdafx.h"
+#include "WinUtil.h"
 #include "cshell/p1_modern.h"
-#endif
+#include "engine/portable/profile.h"
+#include "platform/logging.h"
+#include <algorithm>
+#include <cstring>
 
-BOOL CWinUtil::GetMoviesPath (char* strPath)
-{
-	char chDrive   = 'A';
-	strPath[0] = '\0';
-
-	char strTemp[256];
-	if (_getcwd (strTemp, 255))
-	{
-		char strFile[270];
-		if (strTemp[strlen(strTemp) - 1] != '\\') strcat (strTemp, "\\");
-		SAFE_STRCPY(strFile, strTemp);
-		strcat (strFile, "intro.smk");
-
-		if (FileExist (strFile))
-		{
-			SAFE_STRCPY(strPath, strTemp);
-			return TRUE;
-		}
-	}
-
-	while (chDrive <= 'Z')
-	{
-		sprintf(strPath, "%c:\\", chDrive);
-
-		if (GetDriveType(strPath) == DRIVE_CDROM)
-		{
-			strcat(strPath, "Movies\\");
-			if (DirExist (strPath)) return TRUE;
-		}
-
-		chDrive++;
-	}
-
-	strPath[0] = '\0';
-
-	return FALSE;
+namespace {
+template<class Operation> LTBOOL file_operation(Operation operation) {
+    try { return operation(nolf::platform::UserFiles{}) ? LTTRUE : LTFALSE; }
+    catch (const std::exception& error) { nolf::platform::log("game files",error.what()); return LTFALSE; }
 }
-
-BOOL CWinUtil::DirExist (char* strPath)
-{
-	if (!strPath || !*strPath) return FALSE;
-
-	BOOL bDirExists = FALSE;
-
-	BOOL bRemovedBackSlash = FALSE;
-	if (strPath[strlen(strPath) - 1] == '\\')
-	{
-		strPath[strlen(strPath) - 1] = '\0';
-		bRemovedBackSlash = TRUE;
-	}
-
-	UINT oldErrorMode = SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
-	struct stat statbuf;
-	int error = stat (strPath, &statbuf);
-	SetErrorMode (oldErrorMode);
-	if (error != -1) bDirExists = TRUE;
-
-	if (bRemovedBackSlash)
-	{
-		strPath[strlen(strPath)] = '\\';
-	}
-
-	return bDirExists;
 }
-
-BOOL CWinUtil::CreateDir (char* strPath)
-{
-	if (DirExist (strPath)) return TRUE;
-	if (strPath[strlen(strPath) - 1] == ':') return FALSE;		// special case
-
-	char strPartialPath[MAX_PATH];
-	strPartialPath[0] = '\0';
-
-	char* token = strtok (strPath, "\\");
-	while (token)
-	{
-		strcat (strPartialPath, token);
-		if (!DirExist (strPartialPath) && strPartialPath[strlen(strPartialPath) - 1] != ':')
-		{
-			if (!CreateDirectory (strPartialPath, NULL)) return FALSE;
-		}
-		strcat (strPartialPath, "\\");
-		token = strtok (NULL, "\\");
-	}
-
-	return TRUE;
+LTBOOL CWinUtil::DirExist(const char* path) {
+    return path && *path ? file_operation([&](const auto& files) { return files.directory_exists(path); }) : LTFALSE;
 }
-
-BOOL CWinUtil::FileExist (char* strPath)
-{
-	OFSTRUCT ofs;
-	HFILE hFile = OpenFile (strPath, &ofs, OF_EXIST);
-	if (hFile == HFILE_ERROR) return FALSE;
-
-	return TRUE;
+LTBOOL CWinUtil::CreateDir(const char* path) {
+    return path && *path ? file_operation([&](const auto& files) { files.create_directory(path); return true; }) : LTFALSE;
 }
-
-DWORD CWinUtil::WinGetPrivateProfileString (char* lpAppName, char* lpKeyName, char* lpDefault, char* lpReturnedString, DWORD nSize, char* lpFileName)
-{
-	return GetPrivateProfileString (lpAppName, lpKeyName, lpDefault, lpReturnedString, nSize, lpFileName);
+LTBOOL CWinUtil::FileExist(const char* path) {
+    return path && *path ? file_operation([&](const auto& files) { return files.file_exists(path); }) : LTFALSE;
 }
-
-DWORD CWinUtil::WinWritePrivateProfileString (char* lpAppName, char* lpKeyName, char* lpString, char* lpFileName)
-{
-	return WritePrivateProfileString (lpAppName, lpKeyName, lpString, lpFileName);
+uint32 CWinUtil::WinGetPrivateProfileString(const char* section,const char* key,const char* fallback,char* output,uint32 capacity,const char* file) {
+    if (!output || !capacity) return 0;
+    std::string value=fallback ? fallback : "";
+    try {
+        if (section && key && file) value=nolf::profile_value(nolf::platform::UserFiles{},file,section,key,value);
+    } catch (const std::exception& error) { nolf::platform::log("game profile",error.what()); }
+    const auto length=std::min<std::size_t>(value.size(),capacity-1);
+    std::memcpy(output,value.data(),length); output[length]=0;
+    return static_cast<uint32>(length);
 }
-
-void CWinUtil::DebugOut (char* str)
-{
-	OutputDebugString (str);
+LTBOOL CWinUtil::WinWritePrivateProfileString(const char* section,const char* key,const char* value,const char* file) {
+    if (!section || !key || !file) return LTFALSE;
+    return file_operation([&](const auto& files) {
+        nolf::set_profile_value(files,file,section,key,value ? std::optional<std::string_view>(value) : std::nullopt); return true;
+    });
 }
-
-void CWinUtil::DebugBreak()
-{
-	::DebugBreak();
-}
-
-float CWinUtil::GetTime()
-{
-#ifdef NOLFSRC_MODERN
-	// M-P1-05: the performance counter, not GetTickCount's 10-16 ms steps
-	return P1Timing_GetTime();
-#else
-	return (float)GetTickCount() / 1000.0f;
-#endif
-}
-
-char* CWinUtil::GetFocusWindow()
-{
-	static char strText[128];
-
-	HWND hWnd = GetFocus();
-	if (!hWnd)
-	{
-		hWnd = GetForegroundWindow();
-		if (!hWnd) return NULL;
-	}
-
-	GetWindowText (hWnd, strText, 127);
-	return strText;
-}
-
-void CWinUtil::WriteToDebugFile (char *strText)
-{
-	FILE* pFile = fopen ("c:\\shodebug.txt", "a+t");
-	if (!pFile) return;
-
-	time_t seconds;
-	time (&seconds);
-	struct tm* timedate = localtime (&seconds);
-	if (!timedate) return;
-
-	char strTimeDate[128];
-	sprintf (strTimeDate, "[%02d/%02d/%02d %02d:%02d:%02d]  ", timedate->tm_mon + 1, timedate->tm_mday, (timedate->tm_year + 1900) % 100, timedate->tm_hour, timedate->tm_min, timedate->tm_sec);
-	fwrite (strTimeDate, strlen(strTimeDate), 1, pFile);
-
-	fwrite (strText, strlen(strText), 1, pFile);
-	fwrite ("\n", 1, 1, pFile);
-
-	fclose (pFile);
-}
+void CWinUtil::DebugOut(const char* message) { if (message) nolf::platform::log("game",message); }
+float CWinUtil::GetTime() { return P1Timing_GetTime(); }

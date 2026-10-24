@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include <stdio.h>
 #include "AIHuman.h"
 #include "iltserver.h"
@@ -596,7 +599,7 @@ LTBOOL CAIHuman::HandleCommand(char **pTokens, int nArgs)
 			bOptional = LTTRUE;
 		}
 
-		if ( !_stricmp(&pTokens[0][bOptional], s_aStateMaps[iState].szState) )
+		if ( !nolf::ascii_compare(&pTokens[0][bOptional], s_aStateMaps[iState].szState) )
 		{
 			if ( bOptional && !m_pHumanState->CanChangeToState(s_aStateMaps[iState].eState) )
 			{
@@ -641,7 +644,7 @@ LTBOOL CAIHuman::HandleCommand(char **pTokens, int nArgs)
 
 	// Non-state-changing messages
 
-	if ( !_stricmp(pTokens[0], "TRACKPLAYER") )
+	if ( !nolf::ascii_compare(pTokens[0], "TRACKPLAYER") )
 	{
 		LTBOOL bOn = LTTRUE;
 		LTFLOAT fTime = 0.0f;
@@ -649,9 +652,9 @@ LTBOOL CAIHuman::HandleCommand(char **pTokens, int nArgs)
 
 		if(nArgs > 1)
 		{
-			if ( !_stricmp(pTokens[1], "ON") )
+			if ( !nolf::ascii_compare(pTokens[1], "ON") )
 				bOn = LTTRUE;
-			else if ( !_stricmp(pTokens[1], "OFF") )
+			else if ( !nolf::ascii_compare(pTokens[1], "OFF") )
 				bOn = LTFALSE;
 			else
 				fTime = (LTFLOAT)atof(pTokens[1]);
@@ -672,12 +675,12 @@ LTBOOL CAIHuman::HandleCommand(char **pTokens, int nArgs)
 
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "FORCEGROUND") )
+	else if ( !nolf::ascii_compare(pTokens[0], "FORCEGROUND") )
 	{
 		m_bForceGround = IsTrueChar(*pTokens[1]);
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "CIGARETTE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "CIGARETTE") )
 	{
 		if ( IsTrueChar(*pTokens[1]) )
 		{
@@ -690,7 +693,7 @@ LTBOOL CAIHuman::HandleCommand(char **pTokens, int nArgs)
 		}
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "SMOKE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "SMOKE") )
 	{
 		if ( IsTrueChar(*pTokens[1]) )
 		{
@@ -704,12 +707,12 @@ LTBOOL CAIHuman::HandleCommand(char **pTokens, int nArgs)
 		}
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "HOLSTER") )
+	else if ( !nolf::ascii_compare(pTokens[0], "HOLSTER") )
 	{
 		FREE_HSTRING(m_hstrHolster);
 		m_hstrHolster = g_pLTServer->CreateString(pTokens[1]);
 	}
-	else if ( !_stricmp(pTokens[0], "CINEFIRE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "CINEFIRE") )
 	{
 		CWeapon* pWeapon = GetWeapon(0);
 		if ( pWeapon )
@@ -857,7 +860,7 @@ void CAIHuman::HandleDamage(const DamageStruct& damage)
 			// GOTY: reconstructed from the Game of the Year Object.lto
 			// (0x1001ca51): one AI, named DoorGuard_NKHak, cannot be
 			// knocked out from behind
-			if ( 0 == _stricmp(g_pLTServer->GetObjectName(m_hObject), "DoorGuard_NKHak") )
+			if ( 0 == nolf::ascii_compare(g_pLTServer->GetObjectName(m_hObject), "DoorGuard_NKHak") )
 			{
 				return;
 			}
@@ -1086,11 +1089,13 @@ void CAIHuman::UpdateMovement()
 
 		// Move us
 
-        g_pLTServer->TeleportObject(m_hObject, &LTVector(m_vMovePos+vNudge));
+        LTVector destination(m_vMovePos+vNudge);
+        g_pLTServer->TeleportObject(m_hObject, &destination);
 	}
 	else
 	{
-        g_pLTServer->MoveObject(m_hObject, &LTVector(m_vMovePos+vNudge));
+        LTVector destination(m_vMovePos+vNudge);
+        g_pLTServer->MoveObject(m_hObject, &destination);
 	}
 
 	// Clear out movement info
@@ -1168,7 +1173,7 @@ void CAIHuman::UpdateAnimation()
 		GetAnimationContext()->SetProp(aniSwim);
 	}
 /*
-	if ( !stricmp(GetName(), "Scotsman") )
+	if ( !nolf::ascii_compare(GetName(), "Scotsman") )
 	{
 		char szBuffer[256];
 		szBuffer[0] = 0;
@@ -1368,7 +1373,7 @@ void CAIHuman::SetState(CAIHumanState::AIHumanStateType eState, LTBOOL bUnlockAn
 {
 	if ( m_pState && m_pState->DelayChangeState() )
 	{
-		_ASSERT(!"Got direct SetState() in state that can't change states!!!");
+		GAME_ASSERT(!"Got direct SetState() in state that can't change states!!!");
 	}
 
 	// Delete the old state
@@ -1429,7 +1434,7 @@ void CAIHuman::SetState(CAIHumanState::AIHumanStateType eState, LTBOOL bUnlockAn
 
 	if ( !m_pHumanState )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -1448,7 +1453,7 @@ void CAIHuman::SetState(CAIHumanState::AIHumanStateType eState, LTBOOL bUnlockAn
 
 	if ( !m_pHumanState->Init(this) )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		FACTORY_DELETE(m_pHumanState);
 		m_pHumanState = LTNULL;
 		m_pState = LTNULL;
@@ -1524,7 +1529,7 @@ LTBOOL CAIHuman::AimAt(const LTVector& vPosition)
 	fPitch = (LTFLOAT)atan(fPitch/(fDist+.001f));
 
 	fPitch = (fPitch + MATH_PI/2.0f)/MATH_PI;
-	_ASSERT(fPitch >= 0.0f && fPitch <= 1.0f );
+	GAME_ASSERT(fPitch >= 0.0f && fPitch <= 1.0f );
 
 //	g_pLTServer->CPrint("pitch = %f", fPitch);
 	GetAnimationContext()->SetPitch(fPitch);
@@ -1627,11 +1632,11 @@ LTRESULT CAIHumanPlugin::PreHook_EditStringList(const char* szRezPath, const cha
 
 	// See if the model style plugin will handle the property
 
-	if ( !_strcmpi("Brain", szPropName) )
+	if ( !nolf::ascii_compare("Brain", szPropName) )
 	{
 		// TODO: make sure we don't overflow cMaxStringLength or cMaxStrings
 		uint32 cBrains = s_AIButeMgr.GetNumBrains();
-		_ASSERT(cMaxStrings >= cBrains);
+		GAME_ASSERT(cMaxStrings >= cBrains);
 		for ( uint32 iBrain = 0 ; iBrain < cBrains ; iBrain++ )
 		{
 			strcpy(aszStrings[(*pcStrings)++], s_AIButeMgr.GetBrain(iBrain)->szName);

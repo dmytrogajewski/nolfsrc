@@ -35,7 +35,7 @@
 
 
     #include "GameBase.h"
-	#include "commonutilities.h"
+	#include "CommonUtilities.h"
 
 
 	#define MAX_CONTROLLER_TARGETS	8

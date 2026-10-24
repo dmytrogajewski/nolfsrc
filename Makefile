@@ -10,6 +10,8 @@
 #   make progress how much of the build is byte-identical to the retail game;
 #                 fails if a function recorded as identical stops matching
 #   make help     everything else
+#   make native-debug  build the native portability work (see docs/NATIVE.md)
+#   make native-test   test the native build without retail game data
 #
 # Needs only docker on the host and the submodules (`git submodule update
 # --init`): tools/, the build's helpers; the compilers, toolchains/
@@ -206,3 +208,39 @@ clean:
 
 distclean: clean
 	-docker rmi $(IMAGE)
+
+# Native builds do not depend on the historical tools, retail downloads or Wine.
+.PHONY: native native-debug native-headless native-test native-asset-tools native-import native-play native-update-modern
+native:
+	cmake --preset native-release
+	cmake --build --preset native-release --parallel
+
+native-debug:
+	cmake --preset native-debug
+	cmake --build --preset native-debug --parallel
+
+native-headless:
+	cmake --preset native-headless
+	cmake --build --preset native-headless --parallel
+
+native-test: native-debug
+	ctest --preset native-debug
+
+native-asset-tools:
+	python3 build/native-deps.py --asset-tools
+
+native-import:
+	@test -n "$(ASSET_SOURCE)" || { echo 'Usage: make native-import ASSET_SOURCE=/path/to/game-or-image'; exit 1; }
+	python3 build/import-assets.py "$(ASSET_SOURCE)" --output "$(or $(ASSET_OUTPUT),out/native-data)"
+
+# The imported data: GAME_DATA, else the first complete import (one with its
+# string resources) of the default and the earlier output names.
+NATIVE_GAME_DATA = $(or $(GAME_DATA),$(patsubst %/resources,%,$(firstword $(wildcard out/native-data/resources out/native-data-resources/resources))),out/native-data)
+
+# Imports made before the modern data layer existed gain it in place.
+native-update-modern:
+	python3 build/import-assets.py --update-modern "$(NATIVE_GAME_DATA)"
+
+# Build and play the imported data.
+native-play: native
+	out/native-release/nolf-client --data "$(NATIVE_GAME_DATA)" $(ARGS)

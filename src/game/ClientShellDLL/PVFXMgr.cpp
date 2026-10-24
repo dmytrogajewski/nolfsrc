@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "PVFXMgr.h"
 #include "CommonUtilities.h"
 #include "GameClientShell.h"
@@ -366,7 +367,7 @@ void CPVFXMgr::HandleFXKey(ArgList* pArgList)
 
 	// Turn on/off the necessary fx...
 
-	TurnOn(pFXName, (stricmp(pFXState, "ON") == 0));
+	TurnOn(pFXName, (nolf::ascii_compare(pFXState, "ON") == 0));
 }
 
 // ----------------------------------------------------------------------- //
@@ -497,7 +498,7 @@ void CPVFXMgr::TurnOn(char* pFXName, LTBOOL bOn)
 	{
 		if (m_ScaleFX[i].pName && m_ScaleFX[i].bUsed)
 		{
-			if (stricmp(m_ScaleFX[i].pName, pFXName) == 0)
+			if (nolf::ascii_compare(m_ScaleFX[i].pName, pFXName) == 0)
 			{
 				m_ScaleFX[i].bOn = bOn;
 			}
@@ -511,7 +512,7 @@ void CPVFXMgr::TurnOn(char* pFXName, LTBOOL bOn)
 	{
 		if (m_DLightFX[i].pName && m_DLightFX[i].bUsed)
 		{
-			if (stricmp(m_DLightFX[i].pName, pFXName) == 0)
+			if (nolf::ascii_compare(m_DLightFX[i].pName, pFXName) == 0)
 			{
 				m_DLightFX[i].bOn = bOn;
 			}
@@ -525,7 +526,7 @@ void CPVFXMgr::TurnOn(char* pFXName, LTBOOL bOn)
 	{
 		if (m_SoundFX[i].pName && m_SoundFX[i].bUsed && m_SoundFX[i].pFX)
 		{
-			if (stricmp(m_SoundFX[i].pName, pFXName) == 0)
+			if (nolf::ascii_compare(m_SoundFX[i].pName, pFXName) == 0)
 			{
 				if (bOn)
 				{

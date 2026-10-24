@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "DamageFXMgr.h"
 #include "VarTrack.h"
 #include "SoundMgr.h"

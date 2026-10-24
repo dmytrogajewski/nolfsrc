@@ -5,9 +5,6 @@
 #ifndef _POPUPTEXT_INCLUDED_
 #define _POPUPTEXT_INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
 
 class CPopupText

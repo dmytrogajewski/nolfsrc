@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Camera.h"
 #include "iltserver.h"
 #include "ClientServerShared.h"
@@ -134,7 +136,8 @@ uint32 Camera::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD h
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 			break;
 		}
@@ -247,11 +250,11 @@ void Camera::TriggerMsg(HOBJECT hSender, const char* szMsg)
 {
     uint32 dwUsrFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
 
-	if (_stricmp(szMsg, "ON") == 0)
+	if (nolf::ascii_compare(szMsg, "ON") == 0)
 	{
 		TurnOn();
 	}
-	else if (_stricmp(szMsg, "OFF") == 0)
+	else if (nolf::ascii_compare(szMsg, "OFF") == 0)
 	{
 		TurnOff();
 	}

@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIRegion.h"
 #include "AIVolumeMgr.h"
 #include "AINodeMgr.h"
@@ -360,7 +362,7 @@ void CAIRegion::Init(uint32 iRegion, const AIRegion& Region)
 	{for ( uint32 iVolume = 0 ; iVolume < m_cVolumes ; iVolume++ )
 	{
 		CAIVolume* pVolume = g_pAIVolumeMgr->GetVolumeByIndex(m_aiVolumes[iVolume]);
-		_ASSERT(pVolume);
+		GAME_ASSERT(pVolume);
 
 		pVolume->EnumerateSearchNodes(m_aiSearchNodes, &m_cSearchNodes, kMaxSearchNodes);
 	}}
@@ -452,7 +454,7 @@ void CAIRegion::Load(HMESSAGEREAD hRead)
 
 CAINode* CAIRegion::FindNearestSearchNode(const LTVector& vPos, HOBJECT hThreat) const
 {
-	_ASSERT(IsSearchable());
+	GAME_ASSERT(IsSearchable());
 
     LTFLOAT  fMinDistanceSqr = (float)INT_MAX;
     CAINode *pClosestNode = LTNULL;

@@ -1,7 +1,7 @@
 // FolderPerformance.cpp: implementation of the CFolderPerformance class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderPerformance.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

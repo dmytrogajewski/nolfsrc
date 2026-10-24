@@ -9,7 +9,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "MissionMgr.h"
 #include "CommonUtilities.h"
 #include "WeaponMgr.h"
@@ -255,7 +258,7 @@ LTBOOL CMissionMgr::IsMissionLevel(char* pWorldFile, int & nMissionId, int & nLe
 		{
 			for (int i=0; i < (*pCur)->nNumLevels; i++)
 			{
-				if (stricmp((*pCur)->aLevels[i].szLevel, pWorldFile) == 0)
+				if (nolf::ascii_compare((*pCur)->aLevels[i].szLevel, pWorldFile) == 0)
 				{
 					nMissionId = (*pCur)->nId;
 					nLevel = i;
@@ -821,7 +824,7 @@ int MISSION::BuildGearList(CString str, int* pArray, int nArrayLen)
 // ----------------------------------------------------------------------- //
 void MISSION::GetRankBonus(LTFLOAT fScorePercent,RANKBONUS *pBonus)
 {
-	_ASSERT(pBonus);
+	GAME_ASSERT(pBonus);
 	pBonus->Reset();
 
 	int nRank = g_pMissionMgr->GetMissionRating()->GetRank(fScorePercent);

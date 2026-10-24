@@ -10,11 +10,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
 #include "Group.h"
 #include "iltmessage.h"
-#include "commonutilities.h"
-#include "serverutilities.h"
+#include "CommonUtilities.h"
+#include "ServerUtilities.h"
 #include "ObjectMsgs.h"
 
 BEGIN_CLASS(Group)
@@ -167,7 +168,8 @@ DWORD Group::ObjectMessageFn(HOBJECT hSender, DWORD messageID, HMESSAGEREAD hRea
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleTrigger(hSender, szMsg);
 		}
 		break;

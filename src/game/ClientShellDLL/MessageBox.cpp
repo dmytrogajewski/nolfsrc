@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "MessageBox.h"
 #include "InterfaceMgr.h"
 #include "ClientRes.h"

@@ -1,3 +1,9 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <algorithm>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : p7_pad.cpp
@@ -43,7 +49,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"
 #include "CommandIDs.h"
@@ -55,7 +62,7 @@
 #include <math.h>
 
 extern CGameClientShell*	g_pGameClientShell;
-extern HWND					g_hMainWnd;			// GameClientShell.cpp
+
 
 namespace
 {
@@ -80,7 +87,7 @@ namespace
 	bool		s_bCapture;
 
 	// The menu keys: what is held, and the repeat timer.
-	WORD		s_wPrevButtons;
+	std::uint16_t		s_wPrevButtons;
 	int			s_nHeldKey;
 	float		s_fHeldTime;
 	float		s_fNextRepeat;
@@ -93,7 +100,7 @@ namespace
 	// A stick, -32768..32767 a side (y up positive), past a radial dead
 	// zone: its direction kept, its length rescaled from the dead zone's
 	// edge to 1.  Returns the length.
-	float Stick(SHORT nX, SHORT nY, float fDeadZone, float* pX, float* pY)
+	float Stick(std::int16_t nX, std::int16_t nY, float fDeadZone, float* pX, float* pY)
 	{
 		float fX = nX / 32767.0f, fY = nY / 32767.0f;
 		float fLen = (float)sqrt(fX * fX + fY * fY);
@@ -150,7 +157,7 @@ namespace
 		return fX > 0.0f ? VK_RIGHT : VK_LEFT;
 	}
 
-	void UpdateMenus(WORD wPressed)
+	void UpdateMenus(std::uint16_t wPressed)
 	{
 		int nKey;
 
@@ -215,26 +222,63 @@ void P7Pad_InitVars()
 	s_vtInvertY.Init(g_pLTClient, "PadInvertY", LTNULL, 0.0f);
 }
 
+static void P7Pad_ApplyDefaultLine(char* szLine)
+{
+	char* p = szLine + strlen(szLine);
+
+	while (p > szLine && (p[-1] == '\n' || p[-1] == '\r'))
+		*--p = '\0';
+
+	if (strstr(szLine, "\"##gamepad\""))
+		g_pLTClient->RunConsoleString(szLine);
+}
+
 void P7Pad_ApplyDefaultBindings()
 {
+	char szLine[256];
+
+#ifdef NOLFSRC_NATIVE
+	// The shipped defaults come from the mounted game data, wherever the
+	// game was started from.
+	char szName[] = "defctrls.cfg";
+	ILTStream* pStream = LTNULL;
+	uint32 nLength = 0;
+
+	if (g_pLTClient->OpenFile(szName, &pStream) != LT_OK || !pStream)
+		return;
+
+	std::string text;
+	if (pStream->GetLen(&nLength) == LT_OK && nLength && nLength <= 1024 * 1024)
+	{
+		text.resize(nLength);
+		if (pStream->Read(&text[0], nLength) != LT_OK)
+			text.clear();
+	}
+	pStream->Release();
+
+	for (size_t nStart = 0; nStart < text.size(); )
+	{
+		size_t nEnd = text.find('\n', nStart);
+		if (nEnd == std::string::npos)
+			nEnd = text.size();
+
+		const size_t nCopy = std::min(nEnd - nStart, sizeof(szLine) - 1);
+		memcpy(szLine, text.data() + nStart, nCopy);
+		szLine[nCopy] = '\0';
+		P7Pad_ApplyDefaultLine(szLine);
+		nStart = nEnd + 1;
+	}
+#else
 	FILE* pFile = fopen("defctrls.cfg", "r");
-	char  szLine[256];
 
 	if (!pFile)
 		return;
 
 	while (fgets(szLine, sizeof(szLine), pFile))
-	{
-		char* p = szLine + strlen(szLine);
-
-		while (p > szLine && (p[-1] == '\n' || p[-1] == '\r'))
-			*--p = '\0';
-
-		if (strstr(szLine, "\"##gamepad\""))
-			g_pLTClient->RunConsoleString(szLine);
-	}
+		P7Pad_ApplyDefaultLine(szLine);
 
 	fclose(pFile);
+#endif
 }
 
 void P7Pad_RestoreDefaultBindings()
@@ -246,10 +290,10 @@ void P7Pad_RestoreDefaultBindings()
 	{
 		char szCmd[160];
 
-		if (_stricmp(pBinding->strDeviceName, "##gamepad"))
+		if (nolf::ascii_compare(pBinding->strDeviceName, "##gamepad"))
 			continue;
 
-		_snprintf(szCmd, sizeof(szCmd), "rangebind \"##gamepad\" \"%s\" 0 0 \"\"",
+		std::snprintf(szCmd, sizeof(szCmd), "rangebind \"##gamepad\" \"%s\" 0 0 \"\"",
 			pBinding->strTriggerName);
 		szCmd[sizeof(szCmd) - 1] = '\0';
 		g_pLTClient->RunConsoleString(szCmd);
@@ -263,11 +307,11 @@ void P7Pad_RestoreDefaultBindings()
 
 void P7Pad_Update(float fFrameTime)
 {
-	WORD wPressed;
+	std::uint16_t wPressed;
 
 	s_fFrameTime = fFrameTime;
 
-	s_bPad = P7PadRead_Available() && GetForegroundWindow() == g_hMainWnd &&
+	s_bPad = P7PadRead_Available() && nolf::client_window(*g_pLTClient).focused() &&
 	         P7PadRead_State(&s_Pad);
 
 	if (!s_bPad)

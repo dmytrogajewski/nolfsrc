@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "SoundMgr.h"
 #include "CommonUtilities.h"
 
@@ -223,7 +223,7 @@ HLTSOUND CGameSoundMgr::PlaySoundFromObject(HOBJECT hObject, char *pName, LTFLOA
 		psi.m_dwFlags |= PLAYSOUND_CTRL_VOL;
 	}
 
-	strncpy(psi.m_szSoundName, pName, _MAX_PATH);
+	strncpy(psi.m_szSoundName, pName, LT_MAX_PATH);
 	psi.m_nPriority		= ePriority;
 	psi.m_fOuterRadius	= fRadius;
 	psi.m_fInnerRadius	= fRadius * m_fInnerRadiusPercent;
@@ -260,7 +260,7 @@ HLTSOUND CGameSoundMgr::PlaySoundFromPos(LTVector & vPos, char *pName, LTFLOAT f
 		psi.m_dwFlags |= PLAYSOUND_CTRL_VOL;
 	}
 
-	strncpy(psi.m_szSoundName, pName, _MAX_PATH);
+	strncpy(psi.m_szSoundName, pName, LT_MAX_PATH);
 	psi.m_nPriority		= ePriority;
 	psi.m_fOuterRadius	= fRadius;
 	psi.m_fInnerRadius	= fRadius * m_fInnerRadiusPercent;

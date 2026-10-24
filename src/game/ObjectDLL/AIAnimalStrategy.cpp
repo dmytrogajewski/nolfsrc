@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIAnimalStrategy.h"
 #include "CharacterMgr.h"
 #include "AIAnimal.h"
@@ -174,7 +176,7 @@ LTBOOL CAIDogStrategyFollowPath::Update()
         return LTFALSE;
 	}
 
-	_ASSERT(m_eState == eStateSet);
+	GAME_ASSERT(m_eState == eStateSet);
 
 	if ( m_pPath->HasRemainingWaypoints() )
 	{
@@ -197,7 +199,7 @@ LTBOOL CAIDogStrategyFollowPath::Update()
 			default:
 			{
                 g_pLTServer->CPrint("CAIDogStrategyFollowPath::Update - unrecognized waypoint instruction");
-				_ASSERT(!"CAIDogStrategyFollowPath::Update - unrecognized waypoint instruction");
+				GAME_ASSERT(!"CAIDogStrategyFollowPath::Update - unrecognized waypoint instruction");
                 return LTFALSE;
 			}
 			break;
@@ -317,7 +319,7 @@ void CAIDogStrategyFollowPath::SetMovement(CAnimatorAIAnimal::Main eMovement)
 	{
 		case CAnimatorAIAnimal::eWalking:		GetAI()->Walk();	break;
 		case CAnimatorAIAnimal::eRunning:		GetAI()->Run();		break;
-        default:                                _ASSERT(LTFALSE);    break;
+        default:                                GAME_ASSERT(LTFALSE);    break;
 	}
 
 	m_eMovement = eMovement;
@@ -579,7 +581,7 @@ LTBOOL CAIPoodleStrategyFollowPath::Update()
         return LTFALSE;
 	}
 
-	_ASSERT(m_eState == eStateSet);
+	GAME_ASSERT(m_eState == eStateSet);
 
 	if ( m_pPath->HasRemainingWaypoints() )
 	{
@@ -602,7 +604,7 @@ LTBOOL CAIPoodleStrategyFollowPath::Update()
 			default:
 			{
                 g_pLTServer->CPrint("CAIPoodleStrategyFollowPath::Update - unrecognized waypoint instruction");
-				_ASSERT(!"CAIPoodleStrategyFollowPath::Update - unrecognized waypoint instruction");
+				GAME_ASSERT(!"CAIPoodleStrategyFollowPath::Update - unrecognized waypoint instruction");
                 return LTFALSE;
 			}
 			break;
@@ -735,7 +737,7 @@ void CAIPoodleStrategyFollowPath::SetMovement(CAnimatorAIAnimal::Main eMovement)
 	{
 		case CAnimatorAIAnimal::eWalking:		GetAI()->Walk();	break;
 		case CAnimatorAIAnimal::eRunning:		GetAI()->Run();		break;
-        default:                                _ASSERT(LTFALSE);    break;
+        default:                                GAME_ASSERT(LTFALSE);    break;
 	}
 
 	m_eMovement = eMovement;
@@ -899,7 +901,7 @@ LTBOOL CAISharkStrategyFollowPath::Update()
         return LTFALSE;
 	}
 
-	_ASSERT(m_eState == eStateSet);
+	GAME_ASSERT(m_eState == eStateSet);
 
 	if ( m_pPath->HasRemainingWaypoints() )
 	{
@@ -922,7 +924,7 @@ LTBOOL CAISharkStrategyFollowPath::Update()
 			default:
 			{
                 g_pLTServer->CPrint("CAISharkStrategyFollowPath::Update - unrecognized waypoint instruction");
-				_ASSERT(!"CAISharkStrategyFollowPath::Update - unrecognized waypoint instruction");
+				GAME_ASSERT(!"CAISharkStrategyFollowPath::Update - unrecognized waypoint instruction");
                 return LTFALSE;
 			}
 			break;
@@ -1049,7 +1051,7 @@ void CAISharkStrategyFollowPath::SetMovement(CAnimatorAIAnimal::Main eMovement)
 	switch ( eMovement )
 	{
 		case CAnimatorAIAnimal::eSwimming:		GetAI()->Swim();	break;
-        default:                                _ASSERT(LTFALSE);    break;
+        default:                                GAME_ASSERT(LTFALSE);    break;
 	}
 
 	m_eMovement = eMovement;

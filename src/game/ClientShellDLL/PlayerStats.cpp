@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "PlayerStats.h"
 #include "WeaponMgr.h"
 #include <stdio.h>
@@ -1302,7 +1303,7 @@ void CPlayerStats::SetMultiplayerObjectives(HMESSAGEREAD hMessage)
     uint8 nNumCompObj = g_pLTClient->ReadFromMessageByte(hMessage);
 
 	//read list of completed objectives
-	for (i = 0; i < nNumCompObj; i++)
+	for (int i = 0; i < nNumCompObj; i++)
 	{
         uint32 dwId = g_pLTClient->ReadFromMessageDWord(hMessage);
 		m_Objectives.Add(dwId);
@@ -4022,7 +4023,7 @@ void CPlayerStats::UpdateWeaponBindings()
 		DeviceBinding* ptr = pBindings;
 		while (!bFound && ptr)
 		{
-			if (stricmp(ptr->strTriggerName,szTriggers[i])==0)
+			if (nolf::ascii_compare(ptr->strTriggerName,szTriggers[i])==0)
 			{
 				GameAction* pAction = ptr->pActionHead;
 				if (pAction && pAction->nActionCode >= COMMAND_ID_WEAPON_BASE && pAction->nActionCode <= COMMAND_ID_WEAPON_MAX)
@@ -4542,7 +4543,8 @@ void CPlayerStats::DrawTargetName()
 					}
 
 					int nTest = (int)(g_pLTClient->GetTime()*10.0f)%255;
-					g_pLTClient->FillRect(m_hTargetNameSurface, &LTRect(0,0,m_nTargetNameWidth,m_nTargetNameHeight), kBlack);
+					LTRect target_rectangle(0,0,m_nTargetNameWidth,m_nTargetNameHeight);
+                    g_pLTClient->FillRect(m_hTargetNameSurface, &target_rectangle, kBlack);
 					pFont->Draw(hstrName, m_hTargetNameSurface, 0, 0, LTF_JUSTIFY_LEFT, kWhite);
 					g_pLTClient->OptimizeSurface(m_hTargetNameSurface, kBlack);
 					g_pLTClient->FreeString(hstrName);

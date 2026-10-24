@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIMovement.h"
 #ifdef NOLFSRC_MODERN
 // M-P5-01: the movement-table fix
@@ -29,7 +31,7 @@ void CAIMovementHuman::Constructor()
 	m_vDest = LTVector(0,0,0);
 	m_bUnderwater = LTFALSE;
 	// TODO: DANGER!!!! is aniWalk initialized yet?
-	_ASSERT(g_pAnimationMgrHuman->IsInitialized());
+	GAME_ASSERT(g_pAnimationMgrHuman->IsInitialized());
 	m_aniMovement = aniWalk;
 }
 
@@ -159,7 +161,7 @@ LTBOOL CAIMovementHuman::Update()
 void CAIMovementHuman::UpdateAnimation()
 {
 	// TODO: is this okay?
-	//_ASSERT(m_eState == eStateSet);
+	//GAME_ASSERT(m_eState == eStateSet);
 
 	GetAI()->GetAnimationContext()->SetProp(m_aniMovement);
 }

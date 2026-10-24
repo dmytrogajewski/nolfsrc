@@ -1,10 +1,11 @@
 
 %{
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "AnimationLex.h"
 #include "AnimationLexSymbols.h"
 #include "AnimationParse.h"
+#include <vector>
 
 using namespace Animation;
 
@@ -59,10 +60,7 @@ CAnimationLex::CAnimationLex()
 
 CAnimationLex::~CAnimationLex()
 {
-	if ( YY_CURRENT_BUFFER )
-	{
-		yy_delete_buffer(YY_CURRENT_BUFFER);
-	}
+	yyanimationlex_destroy();
 }
 
 void CAnimationLex::HandleComment()
@@ -85,6 +83,7 @@ void CAnimationLex::HandleNewline()
 
 LTBOOL CAnimationLex::Lex(const char* szFile)
 {
+    m_nLine = 1;
     ILTStream* pDStream;
     LTRESULT dr = g_pLTServer->OpenFile((char*)szFile, &pDStream);
 
@@ -92,28 +91,14 @@ LTBOOL CAnimationLex::Lex(const char* szFile)
 
 	// Read the file...
 
-	unsigned long uLen = pDStream->GetLen();
-
-	char* pData = debug_newa(char, uLen+2);
-	if (!pData)
-	{
-		pDStream->Release();
-		return(FALSE);
-	}
-
-	pDStream->Read(pData, uLen);
-
-	// yyparse expects 2 bytes at end with 0
-
-	pData[uLen] = 0;
-	pData[uLen+1] = 0;
-
-	yyanimation_scan_buffer(pData, uLen+2);
-	yyanimationparse();
-
-	debug_deletea(pData);
-
-	pDStream->Release();
-
-	return LTTRUE;
+	struct CloseStream { ILTStream* stream; ~CloseStream() { stream->Release(); } } close{pDStream};
+	const auto length = pDStream->GetLen();
+	if (length > 16 * 1024 * 1024) return LTFALSE;
+	// Flex borrows this buffer only for the duration of the parse.
+	std::vector<char> data(static_cast<std::size_t>(length) + 2, 0);
+	if (pDStream->Read(data.data(), length) != LT_OK) return LTFALSE;
+	auto* buffer = yyanimation_scan_buffer(data.data(), data.size());
+	if (!buffer) return LTFALSE;
+	struct CloseBuffer { YY_BUFFER_STATE buffer; ~CloseBuffer() { yy_delete_buffer(buffer); } } scan{buffer};
+	return yyanimationparse() == 0 ? LTTRUE : LTFALSE;
 }

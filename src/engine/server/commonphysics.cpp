@@ -1,105 +1,100 @@
-// server.dll — the shared ILTPhysics implementation (reconstruction). Build /O1.
-#include <math.h>
+// Shared native physics properties and collision algorithms.
+#include "world_clip.h"
+#include "physics_lifetime.h"
 #include "commonphysics.h"
-#include "servermgr.h"
 #include "worldsim.h"
 #include "de_error.h"
-#include "iltserver.h"
-#include "ilttransform.h"
 #include "servermath.h"
-#include "servercommon.h"
-#include "servermodel.h"
-#include "serverlightanim.h"
+#include "counter.h"
+#include <optional>
+#include <cmath>
 
-// The name an argument error reports: server.dll's copy of these functions
-// says "ILTCommon::...", lithtech.exe's "CommonLT::..." (the retail images'
-// strings: the two were built from different revisions of this file).
-#ifdef LT_SERVER_BUILD
-#define COMMON_ERROR_NAME(fn)	"ILTCommon::" fn
-#else
-#define COMMON_ERROR_NAME(fn)	"CommonLT::" fn
-#endif
+#define COMMON_ERROR_NAME(fn) "ILTCommon::" fn
 
-LTRESULT CommonPhysicsLT::GetFrictionCoefficient(HOBJECT hObj, float& coeff)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetFrictionCoefficient(HOBJECT hObj, float& coeff)
 {
-	if (!hObj)
+	if (!ValidObject(hObj))
 		RETURN_ERROR(2, "ILTPhysics::GetFrictionCoefficient", LT_INVALIDPARAMS);
 
 	coeff = hObj->m_FrictionCoefficient;
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::SetFrictionCoefficient(HOBJECT hObj, float coeff)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::SetFrictionCoefficient(HOBJECT hObj, float coeff)
 {
-	if (!hObj)
+	if (!ValidObject(hObj))
 		RETURN_ERROR(2, "ILTPhysics::SetFrictionCoefficient", LT_INVALIDPARAMS);
 
 	hObj->m_FrictionCoefficient = coeff;
 	return LT_OK;
 }
 
-// The limit is kept squared so the engine's own comparisons need no sqrt;
-// the accessors take the root on the way out and square on the way in.
-LTRESULT CommonPhysicsLT::GetForceIgnoreLimit(HOBJECT hObj, float& limit)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetForceIgnoreLimit(HOBJECT hObj, float& limit)
 {
-	if (!hObj)
+	if (!ValidObject(hObj))
 		RETURN_ERROR(2, "ILTPhysics::GetForceIgnoreLimit", LT_INVALIDPARAMS);
 
 	limit = (float)sqrt(hObj->m_ForceIgnoreLimitSqr);
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::SetForceIgnoreLimit(HOBJECT hObj, float limit)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::SetForceIgnoreLimit(HOBJECT hObj, float limit)
 {
-	if (!hObj)
+	if (!ValidObject(hObj))
 		RETURN_ERROR(2, "ILTPhysics::SetForceIgnoreLimit", LT_INVALIDPARAMS);
 
 	hObj->m_ForceIgnoreLimitSqr = limit * limit;
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::GetVelocity(HOBJECT hObj, LTVector* pVel)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetVelocity(HOBJECT hObj, LTVector* pVel)
 {
-	if (!hObj || !pVel)
+	if (!ValidObject(hObj) || !pVel)
 		RETURN_ERROR(1, "CommonLT::GetVelocity", LT_INVALIDPARAMS);
 
 	*pVel = hObj->m_Velocity;
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::GetAcceleration(HOBJECT hObj, LTVector* pAccel)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetAcceleration(HOBJECT hObj, LTVector* pAccel)
 {
-	if (!hObj || !pAccel)
+	if (!ValidObject(hObj) || !pAccel)
 		RETURN_ERROR(2, COMMON_ERROR_NAME("GetAcceleration"), LT_INVALIDPARAMS);
 
 	*pAccel = hObj->m_Acceleration;
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::GetObjectMass(HOBJECT hObj, float& mass)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetObjectMass(HOBJECT hObj, float& mass)
 {
-	if (!hObj)
+	if (!ValidObject(hObj))
 		RETURN_ERROR(2, COMMON_ERROR_NAME("GetObjectMass"), LT_INVALIDPARAMS);
 
 	mass = hObj->m_Mass;
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::SetObjectMass(HOBJECT hObj, float mass)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::SetObjectMass(HOBJECT hObj, float mass)
 {
-	if (!hObj)
+	if (!ValidObject(hObj))
 		RETURN_ERROR(2, COMMON_ERROR_NAME("GetObjectMass"), LT_INVALIDPARAMS);
 
 	hObj->m_Mass = mass;
 	return LT_OK;
 }
 
-// The engine keeps the standing-on contact as an object plus, for world
-// geometry, the polygon underfoot. For anything else the contact plane is
-// synthesized as the flat top of the object's bounding box.
-LTRESULT CommonPhysicsLT::GetStandingOn(HOBJECT hObj, CollisionInfo* pInfo)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetStandingOn(HOBJECT hObj, CollisionInfo* pInfo)
 {
-	if (!hObj || !pInfo)
+	if (!ValidObject(hObj) || !pInfo)
 		RETURN_ERROR(2, "ILTPhysics::GetStandingOn", LT_INVALIDPARAMS);
 
 	pInfo->m_vStopVel.x = 0.0f;
@@ -143,19 +138,21 @@ LTRESULT CommonPhysicsLT::GetStandingOn(HOBJECT hObj, CollisionInfo* pInfo)
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::GetObjectDims(HOBJECT hObj, LTVector* pDims)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::GetObjectDims(HOBJECT hObj, LTVector* pDims)
 {
-	if (!hObj || !pDims)
+	if (!ValidObject(hObj) || !pDims)
 		RETURN_ERROR(2, "ILTPhysics::GetObjectDims", LT_INVALIDPARAMS);
 
 	*pDims = hObj->m_Dims;
 	return LT_OK;
 }
 
-LTRESULT CommonPhysicsLT::IsWorldObject(HOBJECT hObj)
+template<class Interface>
+LTRESULT PhysicsProperties<Interface>::IsWorldObject(HOBJECT hObj)
 {
-	if (hObj && hObj->m_ObjectType == OT_WORLDMODEL &&
-	    (hObj->m_pWorldBsp->GetWorldFlags() & WORLDFLAG_MAINWORLD))
+	if (ValidObject(hObj) && hObj->m_ObjectType == OT_WORLDMODEL &&
+	    hObj->m_pWorldBsp && (hObj->m_pWorldBsp->GetWorldFlags() & WORLDFLAG_MAINWORLD))
 	{
 		return LT_YES;
 	}
@@ -163,193 +160,10 @@ LTRESULT CommonPhysicsLT::IsWorldObject(HOBJECT hObj)
 	return LT_NO;
 }
 
-// ---- the server interface object ---------------------------------------- //
+template class PhysicsProperties<ILTPhysics>;
+template class PhysicsProperties<ILTClientPhysics>;
 
-// The ILTServer the engine hands to the game (CServerMgr+0x928; the object
-// CUnknown928Obj and servermsg.h's CLTServer view describe from outside).
-// iltcommon.h names it: `friend class CLTServer`, which is how the
-// constructor below reaches ILTCommon's protected m_pTransformLT and
-// m_pModelLT on its m_CommonLT member.
-//
-// Layout, from 0x1002d385's stores:
-//   +0x000  ILTServer (ILTCSBase: vptr, m_MathLT +0x04, six interface
-//           pointers +0x08..+0x1c, then ILTServer's function pointers to
-//           +0x223)
-//   +0x224  m_pServerMgr
-//   +0x228  ILTTransform (vtable 0x1004e660 is ilttransform.h's own: the
-//           interface's virtuals are implemented as ILTTransform:: itself)
-//   +0x22c  ServerModelLT   (vtable 0x1004e5f4)
-//   +0x234  ServerCommonLT  (vtable 0x1004e5ac, after the SharedCommonLT
-//           constructor CALL 0x1001214c)
-//   +0x248  SPhysicsLT      (vtable 0x1004e560)
-//   +0x258  ServerLightAnimLT (vtable 0x1004e550)
-//   0x260 total, which is what 0x1002d355's `new` asks for.
-//
-// The ??_G 0x1002f83a (slot 71 of 0x1004e368, after ILTCSBase's seventy-one
-// virtuals) is the compiler's: ILTCommon's inline destructor on +0x234 and
-// ILTServer's on +0x00 are the only stores left in it.
-class CLTServer : public ILTServer
-{
-public:
-	CLTServer(CServerMgr* pServerMgr);       // 0x1002d385
-
-	CServerMgr*       m_pServerMgr;          // 0x224
-	ILTTransform      m_TransformLT;         // 0x228
-	ServerModelLT     m_ModelLT;             // 0x22c
-	ServerCommonLT    m_CommonLT;            // 0x234
-	SPhysicsLT        m_PhysicsLT;           // 0x248
-	ServerLightAnimLT m_LightAnimLT;         // 0x258
-};
-
-// Expanded into CLTServer's constructor below. The world simulation the
-// server physics forwards to is the server manager itself. m_StairHeight is
-// a MEMBER INITIALISER: shipped stores the -1.0f (0x1002d3d7) before the
-// vptr (0x1002d3de); assigned in the body it comes after.
-inline SPhysicsLT::SPhysicsLT(CServerMgr* pServerMgr)
-	: m_StairHeight(-1.0f)
-{
-	m_pWorld           = (IWorldSim*)pServerMgr;
-	m_ClientServerType = ServerType;
-}
-
-// 0x1002d385 -- 208 bytes.  `inline` (the in-class spelling): server.dll's
-// /O1 still CALLS it from 0x1002d355 below and keeps the standalone copy,
-// while lithtech.exe's /O2 EXPANDS it into that caller (0x0046bbf0; there is
-// no standalone copy in lithtech.exe).
-inline CLTServer::CLTServer(CServerMgr* pServerMgr)
-	: m_ModelLT(pServerMgr), m_PhysicsLT(pServerMgr), m_LightAnimLT(pServerMgr)
-{
-	m_pServerMgr   = pServerMgr;
-
-	m_pCommonLT    = &m_CommonLT;
-	m_pTransformLT = &m_TransformLT;
-	m_pModelLT     = (ILTModel*)&m_ModelLT;
-	m_pPhysicsLT   = &m_PhysicsLT;
-	m_pLightAnimLT = &m_LightAnimLT;
-
-	// CServerMgr's sound interface is its second base (+0x04). Shipped
-	// null-tests with a BRANCH and one store at the join (0x1002d406..
-	// 0x1002d423): an if/else into a local. The conversion written as an
-	// expression -- plain or as `?:` -- is `neg/sbb/and`; an if/else storing
-	// the member on each arm stores twice.
-	ILTSoundMgr* pSoundMgr;
-	if (pServerMgr)
-		pSoundMgr = (ILTSoundMgr*)(CServerSoundMgr*)pServerMgr;
-	else
-		pSoundMgr = LTNULL;
-	m_pSoundMgr = pSoundMgr;
-
-	m_CommonLT.SetMath((ICommonMath*)&m_MathLT);
-	m_CommonLT.m_pServerMgr   = pServerMgr;
-	m_CommonLT.m_pModelLT     = (ILTModel*)&m_ModelLT;
-	m_CommonLT.m_pTransformLT = &m_TransformLT;
-}
-
-// smgr.cpp:3846, 0x1002fd9b.
-void si_SetupInterface(CLTServer* pServer);
-
-// 0x1002d355 (48 bytes) / lithtech 0x0046bbf0 -- builds the server interface
-// object and fills its function table.  Reached only through
-// sm_CreateUnknown928 (smgr.cpp, 0x1002d34a), which is why it answers the
-// CUnknown928Obj* smgr.cpp declares.
-CUnknown928Obj* sub_1002d355(CServerMgr* pMgr)
-{
-	// `new CLTServer(pMgr)` spelled out: the class is abstract here (its
-	// ILTCSBase overrides are written as views in servermessage.cpp and
-	// elsewhere), so the allocation and the constructor call are separate.
-	void*      pMem = operator new(sizeof(CLTServer));
-	CLTServer* pServer;
-
-	if (pMem)
-		pServer = &((CLTServer*)pMem)->CLTServer::CLTServer(pMgr);
-	else
-		pServer = LTNULL;
-
-	if (pServer)
-		si_SetupInterface(pServer);
-
-	return (CUnknown928Obj*)pServer;
-}
-
-// ---- the server's half -------------------------------------------------- //
-
-// Velocity and acceleration are only written when they actually moved: a
-// change below 0.001 squared is dropped rather than sent to every client.
-//
-// Both byte-identical on both images. The shape that matters is the EARLY
-// RETURN on the small-change test (`< 0.001f` -> return LT_OK) rather than an
-// `if (>=) { ... }` body: with the guarded body, cl shrink-wraps the edi save
-// past the parameter tests and pops it before the success return; with the
-// early return, the two LT_OK returns share one epilogue and edi is saved in
-// the entry block (`push esi`, load hObj, `test`, `push edi`, `je`), as
-// shipped. The member is also named directly, not through a pointer local —
-// the local made cl compute the lea before pushing DistSqr's argument, and
-// kept the /O2 copy off.
-LTRESULT SPhysicsLT::SetVelocity(HOBJECT hObj, LTVector* pVel)
-{
-	if (!hObj || !pVel)
-		RETURN_ERROR(1, "ILTPhysics::SetVelocity", LT_INVALIDPARAMS);
-
-	if (hObj->m_Velocity.DistSqr(*pVel) < 0.001f)
-		return LT_OK;
-
-	hObj->m_ChangeFlags |= CHANGEFLAG_MOTION;
-	hObj->m_Velocity = *pVel;
-
-	return LT_OK;
-}
-
-LTRESULT SPhysicsLT::SetAcceleration(HOBJECT hObj, LTVector* pAccel)
-{
-	if (!hObj)
-		RETURN_ERROR(1, "ILTPhysics::SetAcceleration", LT_INVALIDPARAMS);
-
-	if (hObj->m_Acceleration.DistSqr(*pAccel) < 0.001f)
-		return LT_OK;
-
-	hObj->m_ChangeFlags |= CHANGEFLAG_MOTION;
-	hObj->m_Acceleration = *pAccel;
-
-	return LT_OK;
-}
-
-// The flags argument is accepted and ignored; the simulation is always asked
-// for the same 7.
-LTRESULT SPhysicsLT::MoveObject(HOBJECT hObj, LTVector* pPos, uint32 flags)
-{
-	if (!hObj)
-		RETURN_ERROR(1, "ILTPhysics::MoveObject", LT_INVALIDPARAMS);
-
-	sm_MoveObject(m_pWorld, hObj, pPos, 7);
-	return LT_OK;
-}
-
-// iltphysics.h declares the force accessors taking LTVector& — no null check
-// is possible, and none is compiled. (The null-checking pair that forwards
-// through the world's vtable is ILTServer's, whose header takes LTVector* —
-// see servermessage.cpp. Same names, two interfaces, and the parameter type
-// alone dictates both shapes.)
-
-LTRESULT SPhysicsLT::GetGlobalForce(LTVector& vec)
-{
-	vec = m_pWorld->m_ForceControl.m_Force;
-	return LT_OK;
-}
-
-// HOISTED ABOVE ITS CALLER AND MARKED `inline`.  VC6's inliner is
-// forward-only: with the definition below SetGlobalForce it expands in
-// none of it, and the shipped /O2 build expands it.  Same cause as
-// sm_SetObjectChangeFlag in servermodel.cpp.
-// The direction is kept alongside the force so the simulation never has to
-// normalize per object. A force too small to have a direction leaves the
-// direction at nothing rather than dividing by it.
-//
-// The magnitude is stored in the member, compared from the member and the
-// direction divided by the member (lithtech 0x46c0f0: `fcomps` then a fresh
-// `flds` of m_fMag for the divides) -- the shape the client twin at
-// 0x405190 closed with (src/engine/lithtech/lt2new1.cpp). A local fMag kept
-// server.dll identical but left lithtech.exe a near.
-inline void GlobalForceControl::Set(LTVector* pVec)
+void GlobalForceControl::Set(LTVector* pVec)
 {
 	m_Force = *pVec;
 
@@ -369,112 +183,10 @@ inline void GlobalForceControl::Set(LTVector* pVec)
 	}
 }
 
-LTRESULT SPhysicsLT::SetGlobalForce(LTVector& vec)
-{
-	m_pWorld->m_ForceControl.Set(&vec);
-	return LT_OK;
-}
-
-LTRESULT SPhysicsLT::GetStairHeight(float& fHeight)
-{
-	fHeight = m_StairHeight;
-	return LT_OK;
-}
-
-LTRESULT SPhysicsLT::SetStairHeight(float fHeight)
-{
-	m_StairHeight = fHeight;
-	return LT_OK;
-}
-
-// The six-field fill: four values in and the two supplied-list fields
-// cleared. SPhysicsLT::SetObjectDims just below, and the two out-of-line
-// fillers CWMStateInit::Init / InitFrom further down, all use it (defined
-// here, ahead of its first caller, so /Ob1 can expand it). It has to be an
-// inline function rather than a body written out, because that is the only
-// shape that
-// puts InitFrom's three source loads ahead of all six stores — as arguments
-// they are evaluated right to left (0x0c, then the object, then 0x04, then
-// 0x00) before the body runs, and written out inline they would interleave
-// load with store the way Init's stack arguments do.
-static inline void wm_InitMoveState(WMMoveState* pState, void* pContainer,
-                                    void* pUnknown04, LTObject* pObj,
-                                    uint32 nPriority)
-{
-	pState->m_pContainer = (CUnknown210*)pContainer;
-	pState->m_pUnknown04 = (CUnknown6A8Obj*)pUnknown04;
-	pState->m_pObj       = pObj;
-	pState->m_nUnknown0C = nPriority;
-	pState->m_pPushList = 0;
-	pState->m_nPushCount = 0;
-}
-
-#ifndef LT_SERVER_BUILD
-// lithtech.exe has NO out-of-line copy of CWMMoveSetup::Setup (server
-// 0x1001efd8): all three client call sites expand it -- 0x0045456d..
-// 0x00454577 in wm_RotateWorldModel (0x00454530) is `mov 4(%ebx),%ecx;
-// mov (%ecx),%eax; call *0x24(%eax); mov %eax,0x18(%ebx)` with no call.
-// So the client's copy is inline, defined here ahead of its first caller
-// (VC6's inliner is forward-only); server.dll keeps the out-of-line body
-// below.
-inline void CWMMoveSetup::Setup()
-{
-	m_Unknown18 = m_pUnknown04->_v24();
-}
-#endif
-
-// 0x1002d5a9 / lithtech 0x0046bf20 — byte-identical on both images. The
-// second fill is wm_InitMoveState, not six stores written out: shipped loads
-// both the container address and the 0x6a8 object (0x1002d662/0x1002d668)
-// before the first store, and the container goes in first — an inline
-// helper's arguments evaluated ahead of its body. Written out, the fill put
-// `this` in a different spill position and the function-long zero in ecx
-// rather than edx (and cost 22 blocks on /O2). The vDims copy comes after all
-// four zero stores (lithtech 0x46bf3f..0x46bf60: zeros, then the copy).
-LTRESULT SPhysicsLT::SetObjectDims(HOBJECT hObj, LTVector* pNewDims, uint32 flags)
-{
-	WMMoveState state;
-	LTVector vDims;
-
-	state.m_pContainer = LTNULL;
-	state.m_pUnknown04 = LTNULL;
-	state.m_pObj = LTNULL;
-	state.m_nUnknown64 = 0;
-	vDims = *pNewDims;
-
-	if (!hObj || !pNewDims)
-		RETURN_ERROR(2, "SPhysicsLT::SetObjectDims", LT_INVALIDPARAMS);
-
-	if (pNewDims->x > g_DebugMaxDims || pNewDims->y > g_DebugMaxDims ||
-	    pNewDims->z > g_DebugMaxDims)
-	{
-		dsi_ServerError("ILTPhysics::SetObjectDims: dims larger than 'DebugMaxDims'");
-		dsi_ServerError("Object class: %s, dims (%.2f, %.2f, %.2f)",
-			hObj->m_pSData->m_pClass->m_pClassName,
-			pNewDims->x, pNewDims->y, pNewDims->z);
-	}
-
-	if (hObj->m_ObjectType == OT_CONTAINER || hObj->m_ObjectType == OT_WORLDMODEL)
-		return LT_INVALIDPARAMS;
-
-	CServerMgr* pMgr = (CServerMgr*)m_pWorld;
-	wm_InitMoveState(&state, &pMgr->m_Unknown210, pMgr->m_pUnknown6a8, hObj,
-	                 hObj->m_BlockingPriority);
-
-	if (wm_SetObjectDims(&state, &vDims, flags & 1, 1))
-		return LT_OK;
-
-	// Refused: hand back the dims the simulation would have accepted.
-	*pNewDims = vDims;
-	return LT_ERROR;
-}
-
-
-// ---- the world's global force -------------------------------------------- //
-
-// Gravity, and the slope beyond which a surface stops holding anything up.
 GlobalForceControl::GlobalForceControl()
 {
+    m_pObj = nullptr; m_fFrameTime = 0; m_nObjFlags = 0;
+    m_pVelocity = nullptr; m_pAcceleration = nullptr; m_vFrameMove.Init();
 	LTVector vForce(0.0f, -2000.0f, 0.0f);
 
 	Set(&vForce);
@@ -482,60 +194,21 @@ GlobalForceControl::GlobalForceControl()
 	m_Unknown30 = -0.70709997f;
 }
 
-
-
-// ---- the simulation entry points ----------------------------------------- //
-
-// 0x10058728 / 0x1005872c — the counted-move pair below: how many moves, and
-// the ticks their CountAdders charged. Zeroed .bss, owned here: they sit
-// directly ahead of this file's g_AxisDirs (0x10058730), and the only
-// writers besides the two moves are smgr.cpp's reset (0x10032ec1/0x10032ec7).
-// servermgr.h declares both (names ours).
-int g_Unknown58728;
-int g_Unknown5872c;
-
-// 0x100355fe — move an object through the world simulation.
-//
-// A counted move: one global counts them and a scoped CountAdder charges the
-// time to the next one along (0x10058728 and 0x1005872c). The world pointer is
-// the server manager — the request record is filled from its container and its
-// 0x6a8 object, the same six fields SPhysicsLT::SetObjectDims fills — and the
-// position goes to the simulation BY VALUE, twelve bytes onto the stack ahead
-// of the flags.
-//
-// Two orderings in the block below are load-bearing and were found by probe.
-// The container has to be taken before the 0x6a8 pointer: assigning it later
-// lets the load of 0x6a8 have eax to itself and the address comes out as
-// `add $0x210,%eax` where the shipped code has `lea 0x210(%eax),%ecx` (one
-// byte short). And m_pObj has to precede m_nUnknown0C even though the shipped
-// code stores them in that order anyway — with the priority written first,
-// the object pointer and the byte read off it end up in the wrong registers.
-void sm_MoveObject(IWorldSim* pWorld, HOBJECT hObj, LTVector* pPos, uint32 flags)
+static inline void wm_InitMoveState(WMMoveState* pState, void* pContainer,
+                                    void* pUnknown04, LTObject* pObj,
+                                    uint32 nPriority)
 {
-	g_Unknown58728++;
-
-	// PROBE: the shipped client's copy of this function (lithtech 0x0047c5b0)
-	// has no CountAdder at all -- no ctor, no cnt_StartCounter, no dtor, and a
-	// frame exactly 12 bytes smaller (the counter's 8 plus m_pTotal). The
-	// server's (0x1001fb22) has all three. Same shared TU, so a build-level
-	// selector, not a sibling file.
-#ifdef LT_SERVER_TIMERS
-	CountAdder  cntAdder((uint32*)&g_Unknown5872c);
-#endif
-	WMMoveState state;
-	CServerMgr* pMgr = (CServerMgr*)pWorld;
-
-	state.m_nUnknown64 = 0;
-	state.m_pContainer = &pMgr->m_Unknown210;
-	state.m_pUnknown04 = pMgr->m_pUnknown6a8;
-	state.m_pObj = hObj;
-	state.m_nUnknown0C = hObj->m_BlockingPriority;
-	state.m_pPushList  = LTNULL;
-	state.m_nPushCount = 0;
-
-	wm_MoveObject(&state, *pPos, flags);
+	pState->m_pContainer = (CUnknown210*)pContainer;
+	pState->m_pUnknown04 = static_cast<IObjectMover*>(pUnknown04);
+	pState->m_pObj       = pObj;
+	pState->m_nUnknown0C = nPriority;
+	pState->m_pPushList = 0;
+	pState->m_nPushCount = 0;
+    pState->m_PushObjects.reset();
 }
 
+thread_local int g_Unknown58728;
+thread_local int g_Unknown5872c;
 
 // STAND-IN: an inline twin of obj_MaybeRetransformWorldModel (0x1001eb0c),
 // for the sites lithtech.exe expands (wm_SetObjectDims, wm_MoveObject,
@@ -631,12 +304,14 @@ static inline void obj_MaybeRetransformWorldModelInline(LTObject* pObj, int bFla
 //     pass through the FPU; VEC_SET's plain copy became `mov (%esi),%eax`.
 int wm_SetObjectDims(WMMoveState* pState, LTVector* pDims, int bFlag, int bUnknown)
 {
+    MoveCallbackGuard guard(*pState->m_pUnknown04,*pState->m_pObj);
+    if (!guard.unchanged()) return 0;
 	LTVector vDims;
 	LTVector vMiss;
 	float    fDiffSqr;
 	int      bResult;
 
-	((CWMMoveSetup*)pState)->Setup();
+	pState->Setup();
 
 	LTObject* pObj = pState->m_pObj;
 
@@ -647,9 +322,7 @@ int wm_SetObjectDims(WMMoveState* pState, LTVector* pDims, int bFlag, int bUnkno
 
 		LTVector* pObjDims = &pObj->m_Dims;
 
-		fDiffSqr = LTVector(*(LTVector*)&CVectorInit(pObjDims->x - vNew.x,
-		                                 pObjDims->y - vNew.y,
-		                                 pObjDims->z - vNew.z)).MagSqr();
+		fDiffSqr = LTVector(pObjDims->x - vNew.x, pObjDims->y - vNew.y, pObjDims->z - vNew.z).MagSqr();
 	}
 
 	if (bUnknown && fDiffSqr < 0.001f)
@@ -662,31 +335,34 @@ int wm_SetObjectDims(WMMoveState* pState, LTVector* pDims, int bFlag, int bUnkno
 		if (pObj->m_Dims.y >= pDims->y)
 		{
 			vDims.Init(pObj->m_Dims.x, pDims->y, pObj->m_Dims.z);
-			((CObjDimsSetter*)pObj)->SetDims(vDims);
+			pObj->SetDims(vDims);
 		}
 		else
 		{
 			wm_ResizeAxis(pState, 1, &pDims->y);
+            if (!guard.unchanged()) return 0;
 		}
 
 		if (pObj->m_Dims.x >= pDims->x)
 		{
 			vDims.Init(pDims->x, pObj->m_Dims.y, pObj->m_Dims.z);
-			((CObjDimsSetter*)pObj)->SetDims(vDims);
+			pObj->SetDims(vDims);
 		}
 		else
 		{
 			wm_ResizeAxis(pState, 0, &pDims->x);
+            if (!guard.unchanged()) return 0;
 		}
 
 		if (pObj->m_Dims.z >= pDims->z)
 		{
 			vDims.Init(pObj->m_Dims.x, pObj->m_Dims.y, pDims->z);
-			((CObjDimsSetter*)pObj)->SetDims(vDims);
+			pObj->SetDims(vDims);
 		}
 		else
 		{
 			wm_ResizeAxis(pState, 2, &pDims->z);
+            if (!guard.unchanged()) return 0;
 		}
 
 		vMiss = vWanted - pObj->m_Dims;
@@ -700,7 +376,7 @@ int wm_SetObjectDims(WMMoveState* pState, LTVector* pDims, int bFlag, int bUnkno
 	}
 	else
 	{
-		((CObjDimsSetter*)pObj)->SetDims(*pDims);
+		pObj->SetDims(*pDims);
 		bResult = 1;
 	}
 
@@ -719,9 +395,9 @@ int wm_SetObjectDims(WMMoveState* pState, LTVector* pDims, int bFlag, int bUnkno
 // at record +0x18. `push esi; mov ecx,esi` because ecx is spent on the callee's
 // `this`; nothing else in the function.
 #ifdef LT_SERVER_BUILD
-void CWMMoveSetup::Setup()
+void WMMoveState::Setup()
 {
-	m_Unknown18 = m_pUnknown04->_v24();
+	m_Server = m_pUnknown04->IsServer();
 }
 #endif
 
@@ -730,51 +406,6 @@ void CWMMoveSetup::Setup()
 // `lea 0x198(%ecx),%edi` plus three `movsl`, the base-adjusting form — and the
 // bounds are rebuilt afterwards. Reached here through a cast because
 // ltobject_internal.h is not a file this reconstruction owns.
-#ifdef LT_SERVER_BUILD
-void CObjDimsSetter::SetDims(LTVector vDims)
-{
-	m_Dims = vDims;
-
-	UpdateBounds();
-}
-#else
-// lithtech.exe 0x0045aba0 (219 bytes) -- the same SetDims at /O2, which
-// EXPANDS UpdateBounds (ltobject.cpp, server.dll 0x10024a4c): the two box
-// stores at +0xf0/+0xfc through by-value temps (the 0xc frame) and
-// Mag() + 0.1f into +0x1a4 (0x0045ac61 fsqrt). commonphysics.h's
-// CObjDimsSetter only declares UpdateBounds, so this view restates it
-// in-class, as predobj.cpp's LTObjectQ460 does for SetPos (0x0045aaa0).
-// STAND-IN; the layout is ltobject_internal.h's LTObject. (names ours)
-class CObjDimsSetterQG9
-{
-public:
-	void SetDims(LTVector vDims);                           // 0x0045aba0
-
-	void UpdateBounds()
-	{
-		m_BBoxMin = m_Pos - m_Dims;
-		m_BBoxMax = m_Pos + m_Dims;
-
-		m_Radius = m_Dims.Mag() + 0.1f;
-	}
-
-	uint8    m_pad_000[0xf0];
-	LTVector m_BBoxMin;                                     // 0x0f0
-	LTVector m_BBoxMax;                                     // 0x0fc
-	uint8    m_pad_108[0x18c - 0x108];
-	LTVector m_Pos;                                         // 0x18c
-	LTVector m_Dims;                                        // 0x198
-	float    m_Radius;                                      // 0x1a4
-};
-
-void CObjDimsSetterQG9::SetDims(LTVector vDims)
-{
-	m_Dims = vDims;
-
-	UpdateBounds();
-}
-#endif
-
 // WM_CINLINE: `inline` in lithtech.exe's copy of this file only. server.dll
 // has an out-of-line copy of each of these functions and calls it at every
 // site; lithtech.exe expands them, and keeps an out-of-line copy only where
@@ -891,6 +522,8 @@ void obj_MaybeRetransformWorldModel(LTObject* pObj, int bFlag)
 // lithtech residual is the same two integer-vs-FPU float copies.
 void wm_ResizeAxis(WMMoveState* pState, int nAxis, float* pfWanted)
 {
+    MoveCallbackGuard guard(*pState->m_pUnknown04,*pState->m_pObj);
+    if (!guard.unchanged()) return;
 	WMMoveState state;
 	LTVector    vMove;
 	float       fDelta;
@@ -914,10 +547,12 @@ void wm_ResizeAxis(WMMoveState* pState, int nAxis, float* pfWanted)
 
 	vMove[nAxis] -= fDelta;
 
-	((CWMStateInit*)&state)->Init(pState->m_pContainer, pState->m_pUnknown04,
+	state.Init(pState->m_pContainer, pState->m_pUnknown04,
 	                              pObj, pObj->m_BlockingPriority);
 
 	wm_MoveObject(&state, vMove, 1);
+
+	if (!guard.unchanged()) return;
 
 	{
 		LTVector vPos;
@@ -934,6 +569,8 @@ void wm_ResizeAxis(WMMoveState* pState, int nAxis, float* pfWanted)
 	}
 
 	wm_MoveObject(&state, vMove, 1);
+
+	if (!guard.unchanged()) return;
 
 	{
 		LTVector vPos;
@@ -960,6 +597,8 @@ void wm_ResizeAxis(WMMoveState* pState, int nAxis, float* pfWanted)
 
 			wm_MoveObject(&state, vMove, 1);
 
+			if (!guard.unchanged()) return;
+
 			{
 				LTVector vPos;
 
@@ -983,6 +622,8 @@ void wm_ResizeAxis(WMMoveState* pState, int nAxis, float* pfWanted)
 
 	wm_MoveObject(&state, vMove, 7);
 
+	if (!guard.unchanged()) return;
+
 	VEC_SET(vMove, 0.0f, 0.0f, 0.0f);
 
 	VEC_INDEX(vMove, nAxis) = fPosB;
@@ -996,7 +637,7 @@ void wm_ResizeAxis(WMMoveState* pState, int nAxis, float* pfWanted)
 		vNewDims.y = vMove.y + pDims->y;
 		vNewDims.z = vMove.z + pDims->z;
 
-		((CObjDimsSetter*)pObj)->SetDims(vNewDims);
+		pObj->SetDims(vNewDims);
 	}
 }
 
@@ -1088,9 +729,9 @@ WM_CINLINE int wm_ObjectsIntersect(LTObject* pObj1, LTObject* pObj2,
 	{
 		*pbUsedGeometry = 1;
 
-		if (bsp_IntersectBox(pWorldModel->m_pWMIface->GetTransformedBsp(),
-		                     pMin, pMax))
-			return 1;
+        if (pWorldModel->m_pWMIface->GetWorldFlags() & WORLDFLAG_MAINWORLD)
+            return ws_BoxTouchesSolidSurface(pWorldModel->m_pWMIface->GetRoot(),*pMin,*pMax);
+        if (ws_GetBoxStatus(pWorldModel->m_pWMIface->GetRoot(),pMin,pMax)) return 1;
 
 		return 0;
 	}
@@ -1103,44 +744,19 @@ WM_CINLINE int wm_ObjectsIntersect(LTObject* pObj1, LTObject* pObj2,
 
 // ---- wm_MoveObject's push-everything-else-out-of-the-way pass ------------ //
 
-// The record the container's box query fills in, and the callback it reports
-// each hit through. The callback names itself in its own overflow message —
-// "FindObjectsCB: Overflowed (more than %d intersecting objects...)" — and
-// that message's argument is 0x80, which is also the size of the buffer the
-// caller reserves (0x200 bytes of frame). Field names ours.
-#define WM_MAX_FOUND_OBJECTS 0x80
-
-// The buffer is part of the record and not a local beside it: the frame is
-// 0xc + 0x200 + 0x24 with the header at -0x230 and the array immediately
-// above it at -0x224, and `query.m_ppObjects = query.m_Objects` is what puts
-// the header BELOW the array. Two separate locals put the 512-byte array at
-// the bottom of the frame instead, whatever their declaration order.
-struct CFindObjectsQuery
-{
-	struct WMMoveState* m_pState;            // 0x00
-	class LTObject**    m_ppObjects;         // 0x04
-	int                 m_nObjects;          // 0x08
-	class LTObject*     m_Objects[WM_MAX_FOUND_OBJECTS];   // 0x0c
+// Own each candidate identity before a push can invoke game code.
+struct CFindObjectsQuery {
+    WMMoveState* m_pState = nullptr;
+    using Entry=MoveObjectReference;
+    std::vector<Entry> objects;
 };
-
-void FindObjectsCB(class LTObject* pObj, CFindObjectsQuery* pQuery);  // 0x100205af
-
-typedef void (*FindObjectsFn)(class LTObject* pObj, CFindObjectsQuery* pQuery);
+void FindObjectsCB(LTObject*, CFindObjectsQuery*);
 
 // The container at WMMoveState+0x00, reached here through slot 1: everything
 // whose box overlaps the one it is handed, reported through the callback.
 // servercommon.h declares the same object for slot 3 (the point query) and
 // servermgr.h's CUnknown210 models neither, so the interface is declared
 // locally and the pointer cast (names ours).
-class IBoxQueryWorld
-{
-public:
-	virtual void _v00()=0;
-	virtual void FindObjectsInBox(LTVector* pMin, LTVector* pMax,
-	                              FindObjectsFn pfn, CFindObjectsQuery* pQuery,
-	                              int nFlag)=0;                        // 0x04
-};
-
 // 0x1001f357 — the swept box: the object's own box copied into the two
 // destinations, then each component pushed out along whichever side the move
 // vector points at (name ours). It is a separate out-of-line function even
@@ -1182,7 +798,7 @@ LTVector g_AxisDirs[6] =
 //   0x10020045  the world-model-against-world-model case
 //   0x1002056f  does this pair need real geometry rather than box physics?
 LTBOOL wm_IsPushBlocker(class LTObject* pObj);
-void   wm_NotifyContact(class IWMSetupSource* pSource, class LTObject* pObj,
+void   wm_NotifyContact(class IObjectMover* pSource, class LTObject* pObj,
                         class LTObject* pOther);
 int    wm_PushWithGeometry(struct WMMoveState* pState, class LTObject* pObj,
                            LTVector* pOrigPos, LTVector* pNewPos, int bFlag,
@@ -1225,18 +841,6 @@ void wm_UpdateDimsFromGeometry(class LTObject* pObj, LTMatrix* pTransform);
 // 0x1001f4ee reaches LTObject's vtable slot 0x34, which ltobject_internal.h
 // (not a file this reconstruction owns) declares as void. The cast to this
 // same-layout stand-in is how the call is written (name ours).
-class IWMMovableObject
-{
-public:
-	virtual void _v00()=0; virtual void _v04()=0; virtual void _v08()=0;
-	virtual void _v0c()=0; virtual void _v10()=0; virtual void _v14()=0;
-	virtual int _v18(struct WMMoveState*, class LTObject*, class LTObject*)=0; virtual void _v1c()=0; virtual void _v20()=0;
-	virtual void _v24()=0; virtual void _v28()=0; virtual void _v2c()=0;
-	virtual void _v30()=0;
-	// 0x34 — answers whether the object is one a push has to take seriously.
-	virtual LTBOOL _v34()=0;
-};
-
 // The record the 0x6a8 object is currently serving — the 0x24 bytes
 // wm_MoveObject parks there — is the SDK's CollisionInfo: the notifier below
 // clears its plane (the normal and the distance, four `fldz`) and its polygon
@@ -1248,19 +852,6 @@ public:
 // move started from, the move itself, its midpoint and half-length-plus-dims
 // radius, and the swept box the query runs on. Every one of them is written
 // here and read by the helpers above (names ours).
-class CWMMoveGeom
-{
-public:
-	uint8      m_pad_00[0x1c];
-	LTVector*  m_pOrigPos;                   // 0x1c
-	LTVector   m_vPos;                       // 0x20
-	LTVector   m_vMove;                      // 0x2c
-	LTVector   m_vMid;                       // 0x38
-	float      m_fRadius;                    // 0x44
-	LTVector   m_vBoxMin;                    // 0x48
-	LTVector   m_vBoxMax;                    // 0x54
-};
-
 // 0x1001f131 — shift everything the move would pass through, then check the
 // move again, until nothing else is in the way or the attempt is given up.
 //
@@ -1303,11 +894,11 @@ public:
 void wm_PushIntersectingObjects(WMMoveState* pState, LTVector* pOrigPos,
                                 LTVector* pNewPos)
 {
+    MoveCallbackGuard guard(*pState->m_pUnknown04,*pState->m_pObj);
+    if (!guard.unchanged()) return;
 	CFindObjectsQuery query;
-	CWMMoveGeom*      pGeom = (CWMMoveGeom*)pState;
+	WMMoveState*      pGeom = (WMMoveState*)pState;
 
-	query.m_ppObjects = query.m_Objects;
-	query.m_nObjects = 0;
 
 	pGeom->m_pOrigPos = pOrigPos;
 
@@ -1325,15 +916,18 @@ void wm_PushIntersectingObjects(WMMoveState* pState, LTVector* pOrigPos,
 
 	query.m_pState = pState;
 
-	if (pState->m_pPushList)
+    if (pState->m_PushObjects) {
+        query.objects.reserve(pState->m_PushObjects->size());
+        for (const auto& entry : *pState->m_PushObjects) if (entry.guard.unchanged()) query.objects.push_back(entry);
+    }
+    else if (pState->m_pPushList)
 	{
-		query.m_ppObjects = (LTObject**)pState->m_pPushList;
-		query.m_nObjects = pState->m_nPushCount;
+        query.objects.reserve(pState->m_nPushCount);
+        for (uint32 i = 0; i < pState->m_nPushCount; ++i) query.objects.emplace_back(pState->m_pPushList[i]);
 	}
 	else
 	{
-		((IBoxQueryWorld*)pState->m_pContainer)->FindObjectsInBox(
-			&pGeom->m_vBoxMin, &pGeom->m_vBoxMax, FindObjectsCB, &query, 0);
+		pState->m_pContainer->QueryBox(pGeom->m_vBoxMin, pGeom->m_vBoxMax, [&](LTObject* object) { FindObjectsCB(object, &query); });
 	}
 
 	LTObject* pLast[2];
@@ -1344,17 +938,19 @@ void wm_PushIntersectingObjects(WMMoveState* pState, LTVector* pOrigPos,
 	pLast[0] = LTNULL;
 	nHandled = 0;
 
-	for (i = query.m_nObjects - 1; i >= 0; i--)
+	for (i = static_cast<int>(query.objects.size()) - 1; i >= 0; i--)
 	{
 		if (nHandled >= 10)
 			break;
 
-		LTObject* pObj = query.m_ppObjects[i];
+        if (!query.objects[i].guard.unchanged()) continue;
+		LTObject* pObj = query.objects[i].object;
 
 		pState->m_nUnknown64 = (pObj == pLast[0] || pObj == pLast[1]) ? nHandled : 0;
 
-		if (!wm_PushObject(pState, pObj))
-			continue;
+        const auto pushed = wm_PushObject(pState,pObj);
+        if (!guard.unchanged()) return;
+        if (!query.objects[i].guard.unchanged() || !pushed) continue;
 
 		if (nHandled >= 2 && (pObj == pLast[0] || pObj == pLast[1]))
 		{
@@ -1372,7 +968,7 @@ void wm_PushIntersectingObjects(WMMoveState* pState, LTVector* pOrigPos,
 		// Before the two vector writes, not after: the count goes into the
 		// dead third parameter's slot because the `movsl` runs below need
 		// edi. Written after them it stays a plain read of the record.
-		i = query.m_nObjects;
+		i = static_cast<int>(query.objects.size());
 
 		pGeom->m_vPos = pState->m_pObj->m_Pos;
 		pGeom->m_vMove = pGeom->m_vPos - *pOrigPos;
@@ -1465,14 +1061,24 @@ void wm_PushIntersectingObjects(WMMoveState* pState, LTVector* pOrigPos,
 // into vStart in its own arm, ours selects an address and shares one copy
 // (written as if/else both arms copy, but registers reshuffle to 19 blocks)
 // -- plus the carry loop's record pointer biased by a different constant.
+static void validate_standing(LTObject& object) {
+    if (!object.m_pStandingOnPoly) return;
+    const auto* polygon = object.m_pStandingOnPoly;
+    const auto* plane = polygon->m_pOwner->m_pParent->m_pPlane;
+    const float gap = plane->m_Normal.Dot(object.m_Pos)-plane->m_Dist-
+        phys_SupportRadius(object.m_Dims,object.m_Flags,object.m_Flags2,plane->m_Normal);
+    if (gap < -.15f || gap > .25f || !w_PolygonTouchesBox(*polygon->m_pOwner,object.m_BBoxMin,object.m_BBoxMax,.15f))
+        obj_UnlinkTrackersA(&object);
+}
+
 void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 {
-	CWMStandRec   found[WM_MAX_STANDING];
-	CWMRequestRec rec;
+    MoveCallbackGuard guard(*pState->m_pUnknown04,*pState->m_pObj);
+    if (!guard.unchanged()) return;
+	std::vector<StandingObject> found;
 	WMMoveState   state;
 	uint32        bUseArg;
 	int           bUsedGeometry;
-	void*         pSavedRequest;
 	LTVector      vStart;
 	LTObject*     pStanding;
 	LTVector      vDelta;
@@ -1484,12 +1090,12 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 	state.m_pObj       = LTNULL;
 	state.m_nUnknown64 = 0;
 
-	((CWMMoveSetup*)pState)->Setup();
+	pState->Setup();
 
 	if (pState->m_pObj->m_ChangeFlags & 2)
 		return;
 
-	if (!pState->m_pObj->_p30())
+	if (!pState->m_pObj->_v30())
 		return;
 
 	vDelta = vPos - pState->m_pObj->m_Pos;
@@ -1497,23 +1103,24 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 	if (vDelta.MagSqr() < WM_MOVE_EPSILON_SQR)
 		return;
 
-	if (((IWMSetupSource*)pState->m_pUnknown04)->_v28(pState->m_pObj))
+	if ((pState->m_pUnknown04)->CanPlace(pState->m_pObj))
 	{
 		if (flags & 2)
-			((IWMSetupSource*)pState->m_pUnknown04)->_v00(pState->m_pObj, 2);
+			(pState->m_pUnknown04)->SetObjectChangeFlags(pState->m_pObj, 2);
 
+		if (flags & 1) obj_UnlinkTrackersA(pState->m_pObj);
 		pState->m_pObj->SetPos(vPos);
+        validate_standing(*pState->m_pObj);
 		return;
 	}
 
-	((IWMSetupSource*)pState->m_pUnknown04)->_v20(pState, &vPos);
+	(pState->m_pUnknown04)->CheckMaxPos(pState, &vPos);
 
-	pSavedRequest = *((IWMSetupSource*)pState->m_pUnknown04)->_v04();
-	*((IWMSetupSource*)pState->m_pUnknown04)->_v04() = &rec;
+    CollisionScope collision(*pState->m_pUnknown04);
 
-	memset(&rec, 0, sizeof(rec));
+	(pState->m_pUnknown04)->Detach(pState->m_pObj);
 
-	((IWMSetupSource*)pState->m_pUnknown04)->_v10(pState->m_pObj);
+	if (!guard.unchanged()) return;
 
 	// Two statements, not `flags & 8`, and both taken off one copy of the
 	// flag word: the shipped code loads `flags` into a register that stays
@@ -1524,7 +1131,8 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 	// instead of the dead first parameter's. (Re-measured: `bUseArg = flags
 	// & 8` now emits the same bytes as the two-statement form, and neither
 	// holds `flags` in a register the way the shipped build does.)
-	pState->m_pObj->m_ChangeFlags |= CHANGEFLAG_MOTION | 2;
+	pState->m_pObj->m_ChangeFlags |= CHANGEFLAG_MOTION;
+    MovingObjectScope moving(*pState->m_pObj);
 
 	bUseArg = flags;
 	bUseArg &= 8;
@@ -1538,6 +1146,9 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 		pStanding = pState->m_pObj->m_pStandingOn;
 	else
 		pStanding = LTNULL;
+
+    std::optional<ObjectCallbackGuard> standing;
+    if (pStanding) standing.emplace(*pStanding);
 
 	nFound = -1;
 
@@ -1555,22 +1166,11 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 
 			pCur = pCur->m_pNext;
 
-			// SHIPPED BUG, reproduced as shipped: the cap is
-			// `cmpl $0x20,-0x4(%ebp); jge`, so an index of 0x20 is admitted
-			// into an array of 0x20 records. The frame is the proof that the
-			// array really is that size — 0x200 for it plus 0x24 for the
-			// request record, 0x68 for the nested move state and 0x4c for
-			// the rest is exactly the `sub $0x2d8,%esp` the prologue does —
-			// so a thirty-third object standing on this one writes its
-			// record over the first sixteen bytes of the request record at
-			// -0xd8, which the notification above it has already been
-			// handed the address of.
-			if (!(pOn->m_Flags & FLAG_DONTFOLLOWSTANDING) && nFound < WM_MAX_STANDING)
+			if (!(pOn->m_Flags & FLAG_DONTFOLLOWSTANDING))
 			{
 				nFound++;
 
-				found[nFound].m_pObj = pOn;
-				found[nFound].m_vOffset = pOn->m_Pos - pState->m_pObj->m_Pos;
+				found.emplace_back(pOn,pOn->m_Pos - pState->m_pObj->m_Pos);
 			}
 			else
 			{
@@ -1602,6 +1202,7 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 		WM_RETRANSFORM(pState->m_pObj, 1);
 
 		wm_PushIntersectingObjects(pState, &vStart, &pState->m_pObj->m_Pos);
+        if (!guard.unchanged()) return;
 	}
 	else
 	{
@@ -1625,15 +1226,19 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 		// variable and comes out with two induction pointers.
 		for (i = nFound; i >= 0; i--)
 		{
+            if (!found[i].guard.unchanged()) continue;
 			// Named, and computed BEFORE the fill: the shipped loop copies
 			// the offset and does the three fadds ahead of the InitFrom call
 			// (0x1001ee84..0x1001eeb5) and hands the recursion a copy of
 			// -0x28. Written as the argument it cannot cross the call.
 			LTVector vDest = pState->m_pObj->m_Pos + found[i].m_vOffset;
 
-			((CWMStateInit*)&state)->InitFrom(pState, found[i].m_pObj);
+			state.InitFrom(pState, found[i].m_pObj);
 
 			wm_MoveObject(&state, vDest, nSubFlags);
+            if (!guard.unchanged()) return;
+            if (!found[i].guard.unchanged()) continue;
+
 
 			// A local for the second read: the shipped code reads the
 			// record's object twice — once for the fill above and once
@@ -1650,7 +1255,7 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 
 	// A world model or a container is not something to stand on; anything
 	// else the object is still overlapping it goes back to standing on.
-	if (pStanding && pStanding->m_ObjectType != OT_WORLDMODEL &&
+	if (pStanding && standing->unchanged() && pStanding->m_ObjectType != OT_WORLDMODEL &&
 	    pStanding->m_ObjectType != OT_CONTAINER)
 	{
 		if (wm_ObjectsIntersect(pStanding, pState->m_pObj,
@@ -1664,25 +1269,27 @@ void wm_MoveObject(WMMoveState* pState, LTVector vPos, uint32 flags)
 
 	if (flags & 2)
 	{
-		((IWMSetupSource*)pState->m_pUnknown04)->_v00(pState->m_pObj, 2);
+		(pState->m_pUnknown04)->SetObjectChangeFlags(pState->m_pObj, 2);
 
 		if (bUseArg)
-			((IWMSetupSource*)pState->m_pUnknown04)->_v00(pState->m_pObj, 0x200);
+			(pState->m_pUnknown04)->SetObjectChangeFlags(pState->m_pObj, 0x200);
 	}
 
-	((IWMSetupSource*)pState->m_pUnknown04)->_v14(pState);
+	(pState->m_pUnknown04)->UpdateAttachments(pState);
 
-	*((IWMSetupSource*)pState->m_pUnknown04)->_v04() = pSavedRequest;
+	if (!guard.unchanged()) return;
+    validate_standing(*pState->m_pObj);
 }
+
 
 
 // 0x10020a2d — the fill from four loose arguments. The zero stores are
 // interleaved between the first two argument stores, which is the scheduler
 // filling the gaps between the four `mov 0xN(%esp),%eax` loads.
-void CWMStateInit::Init(void* pContainer, void* pUnknown04, LTObject* pObj,
+void WMMoveState::Init(CUnknown210* pContainer, IObjectMover* pUnknown04, LTObject* pObj,
                         uint32 nPriority)
 {
-	wm_InitMoveState((WMMoveState*)this, pContainer, pUnknown04, pObj,
+	wm_InitMoveState(this, pContainer, pUnknown04, pObj,
 	                 nPriority);
 }
 
@@ -1697,9 +1304,9 @@ void CWMStateInit::Init(void* pContainer, void* pUnknown04, LTObject* pObj,
 // copy (0x00453ef0) is called only from the pusher bodies expanded into
 // wm_PushWorldModel (0x00453357, 0x00453589, 0x004539dc), where the inline
 // budget has run out. server.dll calls it everywhere.
-WM_CINLINE void CWMStateInit::InitFrom(WMMoveState* pSrc, LTObject* pObj)
+WM_CINLINE void WMMoveState::InitFrom(WMMoveState* pSrc, LTObject* pObj)
 {
-	wm_InitMoveState((WMMoveState*)this, pSrc->m_pContainer,
+	wm_InitMoveState(this, pSrc->m_pContainer,
 	                 pSrc->m_pUnknown04, pObj, pSrc->m_nUnknown0C);
 }
 
@@ -1754,7 +1361,7 @@ LTBOOL wm_IsPushBlocker(LTObject* pObj)
 	// early `return LTFALSE`s: lithtech 0x451c40 shares a single `xor/pop/ret`
 	// for the not-solid and wrong-type cases; two refusals gave /O2 two
 	// copies (server.dll was identical either way).
-	if (!((IWMMovableObject*)pObj)->_v34())
+	if (!pObj->_v34())
 	{
 		if (!(pObj->m_Flags & FLAG_SOLID) ||
 		    (pObj->m_ObjectType != OT_WORLDMODEL &&
@@ -1773,9 +1380,11 @@ LTBOOL wm_IsPushBlocker(LTObject* pObj)
 // inside it. The two ends are handled by two separate written-out pairs, not
 // a loop, and the second of each pair re-reads its object out of the
 // parameter slot.
-void wm_NotifyContact(IWMSetupSource* pSource, LTObject* pObj, LTObject* pOther)
+void wm_NotifyContact(IObjectMover* pSource, LTObject* pObj, LTObject* pOther)
 {
-	CollisionInfo* pRec = (CollisionInfo*)*pSource->_v04();
+    MovePairGuard guard(*pSource,*pObj,*pOther);
+    if (!guard.unchanged()) return;
+	CollisionInfo* pRec = (CollisionInfo*)*pSource->GetCollisionInfo();
 	LTVector       vZero;
 
 	// MEMBER-STORE ORDER: shipped /O2 emits +0x00,+0x04,+0x08,+0x0c then
@@ -1795,16 +1404,20 @@ void wm_NotifyContact(IWMSetupSource* pSource, LTObject* pObj, LTObject* pOther)
 	vZero.z = 0.0f;
 
 	if (pObj->m_Flags & FLAG_TOUCH_NOTIFY)
-		pSource->_v08(pObj, pOther, &vZero, 0.0f);
+		pSource->TouchNotify(pObj, pOther, &vZero, 0.0f);
+    if (!guard.unchanged()) return;
 
 	if (pOther->m_Flags & FLAG_TOUCH_NOTIFY)
-		pSource->_v08(pOther, pObj, &vZero, 0.0f);
+		pSource->TouchNotify(pOther, pObj, &vZero, 0.0f);
+    if (!guard.unchanged()) return;
 
 	if (pObj->m_Flags & FLAG_CONTAINER)
-		pSource->_v0c(pOther, pObj);
+		pSource->Attach(pOther, pObj);
+    if (!guard.unchanged()) return;
 
 	if (pOther->m_Flags & FLAG_CONTAINER)
-		pSource->_v0c(pObj, pOther);
+		pSource->Attach(pObj, pOther);
+    if (!guard.unchanged()) return;
 }
 
 
@@ -1836,41 +1449,13 @@ WM_CINLINE LTBOOL wm_PairNeedsGeometry(LTObject* pObj1, LTObject* pObj2)
 //
 // The cap and the overflow message's argument are the same 0x80, which is
 // what puts it in a register rather than as two immediates.
-void FindObjectsCB(LTObject* pObj, CFindObjectsQuery* pQuery)
+void FindObjectsCB(LTObject* object, CFindObjectsQuery* query)
 {
-	if (pObj->m_Unknown54)
-		return;
-
-	// The overflow report is the ELSE of the whole body, not an early return:
-	// that is what puts its block after the append, where the shipped build
-	// has it, with the count test jumping forward into it.
-	if (pQuery->m_nObjects < WM_MAX_FOUND_OBJECTS)
-	{
-		if (pObj == pQuery->m_pState->m_pObj)
-			return;
-
-		uint32 nFlags = pObj->m_Flags;
-
-		if (!(nFlags & (FLAG_SOLID | FLAG_TOUCH_NOTIFY | FLAG_CONTAINER)))
-			return;
-
-		if (!((CWMMoveSetup*)pQuery->m_pState)->m_Unknown18)
-		{
-			if (nFlags & FLAG_CLIENTNONSOLID)
-				return;
-
-			if (!(nFlags & FLAG_SOLID))
-				return;
-		}
-
-		pQuery->m_ppObjects[pQuery->m_nObjects] = pObj;
-		pQuery->m_nObjects++;
-	}
-	else
-	{
-		dsi_ServerError("FindObjectsCB: Overflowed (more than %d intersecting objects)!",
-		                WM_MAX_FOUND_OBJECTS);
-	}
+    if (object->m_Unknown54 || object == query->m_pState->m_pObj || !ObjectCallbackGuard(*object).unchanged()) return;
+    const auto flags = object->m_Flags;
+    if (!(flags & (FLAG_SOLID | FLAG_TOUCH_NOTIFY | FLAG_CONTAINER))) return;
+    if (!query->m_pState->m_Server && ((flags & FLAG_CLIENTNONSOLID) || !(flags & FLAG_SOLID))) return;
+    query->objects.emplace_back(object);
 }
 
 
@@ -1878,7 +1463,9 @@ void FindObjectsCB(LTObject* pObj, CFindObjectsQuery* pQuery)
 // it, and did shifting it work?
 WM_CINLINE int wm_PushObject(WMMoveState* pState, LTObject* pObj)
 {
-	CWMMoveGeom* pGeom = (CWMMoveGeom*)pState;
+    MovePairGuard guard(*pState->m_pUnknown04,*pState->m_pObj,*pObj);
+    if (!guard.unchanged()) return 0;
+	WMMoveState* pGeom = (WMMoveState*)pState;
 	int          bBlocker;
 	int          bUsedGeometry;
 	int          nMoved;
@@ -1930,11 +1517,13 @@ WM_CINLINE int wm_PushObject(WMMoveState* pState, LTObject* pObj)
 
 	if (bBlocker)
 	{
-		if (bUsedGeometry)
+		if (bUsedGeometry) {
 			nMoved = wm_PushWithGeometry(pState, pObj, pGeom->m_pOrigPos,
 			                             &pGeom->m_vPos, 1, &nUnused);
-		else
+		} else {
 			nMoved = wm_PushWithBox(pState, pObj, pGeom->m_pOrigPos, &pGeom->m_vPos);
+		}
+        if (!guard.unchanged()) return 0;
 
 		if (nMoved)
 			pState->m_pObj->SetPos(pGeom->m_vPos);
@@ -1943,8 +1532,9 @@ WM_CINLINE int wm_PushObject(WMMoveState* pState, LTObject* pObj)
 	}
 	else
 	{
-		wm_NotifyContact((IWMSetupSource*)pState->m_pUnknown04, pObj,
+		wm_NotifyContact(pState->m_pUnknown04, pObj,
 		                 pState->m_pObj);
+		if (!guard.unchanged()) return 0;
 	}
 
 	return 0;
@@ -2124,14 +1714,6 @@ Stop:
 // 0x1001e6d7 — LTVector's three-float constructor, out of line. The stores
 // are integer `mov`s: a float parameter copied straight into a float member
 // never touches the FPU.
-CVectorInit::CVectorInit(float _x, float _y, float _z)
-{
-	x = _x;
-	y = _y;
-	z = _z;
-}
-
-
 // 0x1001ff57 — the smallest of the six box separations.
 //
 // Read off the bytes:
@@ -2217,6 +1799,8 @@ int wm_MoveThroughSim(WMMoveState* pState, IWorldBsp* pWorldBsp,
                       LTVector* pStart, LTVector* pEnd,
                       int bPushOut, int bStandOn)
 {
+    MovePairGuard guard(*pState->m_pUnknown04,*pState->m_pObj,*pObj);
+    if (!guard.unchanged()) return 0;
 	CMoveState   move;
 	CBounceState result;
 	int          bStanding;
@@ -2226,11 +1810,11 @@ int wm_MoveThroughSim(WMMoveState* pState, IWorldBsp* pWorldBsp,
 	if (pObj->m_Flags & FLAG_GOTHRUWORLD)
 		return 0;
 
-	IWMSetupSource* pSource = (IWMSetupSource*)pState->m_pUnknown04;
+	IObjectMover* pSource = pState->m_pUnknown04;
 
-	move.m_pHost      = (IPhysicsHost*)pSource;
-	move.m_pUnknown08 = ((CWMMoveSetup*)pState)->m_Unknown18;
-	move.m_pInfo      = (CollisionInfo*)*pSource->_v04();
+	move.m_pHost      = pSource;
+	move.m_pUnknown08 = pState->m_Server;
+	move.m_pInfo      = (CollisionInfo*)*pSource->GetCollisionInfo();
 	move.m_pWorldBsp  = pWorldBsp;
 	move.m_hObject    = hObject;
 	move.m_vStart     = *pStart;
@@ -2269,12 +1853,14 @@ int wm_MoveThroughSim(WMMoveState* pState, IWorldBsp* pWorldBsp,
 
 			float fMagSqr = result.m_vMomentum.MagSqr();
 
-			if (fMagSqr >= pObj->m_ForceIgnoreLimitSqr)
-				((IWMSetupSource*)pState->m_pUnknown04)->_v08(
+			if (fMagSqr >= pObj->m_ForceIgnoreLimitSqr) {
+				(pState->m_pUnknown04)->TouchNotify(
 					pObj,
-					((CollisionInfo*)*((IWMSetupSource*)pState->m_pUnknown04)->_v04())->m_hObject,
+					((CollisionInfo*)*(pState->m_pUnknown04)->GetCollisionInfo())->m_hObject,
 					&result.m_vVelocityAdd,
 					(float)sqrt(fMagSqr));
+			}
+            if (!guard.unchanged()) return 0;
 
 			if (bStanding)
 			{
@@ -2436,7 +2022,7 @@ void wm_UpdateDimsFromGeometry(LTObject* pObj, LTMatrix* pTransform)
 	// gave `fcomp %st(1)` there; server.dll is identical either way.
 	vMin = (vMax - vMin) * 0.5f;
 
-	((CObjDimsSetter*)pObj)->SetDims(vMin);
+	pObj->SetDims(vMin);
 }
 
 
@@ -2459,12 +2045,12 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj);   // 0x10020e31
 // lithtech.exe's twin is 0x00454530 (src/engine/lithtech/wmrotate.cpp, read
 // against the client bytes), which has the counter and not the CountAdder --
 // the same LT_SERVER_TIMERS split sm_MoveObject has. /O1 calls out of line
-// what the client inlines: CWMMoveSetup::Setup, LTMatrix::Init (0x10011dc5),
+// what the client inlines: WMMoveState::Setup, LTMatrix::Init (0x10011dc5),
 // MatTranspose3x3 (0x10020e08), obj_MaybeRetransformWorldModel, memset and
 // MatVMul_H (0x1000f878).
 //
 // lithtech.exe (0x00454530, 1285 bytes) is NEAR at 1297 after the two
-// client-only expansions (CWMMoveSetup::Setup and the retransform guard).
+// client-only expansions (WMMoveState::Setup and the retransform guard).
 // Left: the /O2 image copies vPos into matFromOrigin's translation column as
 // INTEGER moves (0x004545b4 `mov %edx,0x70(%esp)`, 0x00454693, 0x004546bb)
 // where Init's float parameters go through the FPU here, and MatVMul_H's
@@ -2480,13 +2066,17 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj);   // 0x10020e31
 // /O2's lowering of the inlined float argument, not a spelling. Identity()
 // instead of the explicit Init leaves Init a call (1121/1177).
 //
-// The carry list keeps wm_MoveObject's shipped off-by-one: the cap is
-// `cmpl $0x20,0xc(%ebp); jge` (0x10020cd6), admitting an index of 0x20 into
-// an array of 0x20 -- found[] ends exactly at the saved %ebp.
 void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknown)
 {
-	CWMStandRec   found[WM_MAX_STANDING];
-	CWMRequestRec rec;
+    MoveCallbackGuard guard(*pState->m_pUnknown04,*pState->m_pObj);
+    if (!guard.unchanged()) return;
+    std::vector<CFindObjectsQuery::Entry> supplied;
+    if (pState->m_PushObjects) supplied=*pState->m_PushObjects;
+    else if (pState->m_pPushList) {
+        supplied.reserve(pState->m_nPushCount);
+        for (uint32 i=0;i<pState->m_nPushCount;++i) supplied.emplace_back(pState->m_pPushList[i]);
+    }
+	std::vector<StandingObject> found;
 	WMMoveState   state;
 	LTMatrix      matToOrigin;
 	LTMatrix      matFromOrigin;
@@ -2496,7 +2086,6 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 	LTMatrix      matRotation;
 	LTVector      vPos;
 	LTVector      vDest;
-	void*         pSavedRequest;
 	LTObject*     pObj;
 	int           nFound;
 
@@ -2511,7 +2100,7 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 	CountAdder cntAdder((uint32*)&g_Unknown5872c);
 #endif
 
-	((CWMMoveSetup*)pState)->Setup();
+	pState->Setup();
 
 	pObj = pState->m_pObj;
 	vPos = pObj->m_Pos;
@@ -2557,10 +2146,7 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 	MatMul(&matTemp, &matRotation, &matObjRot);
 	MatMul(&matRotation, &matTemp, &matToOrigin);
 
-	pSavedRequest = *((IWMSetupSource*)pState->m_pUnknown04)->_v04();
-	*((IWMSetupSource*)pState->m_pUnknown04)->_v04() = &rec;
-
-	memset(&rec, 0, sizeof(rec));
+    CollisionScope collision(*pState->m_pUnknown04);
 
 	nFound = -1;
 
@@ -2574,12 +2160,11 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 
 			pCur = pCur->m_pNext;
 
-			if (!(pOn->m_Flags & FLAG_DONTFOLLOWSTANDING) && nFound < WM_MAX_STANDING)
+			if (!(pOn->m_Flags & FLAG_DONTFOLLOWSTANDING))
 			{
 				nFound++;
 
-				found[nFound].m_pObj    = pOn;
-				found[nFound].m_vOffset = pOn->m_Pos;
+				found.emplace_back(pOn,pOn->m_Pos);
 			}
 			else
 			{
@@ -2592,18 +2177,18 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 
 	// Either the caller named the objects to push, or the container is asked
 	// which ones the new box touches.
-	if (pState->m_pPushList)
+    if (pState->m_PushObjects || pState->m_pPushList)
 	{
-		uint32 i;
-
-		for (i = 0; i < pState->m_nPushCount; i++)
-			wm_RotatePushObject(pState, ((LTObject**)pState->m_pPushList)[i]);
+        for (const auto& candidate : supplied) {
+            if (!candidate.guard.unchanged()) continue;
+            wm_RotatePushObject(pState,candidate.object);
+            if (!guard.unchanged()) return;
+        }
 	}
 	else
 	{
-		((IBoxQueryWorld*)pState->m_pContainer)->FindObjectsInBox(
-			&pState->m_pObj->m_BBoxMin, &pState->m_pObj->m_BBoxMax,
-			(FindObjectsFn)wm_RotatePushFilter, (CFindObjectsQuery*)pState, 0);
+		pState->m_pContainer->QueryBox(pState->m_pObj->m_BBoxMin, pState->m_pObj->m_BBoxMax, [&](LTObject* object) { if (guard.unchanged()) wm_RotatePushFilter(object, pState); });
+        if (!guard.unchanged()) return;
 	}
 
 	if (nFound >= 0)
@@ -2612,6 +2197,7 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 
 		for (i = nFound; i >= 0; i--)
 		{
+            if (!found[i].guard.unchanged()) continue;
 			LTObject* pOn = found[i].m_pObj;
 
 			MatVMul_H(&vDest, &matRotation, &found[i].m_vOffset);
@@ -2622,10 +2208,12 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 			vDest.y -= 0.5f;
 
 			wm_MoveObject(&state, vDest, 7);
+
+			if (!guard.unchanged()) return;
 		}
 	}
 
-	*((IWMSetupSource*)pState->m_pUnknown04)->_v04() = pSavedRequest;
+
 }
 
 
@@ -2636,16 +2224,6 @@ void wm_RotateWorldModel(WMMoveState* pState, LTRotation* pRotation, int bUnknow
 // it that way, so the return value has to be reached through a
 // layout-identical view. The vptr is the object's own, at offset 0, which is
 // where the shipped `mov (%ebx),%eax` reads it (names ours).
-class IObjPushTestView
-{
-public:
-	virtual void _p00()=0; virtual void _p04()=0; virtual void _p08()=0;
-	virtual void _p0c()=0; virtual void _p10()=0; virtual void _p14()=0;
-	virtual void _p18()=0; virtual void _p1c()=0; virtual void _p20()=0;
-	virtual void _p24()=0; virtual void _p28()=0; virtual void _p2c()=0;
-	virtual void _p30()=0;
-	virtual int  TakesPartInPush()=0;        // 0x34
-};
 
 
 // 0x10020e31 — one object out of the way of a ROTATING world model, and the
@@ -2700,6 +2278,8 @@ public:
 //     the fresh pState->m_pObj reads flipped %ebx from pObj to pState.
 void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 {
+    MovePairGuard guard(*pState->m_pUnknown04,*pState->m_pObj,*pObj);
+    if (!guard.unchanged()) return;
 	LTVector    vPush;         // -0x0c
 	LTVector    vTmp;          // -0x18
 	LTObject*   pMoving;       // -0x1c
@@ -2723,7 +2303,7 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 	move.m_pObj       = LTNULL;
 	move.m_nUnknown64 = 0;
 
-	if (((IObjPushTestView*)pObj)->TakesPartInPush())
+	if (pObj->_v34())
 		return;
 
 	pMoving = pState->m_pObj;
@@ -2732,7 +2312,7 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 	                     &pObj->m_BBoxMin, &pObj->m_BBoxMax, 0.01f))
 		return;
 
-	if (!bsp_IntersectBox(pState->m_pObj->m_pWMIface->GetTransformedBsp(),
+	if (!ws_GetBoxStatus(pState->m_pObj->m_pWMIface->GetRoot(),
 	                      &pObj->m_BBoxMin, &pObj->m_BBoxMax))
 		return;
 
@@ -2740,8 +2320,9 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 	// they touched and that is all.
 	if (!(pState->m_pObj->m_Flags & FLAG_SOLID) || !(pObj->m_Flags & FLAG_SOLID))
 	{
-		wm_NotifyContact((IWMSetupSource*)pState->m_pUnknown04,
+		wm_NotifyContact(pState->m_pUnknown04,
 		                 pState->m_pObj, pObj);
+		if (!guard.unchanged()) return;
 		return;
 	}
 
@@ -2779,7 +2360,7 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 		// order, not this one's.
 		vTestMax = vPush + pObj->m_Dims;
 
-		if (!bsp_IntersectBox(pMoving->m_pWMIface->GetTransformedBsp(),
+		if (!ws_GetBoxStatus(pMoving->m_pWMIface->GetRoot(),
 		                      &vTestMin, &vTestMax))
 			break;
 
@@ -2795,6 +2376,8 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 	                           (HOBJECT)pState->m_pObj, pObj, &vPush, &vObjPos,
 	                           !(pObj->m_Flags & FLAG_NOSLIDING), 1);
 
+	if (!guard.unchanged()) return;
+
 	pObj->m_Velocity = vSaveVel;
 
 	if (!bMoved)
@@ -2809,11 +2392,15 @@ void wm_RotatePushObject(WMMoveState* pState, LTObject* pObj)
 
 	wm_MoveObject(&move, vObjPos, 7);
 
-	if (!bsp_IntersectBox(pMoving->m_pWMIface->GetTransformedBsp(),
+	if (!guard.unchanged()) return;
+
+	if (!ws_GetBoxStatus(pMoving->m_pWMIface->GetRoot(),
 	                      &pObj->m_BBoxMin, &pObj->m_BBoxMax))
 		return;
 
-	((IWMSetupSource*)pState->m_pUnknown04)->_v1c(pObj, pState->m_pObj);
+	(pState->m_pUnknown04)->Crush(pObj, pState->m_pObj);
+
+	if (!guard.unchanged()) return;
 }
 
 
@@ -2973,7 +2560,7 @@ void wm_RotatePushFilter(LTObject* pObj, WMMoveState* pState)
 //      `this`.  No call either way.
 //
 //  THE SECOND ARM'S MOVE-STATE FILL.  The client pushes four loose values
-//  and calls 0x004524b0 (`ret $0x10`, CWMStateInit::Init); the server
+//  and calls 0x004524b0 (`ret $0x10`, WMMoveState::Init); the server
 //  pushes two and calls 0x1001efe8 (`ret $0x8`, InitFrom) at 0x1001f8ae.
 //  The server's bytes are the ground truth here, so both arms name
 //  InitFrom; the client's four pushes are exactly InitFrom's own reads.
@@ -3015,6 +2602,8 @@ static inline LTBOOL wm_IsWorldModelType(LTObject* pObj)
 WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector* pOrigPos,
                         LTVector* pNewPos, int bFlag, int* pnOut)
 {
+    MovePairGuard guard(*pState->m_pUnknown04,*pState->m_pObj,*pObj);
+    if (!guard.unchanged()) return 0;
 	WMMoveState state;
 	LTVector    vDest;
 	LTVector    vMove, vTo, vDir, vMin, vMax;
@@ -3041,19 +2630,23 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 
 		vTo += vDir * 0.5f;
 
-		if (wm_MoveThroughSim(pState, (IWorldBsp*)pState->m_pObj->m_pWMIface,
+		const auto hit = wm_MoveThroughSim(pState, (IWorldBsp*)pState->m_pObj->m_pWMIface,
 		                      pState->m_pObj, pObj, &vTo, &vDest,
 		                      !(pState->m_pObj->m_Flags & FLAG_NOSLIDING),
-		                      bFlag))
+		                      bFlag);
+        if (!guard.unchanged()) return 0;
+        if (hit)
 		{
 			*pnOut = 1;
 
-			if (((IWMSetupSource*)pState->m_pUnknown04)->_v18(pState,
+			if ((pState->m_pUnknown04)->ObjectBlocks(pState,
 			                                                  pState->m_pObj, pObj))
 			{
-				((CWMStateInit*)&state)->InitFrom(pState, pObj);
+				state.InitFrom(pState, pObj);
 
 				wm_MoveObject(&state, vDest, 7);
+
+				if (!guard.unchanged()) return 0;
 
 				vMin = pObj->m_BBoxMin;
 				vMax = pObj->m_BBoxMax;
@@ -3072,8 +2665,10 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 				                         &vMin, &vMax, 0.1f, &bUsedGeometry))
 					return 0;
 
-				((IWMSetupSource*)pState->m_pUnknown04)->_v1c(pObj,
+				(pState->m_pUnknown04)->Crush(pObj,
 				                                              pState->m_pObj);
+
+				if (!guard.unchanged()) return 0;
 			}
 
 			// However far short of vDest the object ended up, the model's
@@ -3087,14 +2682,16 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 	{
 		vDest = *pNewPos;
 
-		if (wm_MoveThroughSim(pState, (IWorldBsp*)pObj->m_pWMIface, pObj,
+		const auto hit = wm_MoveThroughSim(pState, (IWorldBsp*)pObj->m_pWMIface, pObj,
 		                      pState->m_pObj, pOrigPos, &vDest,
 		                      !(pState->m_pObj->m_Flags & FLAG_NOSLIDING),
-		                      bFlag))
+		                      bFlag);
+        if (!guard.unchanged()) return 0;
+        if (hit)
 		{
 			*pnOut = 1;
 
-			if (((IWMSetupSource*)pState->m_pUnknown04)->_v18(pState,
+			if ((pState->m_pUnknown04)->ObjectBlocks(pState,
 			                                                  pState->m_pObj,
 			                                                  pObj))
 			{
@@ -3104,7 +2701,7 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 
 				// lithtech.exe expands InitFrom here but, its inline budget
 				// spent, CALLS the four-argument filler inside it (0x004522c4
-				// -> 0x004524b0, CWMStateInit::Init, with InitFrom's four
+				// -> 0x004524b0, WMMoveState::Init, with InitFrom's four
 				// loads). Ours does the same with the filler InitFrom is
 				// written through here -- the static wm_InitMoveState, whose
 				// COMDAT is then emitted -- so the shipped InitFrom was
@@ -3116,9 +2713,11 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 				// the copy expanded into wm_PushWorldModel calls Init where
 				// the shipped copy calls InitFrom (0x00453589). server.dll
 				// calls InitFrom (0x1001f8ae).
-				((CWMStateInit*)&state)->InitFrom(pState, pObj);
+				state.InitFrom(pState, pObj);
 
 				wm_MoveObject(&state, vTo, 7);
+
+				if (!guard.unchanged()) return 0;
 
 				vMin = pObj->m_BBoxMin;
 				vMax = pObj->m_BBoxMax;
@@ -3137,8 +2736,10 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 				                         &vMin, &vMax, 0.1f, &bUsedGeometry))
 					return 0;
 
-				((IWMSetupSource*)pState->m_pUnknown04)->_v1c(pObj,
+				(pState->m_pUnknown04)->Crush(pObj,
 				                                              pState->m_pObj);
+
+				if (!guard.unchanged()) return 0;
 
 				*pNewPos += pObj->m_Pos - vTo;
 			}
@@ -3242,7 +2843,7 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 //  order is _v18(ind), wm_SmallestSeparation, obj_SetStandingOn,
 //  wm_MoveObject, ws_ObjectsCollided, wm_BoxesOverlap, _v1c(ind),
 //  wm_SmallestSeparation, obj_SetStandingOn, ws_ObjectsCollided; ours adds
-//  CWMStateInit::InitFrom between obj_SetStandingOn and wm_MoveObject,
+//  WMMoveState::InitFrom between obj_SetStandingOn and wm_MoveObject,
 //  because the shipped build expanded it (six stores at 0x00452999..
 //  0x004529be, no call) -- the same auto-inline residual as everywhere
 //  else.  The server, which does NOT expand it, calls 0x1001efe8 there.
@@ -3296,6 +2897,8 @@ WM_CINLINE int wm_PushWithGeometry(WMMoveState* pState, LTObject* pObj, LTVector
 WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOrigPos,
                    LTVector* pNewPos)
 {
+    MovePairGuard guard(*pState->m_pUnknown04,*pState->m_pObj,*pObj);
+    if (!guard.unchanged()) return 0;
 	WMMoveState state;
 	LTVector    vSep;
 	LTVector    vSlide;
@@ -3317,7 +2920,7 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 	}
 
 	// ---- half 1: push the other object out of the mover ---------------- //
-	if (((IWMSetupSource*)pState->m_pUnknown04)->_v18(pState, pState->m_pObj,
+	if ((pState->m_pUnknown04)->ObjectBlocks(pState, pState->m_pObj,
 	                                                  pObj))
 	{
 		LTVector vNew;
@@ -3395,12 +2998,16 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 			vNew += pObj->m_Pos;
 		}
 
-		((CWMStateInit*)&state)->InitFrom(pState, pObj);
+		state.InitFrom(pState, pObj);
 
 		wm_MoveObject(&state, vNew, 7);
 
-		ws_ObjectsCollided((IPhysicsSim*)pState->m_pUnknown04, pObj,
+		if (!guard.unchanged()) return 0;
+
+		ws_ObjectsCollided(pState->m_pUnknown04, pObj,
 		                   pState->m_pObj, &g_AxisDirs[nSide], fDist);
+
+		if (!guard.unchanged()) return 0;
 
 		// Still overlapping: report it and fall through to half 2.
 		// Clear: nothing to tell the caller, and its target stands.
@@ -3413,8 +3020,9 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 		                    &pState->m_pObj->m_BBoxMax,
 		                    &pObj->m_BBoxMin, &pObj->m_BBoxMax, 0.1f))
 		{
-			((IWMSetupSource*)pState->m_pUnknown04)->_v1c(pObj,
+			(pState->m_pUnknown04)->Crush(pObj,
 			                                              pState->m_pObj);
+			if (!guard.unchanged()) return 0;
 		}
 		else
 		{
@@ -3477,8 +3085,10 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 		*pNewPos += *pOrigPos;
 	}
 
-	ws_ObjectsCollided((IPhysicsSim*)pState->m_pUnknown04, pState->m_pObj,
+	ws_ObjectsCollided(pState->m_pUnknown04, pState->m_pObj,
 	                   pObj, &g_AxisDirs[nSide], fDist);
+
+	if (!guard.unchanged()) return 0;
 
 	return 1;
 }
@@ -3525,14 +3135,14 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 //    0x00451cb0    184  wm_ObjectsIntersect              3/3  measured, BYTE-EXACT
 //    0x00451d70    160  wm_NotifyContact                 5/5  measured
 //    0x00451e10   1691  wm_PushWithGeometry             13-14/17 predicted (NEW)
-//    0x004524b0     38  CWMStateInit::Init              vacuous; BYTE-EXACT
+//    0x004524b0     38  WMMoveState::Init              vacuous; BYTE-EXACT
 //    0x004524e0    526  wm_MoveThroughSim                6/7  measured
 //    (0x00452506)   --  NOT A FUNCTION: inside the above
 //    0x004526f0   1315  wm_PushWithBox                  10/10 predicted (NEW)
 //
 //  Beyond the twelve, and defined here because the cluster's bodies were
 //  expanded out of them: wm_SweepBox and wm_PushObject (both folded into
-//  0x00451720) and CWMStateInit::InitFrom (0x00453ef0).
+//  0x00451720) and WMMoveState::InitFrom (0x00453ef0).
 // ======================================================================= //
 
 
@@ -3679,7 +3289,9 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 // ----------------------------------------------------------------------- //
 int wm_PushWorldModel(WMMoveState* pState, LTObject* pObj)
 {
-	CWMMoveGeom* pGeom = (CWMMoveGeom*)pState;
+    MovePairGuard guard(*pState->m_pUnknown04,*pState->m_pObj,*pObj);
+    if (!guard.unchanged()) return 0;
+	WMMoveState* pGeom = (WMMoveState*)pState;
 	int          bBothSolid;
 	int          bNeedsGeom;
 	int          nTries;
@@ -3879,6 +3491,7 @@ int wm_PushWorldModel(WMMoveState* pState, LTObject* pObj)
 					nResult = wm_PushWithGeometry(pState, pObj,
 					                              pGeom->m_pOrigPos,
 					                              &pGeom->m_vPos, 1, &bMoved);
+					if (!guard.unchanged()) return 0;
 
 					if (nResult)
 					{
@@ -3890,6 +3503,7 @@ int wm_PushWorldModel(WMMoveState* pState, LTObject* pObj)
 				{
 					nResult = wm_PushWithBox(pState, pObj, pGeom->m_pOrigPos,
 					                         &pState->m_pObj->m_Pos);
+					if (!guard.unchanged()) return 0;
 				}
 			}
 			else
@@ -3933,6 +3547,7 @@ int wm_PushWorldModel(WMMoveState* pState, LTObject* pObj)
 						                         pObj, pState->m_pObj,
 						                         pGeom->m_pOrigPos, &vTarget,
 						                         0, 1);
+						if (!guard.unchanged()) return 0;
 					}
 					else if ((pState->m_pObj->m_ObjectType == OT_WORLDMODEL ||
 					          pState->m_pObj->m_ObjectType == OT_CONTAINER) &&
@@ -3943,6 +3558,7 @@ int wm_PushWorldModel(WMMoveState* pState, LTObject* pObj)
 						                         pState->m_pObj, pObj,
 						                         pGeom->m_pOrigPos, &vTarget,
 						                         0, 1);
+						if (!guard.unchanged()) return 0;
 					}
 
 					if (bHit)
@@ -3950,8 +3566,9 @@ int wm_PushWorldModel(WMMoveState* pState, LTObject* pObj)
 				}
 				else
 				{
-					wm_NotifyContact((IWMSetupSource*)pState->m_pUnknown04,
+					wm_NotifyContact(pState->m_pUnknown04,
 					                 pObj, pState->m_pObj);
+					if (!guard.unchanged()) return 0;
 				}
 
 				nResult = 0;
@@ -4018,32 +3635,3 @@ void phys_ResetMoveCounter()
 //      89 48 64      mov %ecx,0x64(%eax)
 //      c3            ret
 //
-// __thiscall, no arguments, `this` back in %eax. One call site, 0x00453750,
-// inside wm_PushWithBox, with `lea 0x230(%esp),%ecx` — a stack local at
-// least 0x68 wide of which only four dwords are initialised: +0x00, +0x04,
-// +0x08 and +0x64. The three consecutive dwords and the isolated one 0x5c
-// further on are two different members rather than one array; the zero is
-// materialised ONCE into %ecx and reused, which is what VC6 does for a
-// constructor whose initialisers are all literal zero.
-//
-// Written before its only caller because an out-of-line member definition
-// is emitted whether or not the TU calls it.
-class CPushState453EE0
-{
-public:
-	CPushState453EE0();                      // 0x00453ee0
-
-	void*  m_pUnknown00;                     // 0x00
-	void*  m_pUnknown04;                     // 0x04
-	uint32 m_nUnknown08;                     // 0x08
-	uint8  m_pad_0c[0x64 - 0x0c];
-	uint32 m_nUnknown64;                     // 0x64
-};
-
-CPushState453EE0::CPushState453EE0()
-{
-	m_pUnknown00 = LTNULL;
-	m_pUnknown04 = LTNULL;
-	m_nUnknown08 = 0;
-	m_nUnknown64 = 0;
-}

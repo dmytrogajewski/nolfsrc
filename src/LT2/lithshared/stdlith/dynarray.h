@@ -14,6 +14,13 @@
 #ifndef __MODYNARRAY_H__
 	#define __MODYNARRAY_H__
 
+#if defined(NOLFSRC_NATIVE)
+// Share the native allocator, iterator and array definitions with the engine.
+#include "stdlithdefs.h"
+#include "engine/server/collection.h"
+#else
+
+
 
 	#include "memory.h"
 	#include "l_allocator.h"
@@ -869,6 +876,8 @@
 		DeleteAndClearArray2(theArray, pAlloc);
 	}
 
+
+#endif // NOLFSRC_NATIVE
 
 #endif 
 

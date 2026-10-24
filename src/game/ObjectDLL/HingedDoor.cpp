@@ -8,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "HingedDoor.h"
 
 BEGIN_CLASS(HingedDoor)

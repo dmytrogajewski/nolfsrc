@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 /****************************************************************************
 ;
 ;	 MODULE:		NetInfo (.CPP)
@@ -13,7 +17,9 @@
 
 // Includes...
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "NetInfo.h"
 #include "Sparam.h"
 
@@ -222,11 +228,11 @@ CNinfoGame* CNinfoMgr::AddGame(const char* sInfo, NetSession* pNetSession, DWORD
 	for (i = 1; i <= count; i++)
 	{
 		char sBase[32];
-		wsprintf(sBase, "%s%i", NST_PLRNAME_BASE, i);
+		std::snprintf(sBase,sizeof(sBase), "%s%i", NST_PLRNAME_BASE, i);
 
 		if (Sparam_Get(sName, sInfo, sBase))
 		{
-			wsprintf(sBase, "%s%i", NST_PLRFRAG_BASE, i);
+			std::snprintf(sBase,sizeof(sBase), "%s%i", NST_PLRFRAG_BASE, i);
 
 			if (Sparam_Get(sTemp, sInfo, sBase))
 			{
@@ -331,7 +337,7 @@ void CNinfoMgr::RemoveGames()
 	for (int i = 0; i < m_cGames; i++)
 	{
 		CNinfoGame* pGame = m_aGames[i];
-		_ASSERT(pGame && pGame->IsValid());
+		GAME_ASSERT(pGame && pGame->IsValid());
 
 		if (pGame) debug_delete(pGame);
 	}
@@ -570,7 +576,7 @@ void CNinfoGame::RemovePlayers()
 	for (int i = 0; i < m_cPlayers; i++)
 	{
 		CNinfoPlayer* pPlayer = m_aPlayers[i];
-		_ASSERT(pPlayer);
+		GAME_ASSERT(pPlayer);
 
 		if (pPlayer) debug_delete(pPlayer);
 	}
@@ -594,9 +600,9 @@ char* CNinfoGame::GetNameWithPing()
 {
 	// Build the string to use...
 	if(m_nPing <= 0)
-		wsprintf(s_sNameWithPing, "[-] %s [%s:%d]", GetName(), GetHostIP(), GetHostPort());
+		std::snprintf(s_sNameWithPing,sizeof(s_sNameWithPing), "[-] %s [%s:%d]", GetName(), GetHostIP(), GetHostPort());
 	else
-		wsprintf(s_sNameWithPing, "[%i] %s [%s:%d]", GetPing(), GetName(), GetHostIP(), GetHostPort());
+		std::snprintf(s_sNameWithPing,sizeof(s_sNameWithPing), "[%i] %s [%s:%d]", GetPing(), GetName(), GetHostIP(), GetHostPort());
 
 
 	// All done...

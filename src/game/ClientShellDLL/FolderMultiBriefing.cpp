@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMultiBriefing.h"
 #include "BaseSelectionFolder.h"
 #include "FolderMgr.h"

@@ -69,18 +69,18 @@
 //  first object's length at exactly twelve bytes. Write-only file-scope
 //  vectors, i.e. leftovers; the names are ours, by address.
 //
-//  Spelling: `__forceinline` is not decoration, it is a measured finding —
+//  Spelling: `NOLF_FORCE_INLINE` is not decoration, it is a measured finding —
 //  at /O1 VC6 will NOT expand a constructor into the `_$E` body, not from
 //  an in-class definition and not from plain `inline`; it emits
 //  `mov ecx,&g; push; push; push; call ??0...`. The shipped body has the
 //  global's address folded into each store and no `this` register, which is
-//  the __forceinline shape. If the original was literally
+//  the NOLF_FORCE_INLINE shape. If the original was literally
 //  `LTVector g_x(0.0f, 0.0f, 0.0f);` then ltvector.h's in-class ctor is not
 //  what VC6 saw, and the view class below is the spelling that reproduces
 //  the bytes. THE COIN-FLIP, both spellings exact:
 //      CVectorZeroInit g_Unknown58450(0.0f, 0.0f, 0.0f);        // used here
 //      LTVector    g_Unknown58450(0.0f, 0.0f, 0.0f);        // needs a
-//                                                           // __forceinline
+//                                                           // NOLF_FORCE_INLINE
 //                                                           // ctor on LTVector
 //  and the second one must not be tried without re-measuring lithtech.exe,
 //  because ltvector.h is shared by both images and every other TU.
@@ -105,7 +105,7 @@
 class CVectorZeroInit
 {
 public:
-	__forceinline CVectorZeroInit(float fx, float fy, float fz)
+	NOLF_FORCE_INLINE CVectorZeroInit(float fx, float fy, float fz)
 	{
 		x = fx;
 		y = fy;
@@ -425,47 +425,7 @@ int cc_FindNameIndex(char* pName, char* pTable, int nCount, int* pnIndex)
 //  shipped body calls at all six sites.
 // ======================================================================= //
 
-struct SAxisBasis                            // plain, 0x24 bytes
-{
-	LTVector m_vRight;                       // +0x00
-	LTVector m_vUp;                          // +0x0c
-	LTVector m_vNormal;                      // +0x18
-};
 
-class CAxisBasis : public SAxisBasis
-{
-public:
-	// 0x1001450d — defined in servermath.cpp, declared only here.
-	CAxisBasis(LTVector vRight, LTVector vUp, LTVector vNormal);
-};
-
-// 0x10058610, initializer 0x100142a9 / 0x100142ae, .CRT$XCU slot 0x10051050.
-SAxisBasis g_AxisBases[6] =
-{
-	CAxisBasis(LTVector(1.0f, 0.0f,  0.0f),
-	           LTVector(0.0f, 0.0f, -1.0f),
-	           LTVector(0.0f, 1.0f,  0.0f)),
-
-	CAxisBasis(LTVector(1.0f,  0.0f, 0.0f),
-	           LTVector(0.0f,  0.0f, 1.0f),
-	           LTVector(0.0f, -1.0f, 0.0f)),
-
-	CAxisBasis(LTVector(1.0f, 0.0f, 0.0f),
-	           LTVector(0.0f, 1.0f, 0.0f),
-	           LTVector(0.0f, 0.0f, 1.0f)),
-
-	CAxisBasis(LTVector(1.0f,  0.0f,  0.0f),
-	           LTVector(0.0f, -1.0f,  0.0f),
-	           LTVector(0.0f,  0.0f, -1.0f)),
-
-	CAxisBasis(LTVector(0.0f,  0.0f, 1.0f),
-	           LTVector(0.0f, -1.0f, 0.0f),
-	           LTVector(1.0f,  0.0f, 0.0f)),
-
-	CAxisBasis(LTVector( 0.0f,  0.0f, -1.0f),
-	           LTVector( 0.0f, -1.0f,  0.0f),
-	           LTVector(-1.0f,  0.0f,  0.0f))
-};
 
 
 // ======================================================================= //

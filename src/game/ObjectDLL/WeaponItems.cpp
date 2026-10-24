@@ -12,9 +12,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "WeaponItems.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "iltserver.h"
 #include "Character.h"
 #include "ObjectMsgs.h"
@@ -403,7 +404,7 @@ LTRESULT CWeaponItemPlugin::PreHook_EditStringList(const char* szRezPath, const 
 {
 	// See if we can handle the property...
 
-	if (_strcmpi("WeaponType", szPropName) == 0)
+	if (nolf::ascii_compare("WeaponType", szPropName) == 0)
 	{
 		m_WeaponMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);

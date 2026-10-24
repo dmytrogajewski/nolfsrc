@@ -14,6 +14,8 @@
 #define __CHARACTER_H__
 
 #include "GameBase.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "Weapons.h"
 #include "ServerUtilities.h"
 #include "SurfaceMgr.h"
@@ -25,7 +27,7 @@
 #include "ModelButeMgr.h"
 #include "SharedMovement.h"
 #include "Editable.h"
-#include "SFXMsgIDs.h"
+#include "SFXMsgIds.h"
 #include "SharedFXStructs.h"
 
 #define INVALID_ANI				((HMODELANIM)-1)
@@ -247,7 +249,7 @@ class CCharacter : public GameBase
 		void DestroyHearts();
 
 		// Attachments
-        virtual void    CreateAttachments() { _ASSERT(LTFALSE); }
+        virtual void    CreateAttachments() { GAME_ASSERT(LTFALSE); }
         void            DestroyAttachments();
 		CAttachments*	GetAttachments() { return m_pAttachments; }
 		virtual CAttachments*	TransferAttachments(); // Responsibility of call to delete attachments

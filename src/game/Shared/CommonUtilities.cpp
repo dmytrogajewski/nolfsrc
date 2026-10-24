@@ -8,7 +8,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "CommonUtilities.h"
 #include "ltbasedefs.h"
 
@@ -22,7 +23,7 @@ ILTCSBase*			 g_pBaseLT = LTNULL;
 
 // Temp buffer...
 
-char s_FileBuffer[_MAX_PATH];
+char s_FileBuffer[LT_MAX_PATH];
 
 // Stolen from gamework.h...
 
@@ -77,19 +78,19 @@ WaveFn GetWaveFn(WaveType waveType)
 
 WaveType ParseWaveType(char *pStr)
 {
-	if(stricmp(pStr, WAVESTR_LINEAR) == 0)
+	if(nolf::ascii_compare(pStr, WAVESTR_LINEAR) == 0)
 	{
 		return Wave_Linear;
 	}
-	else if(stricmp(pStr, WAVESTR_SINE) == 0)
+	else if(nolf::ascii_compare(pStr, WAVESTR_SINE) == 0)
 	{
 		return Wave_Sine;
 	}
-	else if(stricmp(pStr, WAVESTR_SLOWOFF) == 0)
+	else if(nolf::ascii_compare(pStr, WAVESTR_SLOWOFF) == 0)
 	{
 		return Wave_SlowOff;
 	}
-	else if(stricmp(pStr, WAVESTR_SLOWON) == 0)
+	else if(nolf::ascii_compare(pStr, WAVESTR_SLOWON) == 0)
 	{
 		return Wave_SlowOn;
 	}
@@ -233,7 +234,7 @@ void ConsoleToButeFloat( CButeMgr &bute, const char *pszButeTag, const char *psz
 
 void ConsoleToButeString( CButeMgr &bute, const char *pszButeTag, const char *pszButeAttr, const char *pszConsoleVar )
 {
-	char szVal[MAX_PATH*2];
+	char szVal[LT_MAX_PATH*2];
 
 	GetConsoleString(( char * )pszConsoleVar, szVal, "" );
 	bute.SetString( pszButeTag, pszButeAttr, szVal );

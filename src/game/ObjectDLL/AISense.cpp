@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AI.h"
 #include "AISense.h"
 #include "Spawner.h"
@@ -199,7 +201,7 @@ void CAISenseMgr::UpdateSense(SenseType st)
 	if ( !m_bEnabled || (g_pLTServer->GetTime() < m_fNextUpdateTime) ) return;
 
 	CAISense* pAISense = m_apSenses[st];
-	_ASSERT(pAISense);
+	GAME_ASSERT(pAISense);
 
 	if ( pAISense->IsEnabled() )
 	{
@@ -445,7 +447,7 @@ void CAISense::PostUpdate(LTFLOAT fTimeDelta)
 
 void CAISense::IncreaseStimulation(LTFLOAT fTimeDelta, LTFLOAT fRateModifier /* = 1.0f */)
 {
-	_ASSERT(GetClass() == scStimulation);
+	GAME_ASSERT(GetClass() == scStimulation);
 
     LTFLOAT fAwarenessModifier = 0.5f + (1.5f*GetAI()->GetAwareness());
 
@@ -473,7 +475,7 @@ void CAISense::IncreaseStimulation(LTFLOAT fTimeDelta, LTFLOAT fRateModifier /* 
 
 void CAISense::DecreaseStimulation(LTFLOAT fTimeDelta, LTFLOAT fRateModifier /* = 1.0f */)
 {
-	_ASSERT(GetClass() == scStimulation);
+	GAME_ASSERT(GetClass() == scStimulation);
 
     LTFLOAT fAwarenessModifier = 0.5f + (1.5f*GetAI()->GetAwareness());
 
@@ -848,7 +850,7 @@ LTBOOL CAISenseHearEnemyWeaponImpact::Update(HOBJECT hStimulus, LTFLOAT fTimeDel
 	// Scale based on surface types
 
 	SURFACE* pSurf = g_pSurfaceMgr->GetSurface(info.eSurface);
-	_ASSERT(pSurf);
+	GAME_ASSERT(pSurf);
 	if ( pSurf && !pAmmo->pImpactFX->bAIIgnoreSurface )
 	{
 		fWeaponImpactNoiseDistance *= pSurf->fImpactNoiseModifier;
@@ -1315,7 +1317,7 @@ LTBOOL CAISenseRecord::IsSame(CAISenseRecord* pAISenseRecord)
 
 			default:
 			{
-                _ASSERT(LTFALSE);
+                GAME_ASSERT(LTFALSE);
 			}
 			break;
 		}
@@ -1374,7 +1376,7 @@ void CAISenseRecorder::Destructor()
 
 void CAISenseRecorder::Init(HOBJECT hOwner)
 {
-	_ASSERT(hOwner);
+	GAME_ASSERT(hOwner);
 
 	m_hOwner = hOwner;
 }
@@ -1562,7 +1564,7 @@ static LTFLOAT GetLifetime(CAISense* pAISense)
 		case stHearAllyPain:			return 5.0f;
 		case stHearAllyWeaponFire:		return 5.0f;
 		case stSeeEnemy:				return 5.0f;
-        default: _ASSERT(LTFALSE);		return 0.0f;
+        default: GAME_ASSERT(LTFALSE);		return 0.0f;
 	}
 }
 

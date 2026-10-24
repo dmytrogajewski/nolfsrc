@@ -58,6 +58,13 @@ private:
     void removed(LMessageImpl&);
     void light_animations(LMessageImpl&);
     void filenames(LMessageImpl&,const ServerFiles&);
+    struct PendingAttachment { std::uint16_t parent=0,child=0; std::uint32_t node=0; LTVector offset; LTRotation turn; };
+    std::vector<PendingAttachment> pending_attachments_;
+    void attach_pending(std::uint16_t child);
+    // Attachments made from server records, by parent, which the parent's
+    // next list replaces.
+    std::map<std::uint16_t,std::vector<HATTACHMENT>> server_attachments_;
+    void attach(std::uint16_t id,HOBJECT parent,HOBJECT child,std::uint32_t node,LTVector offset,LTRotation turn);
     std::shared_ptr<ClientScene> scene_;
     std::shared_ptr<const Resources> resources_;
     std::weak_ptr<const void> engine_;

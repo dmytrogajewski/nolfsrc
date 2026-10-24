@@ -911,6 +911,13 @@ LTRESULT ClientScene::unload_world() { const auto self=state_; return self->disp
 std::string ClientScene::world_name() const { state_->ready(); return state_->world_path; }
 HOBJECT ClientScene::main_world() const { state_->ready(); return state_->world_object; }
 std::shared_ptr<const CServerWorld> ClientScene::world_data() const { state_->ready(); return state_->world; }
+LTRESULT ClientScene::portal_flags(uint32 world,uint32 portal,uint16 flags) {
+    const auto self=state_; return self->dispatch([&]() -> LTRESULT {
+        if (!self->world || world>=self->world->m_Worlds.GetSize()) return LT_INVALIDPARAMS;
+        auto* bsp=self->world->m_Worlds[world]->m_pWorldBsp; if (!bsp || portal>=bsp->m_nChunks) return LT_INVALIDPARAMS;
+        bsp->m_pChunks[portal].m_Flags=flags; return LT_OK;
+    });
+}
 SkyInfo ClientScene::sky() const { state_->ready(); return state_->sky; }
 LTRESULT ClientScene::sky(const SkyInfo& value) {
     const auto self=state_; return self->dispatch([&]() -> LTRESULT {

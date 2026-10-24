@@ -70,11 +70,13 @@ Options parse(int argc, char** argv, const std::filesystem::path& program) {
         else if (option == "--max-fps") options.max_fps = number(value,1000,option);
         else if (option == "--input") {
             // Scripted input for automated runs: "FRAME key CODE down|up" with
-            // engine (DirectInput) key codes, "FRAME mouse DX DY" or
-            // "FRAME button N down|up" (1 left, 2 middle, 3 right).
+            // engine (DirectInput) key codes, "FRAME mouse DX DY",
+            // "FRAME pointer X Y" (drawable pixels), "FRAME button N down|up"
+            // (1 left, 2 middle, 3 right; at the last pointer position) or
+            // "FRAME text WORD" (typed text).
             const auto bytes = nolf::platform::read_file(std::filesystem::path(value));
             std::istringstream script(std::string(reinterpret_cast<const char*>(bytes.data()),bytes.size()));
-            std::string line;
+            std::string line; float pointer_x = 0, pointer_y = 0;
             while (std::getline(script,line)) {
                 std::istringstream words(line); unsigned frame = 0; std::string kind;
                 if (!(words >> frame >> kind) || kind.starts_with("#")) continue;
@@ -86,10 +88,18 @@ Options parse(int argc, char** argv, const std::filesystem::path& program) {
                 } else if (kind == "button") {
                     std::string state; event.type = nolf::platform::InputType::mouse_button;
                     if (!(words >> event.code >> state)) throw std::invalid_argument("bad input line: "+line);
-                    event.pressed = state == "down";
+                    event.pressed = state == "down"; event.pointer_x = pointer_x; event.pointer_y = pointer_y;
+                } else if (kind == "pointer") {
+                    event.type = nolf::platform::InputType::mouse_motion;
+                    if (!(words >> pointer_x >> pointer_y)) throw std::invalid_argument("bad input line: "+line);
+                    event.pointer_x = pointer_x; event.pointer_y = pointer_y;
                 } else if (kind == "mouse") {
                     event.type = nolf::platform::InputType::mouse_motion;
                     if (!(words >> event.x >> event.y)) throw std::invalid_argument("bad input line: "+line);
+                    event.pointer_x = pointer_x; event.pointer_y = pointer_y;
+                } else if (kind == "text") {
+                    event.type = nolf::platform::InputType::text;
+                    if (!(words >> event.text)) throw std::invalid_argument("bad input line: "+line);
                 } else if (kind == "console") {
                     std::string text; std::getline(words,text);
                     options.commands.emplace(frame,text.substr(text.find_first_not_of(' ')));

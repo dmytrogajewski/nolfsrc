@@ -43,7 +43,7 @@ struct Files {
 };
 HOBJECT create(nolf::ClientScene& scene,uint16 type=OT_NORMAL,const char* filename="") {
     ObjectCreateStruct create; create.m_ObjectType=type; std::strcpy(create.m_Filename,filename);
-    HOBJECT object=nullptr; require(scene.create(create,object)==LT_OK && object,"native scene object creation failed"); return object;
+    HOBJECT object=nullptr; if (scene.create(create,object)!=LT_OK || !object) throw std::runtime_error(std::string("native scene object creation failed: ")+filename); return object;
 }
 void objects_and_cameras() {
     nolf::ClientScene scene,foreign;
@@ -261,7 +261,7 @@ void sdk_objects(Files& files) {
 }
 void original_assets(const char* path) {
     auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(path); nolf::ClientScene scene(assets);
-    auto* camera=create(scene,OT_CAMERA); unsigned worlds=0,models=0,starts=0,sweeps=0,contacts=0,visibility_rejections=0,light_animations=0;
+    auto* camera=create(scene,OT_CAMERA); unsigned worlds=0,models=0,starts=0,sweeps=0,contacts=0,visibility_rejections=0,light_animations=0,portals_set=0;
     for (const auto& name : assets->names()) {
         if (name.ends_with(".abc")) {
             auto* object=create(scene,OT_MODEL,name.c_str()); LTAnimTracker* tracker=nullptr;
@@ -320,8 +320,15 @@ void original_assets(const char* path) {
                         require(scene.remove(body)==LT_OK,"production client scene sweep object removal"); ++sweeps;
                     }
                 }
-            CWorldBsp* render=nullptr;
-            for (uint32 i=0;i<data->m_Worlds.GetSize();++i) if (data->m_Worlds[i]->m_pWorldBsp->m_nUnknown48&0x20) { render=data->m_Worlds[i]->m_pWorldBsp; break; }
+            CWorldBsp* render=nullptr; uint32 render_index=0;
+            for (uint32 i=0;i<data->m_Worlds.GetSize();++i) if (data->m_Worlds[i]->m_pWorldBsp->m_nUnknown48&0x20) { render=data->m_Worlds[i]->m_pWorldBsp; render_index=i; break; }
+            // A server portal change reaches the client's render BSP.
+            if (render && render->m_nChunks) {
+                const auto before=render->m_pChunks[0].m_Flags;
+                require(scene.portal_flags(render_index,0,uint16(before^1))==LT_OK && render->m_pChunks[0].m_Flags==(before^1),"server portal flags did not reach the client world");
+                require(scene.portal_flags(render_index,render->m_nChunks,1)==LT_INVALIDPARAMS && scene.portal_flags(uint32(data->m_Worlds.GetSize()),0,1)==LT_INVALIDPARAMS,"unknown portal accepted");
+                require(scene.portal_flags(render_index,0,before)==LT_OK,"portal flags restore"); ++portals_set;
+            }
             std::vector<HOBJECT> probes;
             for (const auto& start : authored_starts) { auto* probe=create(scene); require(scene.position(probe,start,true)==LT_OK,"visibility probe placement"); probes.push_back(probe); }
             if (render) {
@@ -347,8 +354,8 @@ void original_assets(const char* path) {
             scene.events({});
         }
     }
-    require(models && worlds && sweeps && visibility_rejections && light_animations && scene.size()==1,"original scene corpus was empty, unfiltered, unlit or leaked objects");
-    std::cout << "Original native client scene: " << models << " ABC models, " << worlds << " worlds, " << starts << " starts, " << sweeps << " sweeps, " << contacts << " supporting polygons, " << visibility_rejections << " PVS rejections, " << light_animations << " light animations; persistent camera retained\n";
+    require(models && worlds && sweeps && visibility_rejections && light_animations && portals_set && scene.size()==1,"original scene corpus was empty, unfiltered, unlit or leaked objects");
+    std::cout << "Original native client scene: " << models << " ABC models, " << worlds << " worlds, " << starts << " starts, " << sweeps << " sweeps, " << contacts << " supporting polygons, " << visibility_rejections << " PVS rejections, " << light_animations << " light animations, " << portals_set << " portal updates; persistent camera retained\n";
 }
 }
 int main(int argc,char** argv) {

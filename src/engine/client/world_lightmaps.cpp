@@ -171,15 +171,26 @@ struct WorldLightmaps::State {
         }
         return lightmap_image(tile.width,tile.height,output);
     }
-    std::size_t update(std::span<const DynamicWorldLight> lights,float saturate) {
+    std::size_t update(std::span<const DynamicWorldLight> lights,float saturate,std::span<const LightmapPlacement> placements) {
         live(); std::vector<Snapshot> next; next.reserve(source->m_Anims.GetSize());
         std::vector<bool> dirty(tiles.size(),!initialized),changed(pages.size(),false);
+        // A moved world model's texels are where its BSP put them: the
+        // lights go into that space instead.
+        std::unordered_map<uint16,std::vector<DynamicWorldLight>> placed;
+        if (!lights.empty()) for (const auto& placement : placements) {
+            auto& local=placed[placement.model]; local.assign(lights.begin(),lights.end());
+            const auto& m=placement.to_local;
+            for (auto& light : local) { const auto p=light.position; light.position={m.m[0][0]*p.x+m.m[0][1]*p.y+m.m[0][2]*p.z+m.m[0][3],m.m[1][0]*p.x+m.m[1][1]*p.y+m.m[1][2]*p.z+m.m[1][3],m.m[2][0]*p.x+m.m[2][1]*p.y+m.m[2][2]*p.z+m.m[2][3]}; }
+        }
         // The lights reaching each tile; tiles lit last frame are composed
         // again whether or not they still are.
         std::vector<std::vector<const DynamicWorldLight*>> reaching(lights.empty() ? 0 : tiles.size());
         std::vector<bool> now(tiles.size(),false);
-        if (!lights.empty()) for (std::size_t i=0;i<tiles.size();++i) for (const auto& light : lights)
-            if (light.touches(tiles[i].normal,tiles[i].distance,centres[i],extents[i])) { reaching[i].push_back(&light); now[i]=true; }
+        if (!lights.empty()) for (std::size_t i=0;i<tiles.size();++i) {
+            const auto found=placed.find(uint16(tiles[i].key>>16));
+            for (const auto& light : found!=placed.end() ? std::span<const DynamicWorldLight>(found->second) : lights)
+                if (light.touches(tiles[i].normal,tiles[i].distance,centres[i],extents[i])) { reaching[i].push_back(&light); now[i]=true; }
+        }
         for (std::size_t i=0;i<tiles.size();++i) if (lit[i] || now[i]) dirty[i]=true;
         for (uint32 i=0;i<source->m_Anims.GetSize();++i) {
             next.emplace_back(source->m_Anims[i]);
@@ -211,11 +222,11 @@ struct WorldLightmaps::State {
     }
 };
 WorldLightmaps::WorldLightmaps(std::shared_ptr<const CWorldData> data,std::vector<LightmapTile> tiles,uint32 side,std::size_t budget)
-    : state_(std::make_unique<State>(std::move(data),std::move(tiles),side,budget)) { state_->update({},1); }
+    : state_(std::make_unique<State>(std::move(data),std::move(tiles),side,budget)) { state_->update({},1,{}); }
 WorldLightmaps::~WorldLightmaps()=default;
-std::size_t WorldLightmaps::update(std::span<const DynamicWorldLight> lights,float saturate) {
+std::size_t WorldLightmaps::update(std::span<const DynamicWorldLight> lights,float saturate,std::span<const LightmapPlacement> placements) {
     if (!std::isfinite(saturate) || saturate<0) throw std::invalid_argument("invalid light saturation");
-    return state_->update(lights,saturate);
+    return state_->update(lights,saturate,placements);
 }
 std::size_t WorldLightmaps::pages() const { state_->thread(); return state_->pages.size(); }
 const Image& WorldLightmaps::image(std::size_t page) const { state_->thread(); return state_->pages.at(page).pixels; }

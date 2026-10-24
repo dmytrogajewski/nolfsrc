@@ -63,6 +63,10 @@ void dynamic() {
     require(atlas.update(std::span(&solid,1),1)==2 && pixel()==0xff00ff00,"solid light did not set its colour");
     const auto far=Light::from({100,0,.5f},10,{255,255,255},false,false);
     require(atlas.update(std::span(&far,1),1)==2 && pixel()==0xff0000ff,"out of reach light changed the lightmap");
+    // A world model moved 100 along X takes the same light into its BSP's
+    // space, where its texels are, and is lit by it.
+    nolf::LightmapPlacement moved{0,{}}; moved.to_local.Identity(); moved.to_local.m[0][3]=-100;
+    require(atlas.update(std::span(&far,1),1,std::span(&moved,1))==2 && pixel()==0xffffffff,"a moved world model's lightmap missed the light where it is");
     rejects([&] { atlas.update({},std::numeric_limits<float>::quiet_NaN()); });
 }
 void corpus(const char* path) {

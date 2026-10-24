@@ -20,6 +20,10 @@ struct ClientSyncEvents {
     std::function<HLTSOUND(PlaySoundInfo&,const std::string& file,float offset)> sound;
     std::function<void(HLTSOUND,const LTVector&)> move_sound;
     std::function<void(HLTSOUND)> stop_sound;
+    // The world's global light (packet 26): the sun's direction and colour
+    // and the light scale, which the original hands to SetGlobalLightDir,
+    // SetGlobalLightColor and SetGlobalLightScale.
+    std::function<void(LTVector direction,LTVector color,float scale)> global_light;
 };
 // Applies the engine's object, sound and lighting update packets (8, 10,
 // 15, 18, 25, 26) to the client scene, exactly as the original client read
@@ -36,9 +40,6 @@ public:
     HOBJECT object(std::uint16_t server_id) const;
     std::size_t size() const { return objects_.size(); }
     float server_time() const { return server_time_; }
-    LTVector global_light_direction() const { return light_direction_; }
-    LTVector global_light_color() const { return light_color_; }
-    float ambient() const { return ambient_; }
     // Server objects the scene removed itself (the game removed them).
     void forget(HOBJECT);
 private:
@@ -76,7 +77,5 @@ private:
     void stop(std::uint16_t id);
     ILTMessage* reader_=nullptr;
     float server_time_=0;
-    LTVector light_direction_{0,-1,0},light_color_{1,1,1};
-    float ambient_=0;
 };
 }

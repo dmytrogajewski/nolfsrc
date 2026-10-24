@@ -7020,17 +7020,10 @@ void sm_SendToClient(CServerMgr* pMgr, Client* pClient, int nPacketID,
 }
 
 
-// What the global light object keeps that the sky update sends on: a colour
-// at +0x10 and one more float at +0x28. It is a game-side class derived from
-// BaseClass, so the offsets are all this side knows (names ours).
-class CGlobalLightView
-{
-public:
-	uint8    m_pad_00[0x10];
-	LTVector m_vColor;                       // +0x10
-	uint8    m_pad_1c[0x28 - 0x1c];
-	float    m_fUnknown28;                   // +0x28
-};
+// The global light object is a StaticSunLight (ltengineobjects.cpp, the one
+// class that calls SetGlobalLightObject): the sky update sends its InnerColor
+// and BrightScale, which the original read at +0x10 and +0x28 of the object.
+// Any other object has no colour to send.
 
 // 0x1002873d — tell one client where the global light is pointing and what
 // colour it is. The direction is the forward basis vector of the object's
@@ -7109,8 +7102,21 @@ void sm_Unknown2873d(CServerMgr* pMgr, Client* pClient)
 	{
 		HOBJECT           hLight = pMgr->m_hGlobalLightObject;
 		CLTServer**       ppServer = (CLTServer**)&pMgr->m_pUnknown928;
-		CGlobalLightView* pLight = (CGlobalLightView*)
-			(*ppServer)->HandleToObject(hLight);
+		// The class is the game module's: known here by its name, not its type.
+		const bool bSun = hLight && hLight->m_pSData && hLight->m_pSData->m_pClass && hLight->m_pSData->m_pClass->m_ClassName &&
+			strcmp(hLight->m_pSData->m_pClass->m_ClassName, "StaticSunLight") == 0;
+		// Read as the object's bytes at this build's offsets: the type's
+		// identity lives in the game module, where no cast here can reach it.
+		LTVector vColor(0.0f, 0.0f, 0.0f);
+		float    fScale = 1.0f;
+		if (const auto* pBytes = bSun ? reinterpret_cast<const char*>((*ppServer)->HandleToObject(hLight)) : nullptr)
+		{
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+			memcpy(&vColor, pBytes + offsetof(StaticSunLight, m_InnerColor), sizeof(vColor));
+			memcpy(&fScale, pBytes + offsetof(StaticSunLight, m_BrightScale), sizeof(fScale));
+#pragma GCC diagnostic pop
+		}
 
 		(*ppServer)->GetObjectRotation(pMgr->m_hGlobalLightObject, &rRot);
 
@@ -7121,10 +7127,10 @@ void sm_Unknown2873d(CServerMgr* pMgr, Client* pClient)
 		((CPacket*)msg.m_pMsg)->WriteType(vForward.x);
 		((CPacket*)msg.m_pMsg)->WriteType(vForward.y);
 		((CPacket*)msg.m_pMsg)->WriteType(vForward.z);
-		((CPacket*)msg.m_pMsg)->WriteType(pLight->m_vColor.x);
-		((CPacket*)msg.m_pMsg)->WriteType(pLight->m_vColor.y);
-		((CPacket*)msg.m_pMsg)->WriteType(pLight->m_vColor.z);
-		((CPacket*)msg.m_pMsg)->WriteType(pLight->m_fUnknown28);
+		((CPacket*)msg.m_pMsg)->WriteType(vColor.x);
+		((CPacket*)msg.m_pMsg)->WriteType(vColor.y);
+		((CPacket*)msg.m_pMsg)->WriteType(vColor.z);
+		((CPacket*)msg.m_pMsg)->WriteType(fScale);
 	}
 
 	sm_SendToClient(pMgr, pClient, 0x1a, msg.m_pMsg, 0, 0x80);

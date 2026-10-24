@@ -26,6 +26,7 @@ std::size_t GlModels::draw(const ModelPose& pose,const ModelPieceData& mesh,
     const auto triangles=mesh.triangles();
     if (!style.vertex_colors.empty() && style.vertex_colors.size()!=positions.size()) throw std::invalid_argument("model lighting does not match vertices");
     if (!style.vertex_uvs.empty() && style.vertex_uvs.size()!=positions.size()) throw std::invalid_argument("model texture coordinates do not match vertices");
+    if (!style.normals.empty() && style.normals.size()!=positions.size()) throw std::invalid_argument("model normals do not match vertices");
     if (static_cast<unsigned>(style.blend)>static_cast<unsigned>(ModelBlend::Multiply)) throw std::invalid_argument("invalid model blend");
     for (const auto& triangle : triangles) for (unsigned i=0;i<3;++i)
         if (triangle.indices[i]>=positions.size() || !std::isfinite(triangle.uv[i][0]) || !std::isfinite(triangle.uv[i][1]))
@@ -55,6 +56,7 @@ std::size_t GlModels::draw(const ModelPose& pose,const ModelPieceData& mesh,
             rd_Color4ub(color[0],color[1],color[2],color[3]);
             if (style.vertex_uvs.empty()) rd_TexCoord2f(triangle.uv[corner][0],triangle.uv[corner][1]);
             else rd_TexCoord2f(style.vertex_uvs[vertex][0],style.vertex_uvs[vertex][1]);
+            if (!style.normals.empty()) { const auto& normal=style.normals[vertex]; rd_Normal3f(normal.x,normal.y,normal.z); }
             const auto& position=positions[vertex]; rd_Vertex3f(position.x,position.y,position.z);
         };
         emit(i); if (style.wireframe) emit((i+1)%3);

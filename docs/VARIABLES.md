@@ -106,7 +106,14 @@ the modern build.
 | `DrawPortals` | 1 | Mirrors. Advanced display options. |
 | `DrawShadows` | 0 | Model shadows. Advanced display options sets it, together with `MaxModelShadows`. |
 | `MaxModelShadows` | 1 | Model shadows on or off. Cinematics turn it off; the modern build turns it back on afterwards. |
-| `ModelShadowProj` | 0 | 1 uses projected model shadows. |
+| `ModelShadowProj` | 0 | 1 uses projected model shadows: each character's shape cast from its strongest light onto the world. Advanced display options: Shadows "Projected" (left out of the shipped menu; the native renderer draws them). |
+| `ModelShadowProjRes` | 128 | Projected shadows: texels across one shadow. |
+| `ModelApplySun` | 1 | The level's sun lights the models that see the sky towards it. |
+| `ModelSunVariance` | 0.05 | How finely a model's edge across the sun's shadow is worked out (0: the centre only). |
+| `EnhancedLighting` | 0 | New. Native renderer: 1 lights models per pixel with the direction of their lights and gives every solid model soft shadows from its strongest lights. 0 keeps the original look. Advanced display options: "Enhanced lighting". |
+| `MaxShadowCasters` | 16 | New. Enhanced lighting: the nearest models that cast shadows. |
+| `ShadowLightsPerCaster` | 2 | New. Enhanced lighting: lights each of them casts a shadow from (1-4). |
+| `ShadowMapRes` | 512 | New. Enhanced lighting: texels across one model's shadow. |
 | `Saturate` | 0 | 1 doubles the brightness ramps ("saturated" lighting). |
 | `LightSaturate` | 1 | Lightmap brightness scale. |
 | `ModelLODOffset`, `LodOffset`, `LODScale` | 0, 0, 1 | Model level-of-detail bias and scale. |

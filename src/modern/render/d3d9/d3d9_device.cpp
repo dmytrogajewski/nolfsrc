@@ -1488,3 +1488,22 @@ void rd_PrintInfo(void (*pPrint)(const char* pFormat, ...))
 {
     pPrint("Direct3D 9: %s", s_szDesc);
 }
+
+// ---- the programmable extension: not on Direct3D 9 (g_RDCaps.bShaders stays false) ----
+
+uint32_t rd_CreateProgram(const char*, const char*, char* pLog, int nLogSize) { if (pLog && nLogSize > 0) pLog[0] = 0; return 0; }
+void rd_DeleteProgram(uint32_t) {}
+void rd_UseProgram(uint32_t) {}
+int  rd_Uniform(uint32_t, const char*) { return -1; }
+void rd_Uniform1i(int, int) {}
+void rd_Uniform1f(int, float) {}
+void rd_Uniform3f(int, float, float, float) {}
+void rd_Uniform4f(int, float, float, float, float) {}
+void rd_Uniform4fv(int, int, const float*) {}
+void rd_UniformMatrix4(int, const float*) {}
+void rd_Normal3f(float, float, float) {}
+void rd_PolygonOffset(float, float) {}
+uint32_t rd_CreateDepthTarget(int, int) { return 0; }
+void rd_DeleteDepthTarget(uint32_t) {}
+void rd_BindDepthTarget(uint32_t) {}
+uint32_t rd_DepthTargetTexture(uint32_t) { return 0; }

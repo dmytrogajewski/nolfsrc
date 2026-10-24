@@ -1,0 +1,277 @@
+diff --git a/include/dmusic.h b/include/dmusic.h
+index c49001f..fd09f49 100644
+--- a/include/dmusic.h
++++ b/include/dmusic.h
+@@ -321,6 +321,15 @@ DMAPI DmSegment* DmSegment_retain(DmSegment* slf);
+ /// \param slf[in] The segment to release.
+ DMAPI void DmSegment_release(DmSegment* slf);
+ 
++/// \brief A motif: a short pattern of a style, played over the music already playing.
++typedef struct DmMotif DmMotif;
++
++/// \brief Add one to the reference count of a motif.
++DMAPI DmMotif* DmMotif_retain(DmMotif* slf);
++
++/// \brief Subtract one from the reference count of a motif, deallocating it when none are left.
++DMAPI void DmMotif_release(DmMotif* slf);
++
+ /// \brief Download all resources needed by the segment.
+ ///
+ /// In order to play a segment, its internal resources, like references to styles and bands need to be resolved and
+@@ -460,6 +469,13 @@ DMAPI DmResult DmLoader_addResolver(DmLoader* slf, DmLoaderResolverCallback* res
+ /// \see #DmLoader_addResolver
+ DMAPI DmResult DmLoader_getSegment(DmLoader* slf, char const* name, DmSegment** segment);
+ 
++/// \brief Load the motif named \p name (case-insensitively) from the style file \p style.
++///
++/// The style's bands are downloaded as #DmLoader_getSegment does for a segment's.
++///
++/// \retval #DmResult_NOT_FOUND The style could not be found or has no motif of that name.
++DMAPI DmResult DmLoader_getMotif(DmLoader* slf, char const* style, char const* name, DmMotif** motif);
++
+ /// \}
+ 
+ /// \addtogroup DmPerformanceGroup
+@@ -635,6 +651,12 @@ DMAPI DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t num
+ /// \param vol The new volume to set (between 0 and 1).
+ DMAPI void DmPerformance_setVolume(DmPerformance* slf, float vol);
+ 
++/// \brief Play a motif over whatever the performance is playing, from the next \p timing boundary.
++///
++/// Like a DirectMusic secondary segment it neither replaces nor interrupts the playing segment: its notes
++/// sound on the performance's channels with the current chord, and only stopping the performance cuts it off.
++DMAPI DmResult DmPerformance_playMotif(DmPerformance* slf, DmMotif* motif, DmTiming timing);
++
+ /// \brief Get the playing segment's progress.
+ /// \param slf[in] The performance to query.
+ /// \param out[out] The progress at the end of the last render call.
+diff --git a/src/Loader.c b/src/Loader.c
+index 20dc42d..a1a4e23 100644
+--- a/src/Loader.c
++++ b/src/Loader.c
+@@ -235,6 +235,85 @@ DmResult DmLoader_getDownloadableSound(DmLoader* slf, DmReference const* ref, Dm
+ 	return rv;
+ }
+ 
++DmMotif* DmMotif_retain(DmMotif* slf) {
++	if (slf == NULL) {
++		return NULL;
++	}
++
++	(void) atomic_fetch_add(&slf->reference_count, 1);
++	return slf;
++}
++
++void DmMotif_release(DmMotif* slf) {
++	if (slf == NULL) {
++		return;
++	}
++
++	size_t refs = atomic_fetch_sub(&slf->reference_count, 1) - 1;
++	if (refs > 0) {
++		return;
++	}
++
++	DmStyle_release(slf->style);
++	Dm_free(slf);
++}
++
++static bool Dm_equalsIgnoringCase(char const* a, char const* b) {
++	for (; *a != '\0' && *b != '\0'; ++a, ++b) {
++		if (tolower((unsigned char) *a) != tolower((unsigned char) *b)) {
++			return false;
++		}
++	}
++	return *a == *b;
++}
++
++DmResult DmLoader_getMotif(DmLoader* slf, char const* style, char const* name, DmMotif** motif) {
++	if (slf == NULL || style == NULL || name == NULL || motif == NULL) {
++		return DmResult_INVALID_ARGUMENT;
++	}
++
++	DmReference ref;
++	memset(&ref, 0, sizeof ref);
++	ref.file = style;
++	ref.name = style;
++
++	DmStyle* sty = NULL;
++	DmResult rv = DmLoader_getStyle(slf, &ref, &sty);
++	if (rv != DmResult_SUCCESS) {
++		return rv;
++	}
++
++	if (slf->autodownload) {
++		rv = DmStyle_download(sty, slf);
++		if (rv != DmResult_SUCCESS) {
++			DmStyle_release(sty);
++			return rv;
++		}
++	}
++
++	// DMUS_EMBELLISHT_MOTIF
++	for (size_t i = 0; i < sty->patterns.length; ++i) {
++		DmPattern* pttn = &sty->patterns.data[i];
++		if ((pttn->embellishment & 16) == 0 || pttn->info.unam == NULL || !Dm_equalsIgnoringCase(pttn->info.unam, name)) {
++			continue;
++		}
++
++		DmMotif* new = *motif = Dm_alloc(sizeof *new);
++		if (new == NULL) {
++			DmStyle_release(sty);
++			return DmResult_MEMORY_EXHAUSTED;
++		}
++
++		new->reference_count = 1;
++		new->style = sty;
++		new->pattern = pttn;
++		return DmResult_SUCCESS;
++	}
++
++	DmStyle_release(sty);
++	return DmResult_NOT_FOUND;
++}
++
+ DmResult DmLoader_getStyle(DmLoader* slf, DmReference const* ref, DmStyle** sty) {
+ 	if (slf == NULL || ref == NULL || sty == NULL) {
+ 		return DmResult_INVALID_ARGUMENT;
+diff --git a/src/Performance.c b/src/Performance.c
+index e275d84..82a2022 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -54,6 +54,15 @@ DmResult DmPerformance_create(DmPerformance** slf, uint32_t rate) {
+ 		return rv;
+ 	}
+ 
++	rv = DmMessageQueue_init(&new->motif_queue);
++	if (rv != DmResult_SUCCESS) {
++		mtx_destroy(&new->lock);
++		DmMessageQueue_free(&new->control_queue);
++		DmMessageQueue_free(&new->music_queue);
++		Dm_free(new);
++		return rv;
++	}
++
+ 	return DmResult_SUCCESS;
+ }
+ 
+@@ -79,6 +88,7 @@ void DmPerformance_release(DmPerformance* slf) {
+ 	mtx_destroy(&slf->lock);
+ 	DmMessageQueue_free(&slf->control_queue);
+ 	DmMessageQueue_free(&slf->music_queue);
++	DmMessageQueue_free(&slf->motif_queue);
+ 	DmSegment_release(slf->segment);
+ 	DmStyle_release(slf->style);
+ 	DmBand_release(slf->band);
+@@ -757,6 +767,7 @@ static void DmPerformance_handleSegmentMessage(DmPerformance* slf, DmMessage_Seg
+ 
+ 	// If a `NULL`-segment is provided, simply stop the playing segment!
+ 	if (sgt == NULL) {
++		DmMessageQueue_clear(&slf->motif_queue);
+ 		DmStyle_release(slf->style);
+ 		DmBand_release(slf->band);
+ 
+@@ -958,6 +969,7 @@ DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t len, DmRe
+ 
+ 	DmMessage msg_ctrl;
+ 	DmMessage msg_midi;
++	DmMessage msg_motif;
+ 
+ 	if (mtx_lock(&slf->lock) != thrd_success) {
+ 		return DmResult_MUTEX_ERROR;
+@@ -968,21 +980,28 @@ DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t len, DmRe
+ 
+ 		bool ok_ctrl = DmMessageQueue_get(&slf->control_queue, &msg_ctrl);
+ 		bool ok_midi = DmMessageQueue_get(&slf->music_queue, &msg_midi);
++		bool ok_motif = DmMessageQueue_get(&slf->motif_queue, &msg_motif);
+ 
+-		if (!ok_ctrl && !ok_midi) {
++		if (!ok_ctrl && !ok_midi && !ok_motif) {
+ 			// No more messages to process.
+ 			break;
+ 		}
+ 
++		// Take the earliest message, preferring control messages, then the primary's music, then motifs.
+ 		if (ok_ctrl && ok_midi) {
+-			// Both queues have a message, choose the one that happens
+-			// earlier while preferring control messages
+ 			ok_ctrl = msg_ctrl.time <= msg_midi.time;
+ 			ok_midi = msg_midi.time < msg_ctrl.time;
+ 		}
+ 
++		if (ok_motif && ((ok_ctrl && msg_ctrl.time <= msg_motif.time) || (ok_midi && msg_midi.time <= msg_motif.time))) {
++			ok_motif = false;
++		} else if (ok_motif) {
++			ok_ctrl = false;
++			ok_midi = false;
++		}
++
+ 		DmMessage msg;
+-		DmMessage_copy(ok_ctrl ? &msg_ctrl : &msg_midi, &msg, -1);
++		DmMessage_copy(ok_ctrl ? &msg_ctrl : ok_midi ? &msg_midi : &msg_motif, &msg, -1);
+ 
+ 		uint32_t time_offset = (uint32_t) max_s32((int) msg.time - (int) slf->time, 0);
+ 		uint32_t offset_samples =
+@@ -1020,8 +1039,10 @@ DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t len, DmRe
+ 		// Handle the next message
+ 		if (ok_ctrl) {
+ 			DmMessageQueue_pop(&slf->control_queue);
+-		} else {
++		} else if (ok_midi) {
+ 			DmMessageQueue_pop(&slf->music_queue);
++		} else {
++			DmMessageQueue_pop(&slf->motif_queue);
+ 		}
+ 
+ 		DmPerformance_handleMessage(slf, &msg);
+@@ -1075,6 +1096,26 @@ DmPerformance_playTransition(DmPerformance* slf, DmSegment* sgt, DmEmbellishment
+ 	return DmResult_SUCCESS;
+ }
+ 
++DmResult DmPerformance_playMotif(DmPerformance* slf, DmMotif* motif, DmTiming timing) {
++	if (slf == NULL || motif == NULL) {
++		return DmResult_INVALID_ARGUMENT;
++	}
++
++	if (mtx_lock(&slf->lock) != thrd_success) {
++		return DmResult_MUTEX_ERROR;
++	}
++
++	// A motif plays over a segment; with none playing there is nothing for it to join.
++	DmResult rv = DmResult_SUCCESS;
++	if (slf->segment != NULL) {
++		uint32_t start = Dm_getBoundaryOffset(slf, timing);
++		rv = DmPattern_generateMessages(motif->pattern, motif->style, &slf->chord, start, slf->variation, &slf->motif_queue);
++	}
++
++	(void) mtx_unlock(&slf->lock);
++	return rv;
++}
++
+ DmResult DmPerformance_getPlayback(DmPerformance* slf, DmPlayback* out) {
+ 	if (slf == NULL || out == NULL) {
+ 		return DmResult_INVALID_ARGUMENT;
+diff --git a/src/_Internal.h b/src/_Internal.h
+index 981c4b3..a1bdf26 100644
+--- a/src/_Internal.h
++++ b/src/_Internal.h
+@@ -536,12 +536,19 @@ typedef struct DmMessageQueue {
+ 	}* blocks;
+ } DmMessageQueue;
+ 
++struct DmMotif {
++	_Atomic size_t reference_count;
++	DmStyle* style;
++	DmPattern* pattern;
++};
++
+ struct DmPerformance {
+ 	_Atomic size_t reference_count;
+ 	mtx_t lock;
+ 
+ 	DmMessageQueue control_queue;
+ 	DmMessageQueue music_queue;
++	DmMessageQueue motif_queue; // Secondary notes, which pattern and segment changes leave alone.
+ 
+ 	DmSegment* segment;
+ 	uint32_t segment_start;

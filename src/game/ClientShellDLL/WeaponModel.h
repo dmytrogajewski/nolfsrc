@@ -40,12 +40,8 @@ class CWeaponModel
 
         LTBOOL	Init();
         LTBOOL	Create(ILTClient* pClientDE, uint8 nWeaponId, uint8 nAmmoId, uint32 dwAmmo);
-#ifdef NOLFSRC_MODERN
 		// M-P5-12: bKeepChooser leaves the weapon chooser open (quick switch)
         void	ChangeWeapon(uint8 nCommandId, LTBOOL bCanDeselect=LTTRUE, LTBOOL bKeepChooser=LTFALSE);
-#else
-        void	ChangeWeapon(uint8 nCommandId, LTBOOL bCanDeselect=LTTRUE);
-#endif
 
 		void	SetupModel();
 

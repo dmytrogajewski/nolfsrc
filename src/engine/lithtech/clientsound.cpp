@@ -181,12 +181,8 @@ LTRESULT CSoundMgr::GetReverbProperties(ReverbProperties* pReverbProperties)
 		if (pReverbProperties->m_dwParams & REVERBPARAM_DECAYTIME)
 			pReverbProperties->m_fDecayTime = m_fDecayTime;
 
-#ifdef NOLFSRC_MODERN
 		// fixed: damping has its own flag, as SetReverbProperties uses (RETAIL_BUGS.md)
 		if (pReverbProperties->m_dwParams & REVERBPARAM_DAMPING)
-#else
-		if (pReverbProperties->m_dwParams & REVERBPARAM_DECAYTIME)
-#endif
 			pReverbProperties->m_fDamping = m_fDamping;
 
 		return LT_OK;
@@ -531,11 +527,7 @@ LTRESULT CSoundMgr::GetFilterIndex(const char* pFilter, uint32* pIndex)
 
 	while (AIL_enumerate_filters(&nNext, &hFilter, &pName))
 	{
-#ifdef NOLFSRC_MODERN
 		if (stricmp(pFilter, pName) == 0)       // fixed: report the filter that matches
-#else
-		if (stricmp(pFilter, pName))            // retail: reports the first that does not
-#endif
 			return LT_OK;
 
 		(*pIndex)++;

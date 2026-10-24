@@ -345,9 +345,7 @@ extern "C" int __cdecl strcmp(const char* a, const char* b);   // 0x10080910
 
 void    sub_10032cc0();                                 // d3dr2a.cpp
 void    sub_100210d0();                                 // d3dbatcha.cpp
-#ifdef NOLFSRC_MODERN
 extern "C" LTBOOL __cdecl d3d_FillScreenRect(LTRect* pRect, uint32 nPixel);  // M-P0-03, d3dblit.cpp
-#endif
 
 
 // ======================================================================= //
@@ -363,11 +361,9 @@ void* sub_10020fd0(const char* pName)
 
 	if (strcmp(pName, "BACKBUFFER") == 0)
 		return g_pOffscreen;
-#ifdef NOLFSRC_MODERN
 	// M-P0-03: fast FillRect -- the renderer's colour fill (d3dblit.cpp)
 	if (strcmp(pName, "FillScreenRect") == 0)
 		return (void*)d3d_FillScreenRect;
-#endif
 
 	return LTNULL;
 }

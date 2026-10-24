@@ -45,11 +45,9 @@
 	class ILTCursor;
 	class ILTClientSoundMgr;
 	class ILTDirectMusicMgr;
-#ifdef NOLFSRC_MODERN
 	// M-P0-02 / M-P2-04: callbacks for the modern build's ILTClient additions
 	typedef void (*ConsoleOutputFn)(void *pUser, uint32 nColor, int nLevel, const char *pText);
 	typedef void (*ConsoleCommandEnumFn)(void *pUser, const char *pName, uint32 nFlags);
-#endif
 
 
 	// ------------------------------------------------------------------ //
@@ -1097,7 +1095,6 @@
 		// End the current query.
 		virtual LTRESULT EndQuery()=0;
 
-#ifdef NOLFSRC_MODERN
 		// M-P0-02 / M-P2-04: the modern build's own additions, appended after
 		// the last retail slot so every retail slot keeps its place (the
 		// engine's table: src/engine/lithtech/link/vtables.txt; the bodies:
@@ -1119,7 +1116,6 @@
 		// turns the command off, so calling it again with the same mode
 		// resets it.
 		virtual LTRESULT SetCommandToggle(int nCommand, LTBOOL bToggle)=0;
-#endif
 
 		// Determines if we werw lobby launched.
 		LTRESULT (*IsLobbyLaunched)(char* sDriver);

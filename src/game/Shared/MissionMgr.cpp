@@ -245,7 +245,6 @@ MISSION* CMissionMgr::GetMission(int nMissionId)
 //
 // ----------------------------------------------------------------------- //
 
-#ifdef NOLFSRC_MODERN
 // The engine names a loaded world by its file ("worlds/m01s01.dat"), which the
 // game keeps for its saves; Missions.txt names it as requested
 // ("Worlds\M01S01"). The same level either way.
@@ -259,7 +258,6 @@ static LTBOOL SameWorld(const char* pA, const char* pB)
 	};
 	return stem(pA) == stem(pB);
 }
-#endif
 
 LTBOOL CMissionMgr::IsMissionLevel(char* pWorldFile, int & nMissionId, int & nLevel)
 {
@@ -275,11 +273,7 @@ LTBOOL CMissionMgr::IsMissionLevel(char* pWorldFile, int & nMissionId, int & nLe
 		{
 			for (int i=0; i < (*pCur)->nNumLevels; i++)
 			{
-#ifdef NOLFSRC_MODERN
 				if (SameWorld((*pCur)->aLevels[i].szLevel, pWorldFile))
-#else
-				if (nolf::ascii_compare((*pCur)->aLevels[i].szLevel, pWorldFile) == 0)
-#endif
 				{
 					nMissionId = (*pCur)->nId;
 					nLevel = i;

@@ -13,14 +13,10 @@
 #include "GameClientShell.h"
 #include "InterfaceResMgr.h"
 #include "ClientButeMgr.h"
-#ifdef NOLFSRC_MODERN
 // M-P1-06: window placement
 #include "cshell/p1_modern.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution
 #include "cshell/p3_ui.h"
-#endif
 
 
 CInterfaceResMgr*   g_pInterfaceResMgr = LTNULL;
@@ -118,10 +114,8 @@ LTBOOL CInterfaceResMgr::Init(ILTClient* pClientDE, CGameClientShell* pClientShe
 
 	// Init the InterfaceSurfMgr class
     m_InterfaceSurfMgr.Init(g_pLTClient);
-#ifdef NOLFSRC_MODERN
 	// M-P3: the package's console variables
 	P3_InitVars();
-#endif
 
 	// set resolution dependant variables
 	ScreenDimsChanged();
@@ -258,14 +252,9 @@ void CInterfaceResMgr::DrawFolder()
     GAME_ASSERT(g_pLTClient);
     if (!g_pLTClient) return;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the offset is negative on screens narrower than 4:3
 	if (!m_dwScreenWidth)
 		ScreenDimsChanged();
-#else
-	if (m_Offset.x < 0)
-		ScreenDimsChanged();
-#endif
 
 	// The screen surface
     HSURFACE hScreen = g_pLTClient->GetScreenSurface();
@@ -439,14 +428,10 @@ LTBOOL CInterfaceResMgr::InitFonts()
 
         // ************* Air font
 		g_pLayoutMgr->GetAirFont(g_szFontName,sizeof(g_szFontName));
-#ifdef NOLFSRC_MODERN
 		// M-P3-19: blended like the other bitmap fonts (no black boxes); the
 		// retail image is made for colour keying and cannot be split up for
 		// blending, so it falls back to that (M-P4-10 is about the images)
         if (!SetupFont(m_pAirFont,LTTRUE,dwFlags) && !SetupFont(m_pAirFont,LTFALSE,dwFlags))
-#else
-        if (!SetupFont(m_pAirFont,LTFALSE,dwFlags))
-#endif
 		{
 			debug_delete(m_pAirFont);
             m_pAirFont=LTNULL;
@@ -455,13 +440,9 @@ LTBOOL CInterfaceResMgr::InitFonts()
 
         // ************* Weapon Chooser font
 		g_pLayoutMgr->GetChooserFont(g_szFontName,sizeof(g_szFontName));
-#ifdef NOLFSRC_MODERN
 		// M-P3-19: blended like the other bitmap fonts, falling back to colour
 		// keying for an image made for it (see the air font)
 		if (!SetupFont(m_pChooserFont,LTTRUE) && !SetupFont(m_pChooserFont,LTFALSE))
-#else
-		if (!SetupFont(m_pChooserFont,LTFALSE))
-#endif
 		{
 			debug_delete(m_pChooserFont);
             m_pChooserFont=LTNULL;
@@ -596,15 +577,10 @@ void CInterfaceResMgr::ScreenDimsChanged()
 	RMode currentMode;
     g_pLTClient->GetRenderMode(&currentMode);
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the menus' 640x480 page is the centred 4:3 area, scaled by
 	// the height ratio: offset by the side margin only
 	m_Offset.x = P3_MenuMargin((int)currentMode.m_Width, (int)currentMode.m_Height);
 	m_Offset.y = 0;
-#else
-	m_Offset.x = (int)(currentMode.m_Width - 640) / 2;
-	m_Offset.y = (int)(currentMode.m_Height - USABLE_HEIGHT_I) / 2;
-#endif
 
 	m_fXRatio = (float)currentMode.m_Width / 640.0f;
 	m_fYRatio = (float)currentMode.m_Height / USABLE_HEIGHT_F;
@@ -612,10 +588,8 @@ void CInterfaceResMgr::ScreenDimsChanged()
 	m_dwScreenWidth = currentMode.m_Width;
 	m_dwScreenHeight = currentMode.m_Height;
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-06: size, centre or un-frame the window for the new mode
 	P1Window_Apply();
-#endif
 }
 
 

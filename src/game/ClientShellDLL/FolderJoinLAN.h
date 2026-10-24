@@ -47,13 +47,11 @@ protected:
 	CGroupCtrl			*m_pPortGroup;
 	CLTGUIEditCtrl		*m_pPortEdit;
 	CLTGUITextItemCtrl	*m_pPortLabel;
-#ifdef NOLFSRC_MODERN
 	// M-P6-10: the password for a locked server, which checks it
 	char				m_szP6Password[MAX_PASSWORD];
 	CGroupCtrl			*m_pP6PassGroup;
 	CLTGUIEditCtrl		*m_pP6PassEdit;
 	CLTGUITextItemCtrl	*m_pP6PassLabel;
-#endif
 
 	CMoArray<CString>	m_lstSessions;
 

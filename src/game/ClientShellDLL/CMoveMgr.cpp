@@ -30,10 +30,8 @@
 #include "VarTrack.h"
 #include "VehicleMgr.h"
 #include "BankedList.h"
-#ifdef NOLFSRC_MODERN
 // M-P7-04: analog movement
 #include "cshell/p7_pad.h"
-#endif
 
 #define SPECTATOR_ACCELERATION			100000.0f
 #define MIN_ONGROUND_Y					-10000000.0f
@@ -257,11 +255,9 @@ void CMoveMgr::InitWorldData()
     m_pCharFX               = LTNULL;
 
 	m_hZipcordSnd			= LTNULL;
-#ifdef NOLFSRC_MODERN
 	// M-P5-05
 	P5_ResetStandingOn(m_P5StandingOn);
 	m_fP1Surfaced = 0.0f;
-#endif
 }
 
 // ----------------------------------------------------------------------- //
@@ -511,10 +507,8 @@ void CMoveMgr::UpdateNormalControlFlags()
 		m_dwControlFlags |= BC_CFLG_STRAFE_LEFT;
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P7-04: the controller's left stick: direction, and walk or run
 	P7Pad_MoveFlags(&m_dwControlFlags);
-#endif
 
 
 	if ( (m_dwControlFlags & BC_CFLG_FORWARD) ||
@@ -622,7 +616,6 @@ void CMoveMgr::UpdateInLiquid(CContainerInfo *pInfo)
 
 		if (bMoving)  // Turn off y acceleration and velocity
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P1-23: the rise stopped two frames after the eye (the
 			// camera, a frame late) broke the surface: two 60ths of a
 			// second at 60 fps, so the player floated about 4 units high,
@@ -635,9 +628,6 @@ void CMoveMgr::UpdateInLiquid(CContainerInfo *pInfo)
 			LTBOOL bP1Rising = (m_fP1Surfaced + 2.0f * fP1Dt < 2.0f / 60.0f - 0.0001f);
 			m_fP1Surfaced += fP1Dt;
 			if (!bP1Rising && (vVel.y > 0.0f || curAccel.y > 0.0f))
-#else
-			if (vVel.y > 0.0f || curAccel.y > 0.0f)
-#endif
 			{
 				vVel.y = 0.0f;
 				curAccel.y = 0.0f;
@@ -695,12 +685,10 @@ void CMoveMgr::UpdateOnGround()
 
     LTVector vPos;
 	g_pLTClient->GetObjectPos(m_hObject, &vPos);
-#ifdef NOLFSRC_MODERN
 	// M-P5-05: over a seam between floor polygons the engine can report
 	// nothing underfoot for a frame, and the player is pushed back as if by
 	// an invisible wall; keep standing on the world for a few frames
 	P5_CarryStandingOn(m_P5StandingOn, Info, vPos, m_bJumped || m_bFalling);
-#endif
 
 	// Clear surface we're standing on...
 
@@ -1031,15 +1019,10 @@ void CMoveMgr::UpdateMotion()
 
 		// Dampen velocity...
 		g_pPhysicsLT->GetVelocity(m_hObject, &vVec);
-#ifdef NOLFSRC_MODERN
 		// M-P1-23: halved a 60th of a second, whatever the frame rate
 		float fP1Damp = (float)pow(0.5, g_pGameClientShell->GetFrameTime() * 60.0f);
 		vVec.x *= fP1Damp;
 		vVec.z *= fP1Damp;
-#else
-		vVec.x *= 0.5f;
-		vVec.z *= 0.5f;
-#endif
 		if (vVec.y > 0.0f) vVec.y = 0.0f;
 
 		g_pPhysicsLT->SetVelocity(m_hObject, &vVec);
@@ -1209,9 +1192,7 @@ void CMoveMgr::UpdateNormalMotion()
 	if ((IsLiquid(m_eLastContainerCode) && !bHeadInLiquid) && !m_bOnGround)
 	{
         m_bSwimmingOnSurface = LTTRUE;
-#ifdef NOLFSRC_MODERN
 		m_fP1Surfaced = 0.0f;		// M-P1-23: see UpdateInLiquid
-#endif
 	}
 	else if (bHeadInLiquid)  // See if we went back under...
 	{
@@ -1291,7 +1272,6 @@ void CMoveMgr::UpdateNormalMotion()
 
 	if (!g_pGameClientShell->IsPlayerDead())
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P7-04: the controller's left stick accelerates the way it
 		// points, at the full rate; its deflection is the speed
 		// (GetMaxVelMag).  Up and down in liquid are the buttons' still.
@@ -1315,17 +1295,6 @@ void CMoveMgr::UpdateNormalMotion()
 		{
 			vAccel -= (vForward * fMoveAccel);
 		}
-#else
-		if ((m_dwControlFlags & BC_CFLG_FORWARD) || (m_nMouseStrafeFlags & SF_FORWARD))
-		{
-			vAccel += (vForward * fMoveAccel);
-		}
-
-		if ((m_dwControlFlags & BC_CFLG_REVERSE) || (m_nMouseStrafeFlags & SF_BACKWARD))
-		{
-			vAccel -= (vForward * fMoveAccel);
-		}
-#endif
 
 
 		// If we are in a container that supports free movement, see if we are
@@ -1354,7 +1323,6 @@ void CMoveMgr::UpdateNormalMotion()
 		}
 
 
-#ifdef NOLFSRC_MODERN
 		if (!bPadMove && ((m_dwControlFlags & BC_CFLG_STRAFE_LEFT) || (m_nMouseStrafeFlags & SF_LEFT)))
 		{
 			vAccel -= (vRight * fMoveAccel);
@@ -1364,17 +1332,6 @@ void CMoveMgr::UpdateNormalMotion()
 		{
 			vAccel += (vRight * fMoveAccel);
 		}
-#else
-		if ((m_dwControlFlags & BC_CFLG_STRAFE_LEFT) || (m_nMouseStrafeFlags & SF_LEFT))
-		{
-			vAccel -= (vRight * fMoveAccel);
-		}
-
-		if ((m_dwControlFlags & BC_CFLG_STRAFE_RIGHT) || (m_nMouseStrafeFlags & SF_RIGHT))
-		{
-			vAccel += (vRight * fMoveAccel);
-		}
-#endif
 	}
 
 	// Reset the mouse strafe flags in case they are set
@@ -1410,7 +1367,6 @@ void CMoveMgr::UpdateNormalMotion()
 		if (bOkayToJump)
 		{
 			vel.y = fJumpVel;
-#ifdef NOLFSRC_MODERN
 			// M-P1-23: a jump out of the water also gets this frame's
 			// swim-up acceleration (vAccel.y, above), so the frame's
 			// length decided how high it went: at 60 fps 50 more units a
@@ -1423,7 +1379,6 @@ void CMoveMgr::UpdateNormalMotion()
 				if (fP1Dt < 1.0f / 60.0f)
 					vel.y += vAccel.y * (1.0f / 60.0f - fP1Dt);
 			}
-#endif
 
             m_bJumped            = LTTRUE;
             m_bSwimmingOnSurface = LTFALSE;
@@ -1436,12 +1391,8 @@ void CMoveMgr::UpdateNormalMotion()
 
 	if (g_pGameClientShell->IsSpectatorMode())
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P1-23: 0.9 a 60th of a second, whatever the frame rate
 		vel *= (float)pow(0.9, g_pGameClientShell->GetFrameTime() * 60.0f);
-#else
-		vel *= 0.9f;
-#endif
 		if (vel.Mag() < 0.1f)
 		{
 			vel.Init();
@@ -1715,11 +1666,9 @@ void CMoveMgr::UpdatePushers()
 						}
 
 						pushVec = myPos - pPusher->m_Pos;
-#ifdef NOLFSRC_MODERN
 						// M-P1-23: a push is added every frame; the
 						// retail amount a 60th of a second
 						velocity *= g_pGameClientShell->GetFrameTime() * 60.0f;
-#endif
 						pushVec.Norm(velocity);
 
 						vel = GetVelocity();
@@ -1916,15 +1865,11 @@ void CMoveMgr::MoveLocalSolidObject()
 	info.m_dt = g_pGameClientShell->GetFrameTime();
 	pPhysics->UpdateMovement(&info);
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-23: a frame's move under 0.1 is dropped; that is 6 units a
 	// second at 60 frames a second, 30 at 300, so the threshold is the
 	// 60 fps one's share of this frame
 	float fP1MinMove = 0.1f * g_pGameClientShell->GetFrameTime() * 60.0f;
 	if (info.m_Offset.MagSqr() > fP1MinMove * fP1MinMove)
-#else
-	if (info.m_Offset.MagSqr() > 0.01f)
-#endif
 	{
 		g_pLTClient->GetObjectPos(m_hObject, &curPos);
 		newPos = curPos + info.m_Offset;
@@ -2530,10 +2475,8 @@ LTFLOAT CMoveMgr::GetMaxVelMag() const
 				fMaxVel = m_fWalkVel;
 			}
 
-#ifdef NOLFSRC_MODERN
 			// M-P7-04: the controller's left stick, part way, walks slower
 			fMaxVel *= P7Pad_SpeedScale();
-#endif
 		}
 
 		fMaxVel *= fMoveMultiplier;

@@ -26,25 +26,15 @@
 #include "CharacterFX.h"
 #include "GameButes.h"
 #include "FolderPerformance.h"
-#ifdef NOLFSRC_MODERN
 // M-P1-03: raw mouse look
 #include "cshell/p1_modern.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P2-01: the developer console
 #include "cshell/p2_console.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution
 #include "cshell/p3_ui.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P5-12: quick switch
 #include "cshell/p5_gameplay.h"
-#endif
-#ifdef NOLFSRC_MODERN
 #include "cshell/p6_multiplayer.h"
-#endif
 
 // TESTING DYNAMIC LIGHT IN INTERFACE
 /*
@@ -678,10 +668,8 @@ LTBOOL CInterfaceMgr::PostUpdate()
 {
 	if (/*m_eGameState != GS_SPLASHSCREEN &&*/ m_eGameState != GS_LOADINGLEVEL)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P2-01: the developer console, over everything else
 		P2Console_Draw();
-#endif
         g_pLTClient->FlipScreen(FLIPSCREEN_CANDRAWCONSOLE);
 	}
 
@@ -756,7 +744,6 @@ LTBOOL CInterfaceMgr::Update()
 			{
 				g_bLockPopup = LTFALSE;
 			}
-#ifdef NOLFSRC_MODERN
 			// M-P5-17: Activate closes the popup, on whatever it is bound
 			// to (a controller's button too, which sends no key), once the
 			// press that opened it is let go. OnCommandOn's own close never
@@ -767,7 +754,6 @@ LTBOOL CInterfaceMgr::Update()
 			{
 				m_PopupText.Clear();
 			}
-#endif
 
 			UpdatePopupState();
             bHandled = LTFALSE;  // Allow further processing
@@ -1160,12 +1146,8 @@ void CInterfaceMgr::UpdatePausedState()
 		int xo = g_pInterfaceResMgr->GetXOffset();
 		int yo = g_pInterfaceResMgr->GetYOffset();
 
-#ifdef NOLFSRC_MODERN
 		// M-P3-05: scaled into the 4:3 area
 		P3_DrawBackground(g_pLTClient->GetScreenSurface(), m_hGamePausedSurface);
-#else
-        g_pLTClient->DrawSurfaceToSurface(g_pLTClient->GetScreenSurface(), m_hGamePausedSurface, LTNULL, xo,yo);
-#endif
 	}
 
     g_pLTClient->EndOptimized2D();
@@ -1207,12 +1189,8 @@ void CInterfaceMgr::UpdateSplashScreenState()
     g_pLTClient->Start3D();
     g_pLTClient->StartOptimized2D();
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-05: scaled into the 4:3 area, not stretched over the screen
 	P3_DrawBackground(hScreen, g_hSplash);
-#else
-    g_pLTClient->ScaleSurfaceToSurface(hScreen, g_hSplash, &rcDst, &rcSrc);
-#endif
 
 	UpdateScreenFade();
 
@@ -1342,14 +1320,9 @@ void CInterfaceMgr::UpdateFailureState()
     g_pLTClient->Start3D();
     g_pLTClient->StartOptimized2D();
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-05: scaled into the 4:3 area
 	if (m_hFailBack)
 		P3_DrawBackground(hScreen, m_hFailBack);
-#else
-	if (m_hFailBack)
-        g_pLTClient->DrawSurfaceToSurface(hScreen, m_hFailBack, LTNULL, xo, yo);
-#endif
 
 	int nStringWidth = (int)(0.8f * (LTFLOAT)nScrnWidth);
     LTIntPt failPos = g_pLayoutMgr->GetFailStringPos();
@@ -1560,11 +1533,9 @@ LTBOOL CInterfaceMgr::OnMessage(uint8 messageID, HMESSAGEREAD hMessage)
 		case MID_PLAYER_CONNECTED:
 		{
             HSTRING hstrName = g_pLTClient->ReadFromMessageHString (hMessage);
-#ifdef NOLFSRC_MODERN
 			// M-P6-01: a name from the server (perhaps a retail one) must
 			// not carry format characters into the console and messages
 			hstrName = P6_FilterNetString(hstrName);
-#endif
             uint32 nID = (uint32) g_pLTClient->ReadFromMessageFloat (hMessage);
             uint8 teamId = g_pLTClient->ReadFromMessageByte(hMessage);
 			int nTeam1Score = (int) g_pLTClient->ReadFromMessageFloat (hMessage);
@@ -1583,11 +1554,9 @@ LTBOOL CInterfaceMgr::OnMessage(uint8 messageID, HMESSAGEREAD hMessage)
 			if (!g_pGameClientShell->IsMultiplayerGame()) break;
 
             HSTRING hstrName = g_pLTClient->ReadFromMessageHString (hMessage);
-#ifdef NOLFSRC_MODERN
 			// M-P6-01: a name from the server (perhaps a retail one) must
 			// not carry format characters into the console and messages
 			hstrName = P6_FilterNetString(hstrName);
-#endif
             uint32 nID = (uint32) g_pLTClient->ReadFromMessageFloat (hMessage);
 			HOBJECT	hObj = g_pLTClient->ReadFromMessageObject(hMessage);
             int nFrags = (int) g_pLTClient->ReadFromMessageFloat (hMessage);
@@ -1891,10 +1860,8 @@ LTBOOL CInterfaceMgr::OnMessage(uint8 messageID, HMESSAGEREAD hMessage)
 
 			char szMessage[100];
 			hMessage->ReadStringFL(szMessage, sizeof(szMessage));
-#ifdef NOLFSRC_MODERN
 			// M-P6-01: (as for names) chat from the server
 			FilterFormatChars(szMessage);
-#endif
 
             g_pClientSoundMgr->PlayInterfaceSound("Interface\\Snd\\chat.wav");
 
@@ -2489,7 +2456,6 @@ LTBOOL CInterfaceMgr::OnCommandOff(int command)
 
 		case COMMAND_ID_FIRING :
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P5-12: with quick switch the weapon is already changed: fire
 			// just puts the chooser away
 			if (IsChoosingWeapon() && P5_QuickSwitchOn())
@@ -2497,7 +2463,6 @@ LTBOOL CInterfaceMgr::OnCommandOff(int command)
 				m_WeaponChooser.Close();
 			}
 			else
-#endif
 			if (IsChoosingWeapon())
 			{
                 uint8 nCurrWeapon = m_WeaponChooser.GetCurrentSelection();
@@ -2567,10 +2532,8 @@ LTBOOL CInterfaceMgr::OnKeyDown(int key, int rep)
 {
 	if (FadingToExit()) return LTTRUE;
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-01: the console key, and every key while the console is open
 	if (P2Console_OnKeyDown(key, rep)) return LTTRUE;
-#endif
 	if (m_MessageBox.IsVisible())
 		return m_MessageBox.HandleKeyDown(key,rep);
 
@@ -2645,7 +2608,6 @@ LTBOOL CInterfaceMgr::OnKeyDown(int key, int rep)
 
 		case GS_POPUP :
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P5-17: the Activate key closes a popup too, once the press
 			// that opened it is let go (g_bLockPopup)
 			if (m_PopupText.IsVisible() && !g_bLockPopup && key > 0 &&
@@ -2654,7 +2616,6 @@ LTBOOL CInterfaceMgr::OnKeyDown(int key, int rep)
 				m_PopupText.Clear();
 				return LTTRUE;
 			}
-#endif
 			if (m_PopupText.OnKeyDown(key, rep))
 			{
 				return LTTRUE;
@@ -2804,10 +2765,8 @@ LTBOOL CInterfaceMgr::OnKeyUp(int key)
 void CInterfaceMgr::OnChar(char c)
 {
 	if (c < ' ') return;
-#ifdef NOLFSRC_MODERN
 	// M-P2-01: typing into the open console
 	if (P2Console_OnChar(c)) return;
-#endif
 	if (m_messageMgr.GetEditingState())
 	{
 		m_messageMgr.HandleChar(c);
@@ -3249,22 +3208,14 @@ LTBOOL CInterfaceMgr::PrePopupState(GameState eCurState)
     if (eCurState == GS_POPUP) return LTFALSE;
 
 	// Pause the game...
-#ifdef NOLFSRC_MODERN
 	// M-P3-15: the game waits while the player reads
 	g_pGameClientShell->PauseGame(LTTRUE);
-#else
-//    g_pGameClientShell->PauseGame(LTTRUE);
-#endif
 	g_pGameClientShell->AllowPlayerMovement(LTFALSE);
 
 	g_bLockPopup = LTTRUE;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-15: with the cursor shown
     UseCursor(LTTRUE);
-#else
-    UseCursor(LTFALSE);
-#endif
 	m_bUseInterfaceCamera = LTFALSE;
 
     return LTTRUE;
@@ -3282,11 +3233,9 @@ LTBOOL CInterfaceMgr::PostPopupState(GameState eNewState)
 {
     if (eNewState == GS_POPUP) return LTFALSE;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-15: the game goes on, the cursor goes away
 	g_pGameClientShell->PauseGame(LTFALSE);
 	UseCursor(LTFALSE);
-#endif
 	g_pGameClientShell->AllowPlayerMovement(LTTRUE);
 	g_pLTClient->ClearInput();
 
@@ -4226,7 +4175,6 @@ void CInterfaceMgr::OnRButtonDown(int x, int y)
 			int relY = y - g_pInterfaceResMgr->GetYOffset();
 			m_FolderMgr.OnRButtonDown(relX,relY);
 		}	break;
-#ifdef NOLFSRC_MODERN
 	case GS_POPUP:
 		{
 			// M-P5-17: the right button (Activate by default) closes a
@@ -4234,7 +4182,6 @@ void CInterfaceMgr::OnRButtonDown(int x, int y)
 			if (m_PopupText.IsVisible() && !g_bLockPopup)
 				m_PopupText.Clear();
 		}	break;
-#endif
 	case GS_SPLASHSCREEN:
 		{
 			// They pressed a button - end splash screen...
@@ -4320,38 +4267,26 @@ void CInterfaceMgr::OnMouseMove(int x, int y)
 void CInterfaceMgr::UseCursor(LTBOOL bUseCursor)
 {
 	m_bUseCursor = bUseCursor;
-#ifdef NOLFSRC_MODERN
 	// M-P1-03: raw mouse look -- give the mouse to the menus, or take it
 	// for playing (the retail CursorCenter with OldMouseLook 1)
 	P1Input_UseCursor(m_bUseCursor ? true : false);
-#endif
 	if (m_bUseCursor)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P1-03: CursorCenter is P1Input_UseCursor's
-#else
-        g_pLTClient->RunConsoleString("CursorCenter 0");
-#endif
 
 		if (m_bUseHardwareCursor)
 		{
 			g_pLTClient->Cursor()->SetCursorMode(CM_Hardware);
-#ifdef NOLFSRC_MODERN
 			// Playing confines the mouse with SetCursor(NULL) (p1_input.cpp),
 			// which left the menu's hardware cursor invisible until an
 			// alt-tab set it again: give it its shape back.
 			if (m_hCursor)
 				g_pLTClient->Cursor()->SetCursor(m_hCursor);
-#endif
 		}
 	}
 	else
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P1-03: CursorCenter is P1Input_UseCursor's
-#else
-        g_pLTClient->RunConsoleString ("CursorCenter 1");
-#endif
         g_pLTClient->Cursor()->SetCursorMode(CM_None);
 
 	}
@@ -4900,7 +4835,6 @@ void CInterfaceMgr::UpdateLetterBox()
 	rcDest.Init(0, dwHeight - nBorderSize, dwWidth, dwHeight);
  	g_pLTClient->ScaleSurfaceToSurfaceTransparent(hScreen, m_hLetterBoxSurface,
 	   &rcDest, &rcSrc, hTransColor);
-#ifdef NOLFSRC_MODERN
 	// M-P3-08: RestrictCinematicsTo4x3 covers the side margins too
 	if (P3_Cinematics4x3() && g_pInterfaceResMgr->GetXOffset() > 0)
 	{
@@ -4912,7 +4846,6 @@ void CInterfaceMgr::UpdateLetterBox()
 		g_pLTClient->ScaleSurfaceToSurfaceTransparent(hScreen, m_hLetterBoxSurface,
 		   &rcDest, &rcSrc, hTransColor);
 	}
-#endif
 }
 
 // --------------------------------------------------------------------------- //
@@ -4925,10 +4858,8 @@ void CInterfaceMgr::UpdateLetterBox()
 
 LTBOOL CInterfaceMgr::AllowCameraMovement()
 {
-#ifdef NOLFSRC_MODERN
 	// M-P2-01: the camera stays put while the console is open
 	if (P2Console_IsVisible()) return LTFALSE;
-#endif
 	switch (m_eGameState)
 	{
 		case GS_DIALOGUE :
@@ -5002,11 +4933,7 @@ void CInterfaceMgr::CreateInterfaceBackground()
 
 
 	VEC_MULSCALAR(vTemp, vF, g_fBackDist);
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: keeps its depth, as the scaled menu page fills the screen's height
-#else
-	VEC_MULSCALAR(vTemp, vTemp, g_pInterfaceResMgr->GetXRatio());
-#endif
 	VEC_ADD(vPos, vPos, vTemp);
 
 	VEC_COPY(bcs.vPos, vPos);
@@ -5067,11 +4994,7 @@ void CInterfaceMgr::UpdateInterfaceBackground()
     g_pLTClient->GetRotationVectors(&rRot, &vU, &vR, &vF);
 
 	VEC_MULSCALAR(vTemp, vF, g_fBackDist);
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: keeps its depth, as the scaled menu page fills the screen's height
-#else
-	VEC_MULSCALAR(vTemp, vTemp, g_pInterfaceResMgr->GetXRatio());
-#endif
 	VEC_ADD(vPos, vPos, vTemp);
 
     g_pLTClient->SetObjectPos(m_BackSprite.GetObject(), &vPos);
@@ -5480,14 +5403,12 @@ void CInterfaceMgr::Disconnected(uint32 nDisconnectFlag)
 						hString = g_pLTClient->FormatString(IDS_DISCON_BADCSHELL);
 					}
 					break;
-#ifdef NOLFSRC_MODERN
 					// M-P6-10
 					case GAME_DISCON_BADPASSWORD :
 					{
 						hString = g_pLTClient->FormatString(IDS_P6_DISCON_BADPASSWORD);
 					}
 					break;
-#endif
 					default :
 					{
 						hString = g_pLTClient->FormatString(IDS_DISCON_SERVERBOOT);

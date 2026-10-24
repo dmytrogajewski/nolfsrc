@@ -35,17 +35,11 @@
 #include "Camera.h"
 
 #include "CRC32.h"
-#ifdef NOLFSRC_MODERN
 #include "object/p6_master.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P1-02: 60 fps limiter on servers
 #include "object/p1_server.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // P2: console commands from the host, big head mode, trigger boxes
 #include "object/p2_server.h"
-#endif
 
 #define MAX_CLIENT_NAME_LENGTH		100
 #define CLIENT_PING_UPDATE_RATE		3.0f
@@ -130,10 +124,8 @@ IServerShell* CreateServerShell(ILTServer *pServerDE)
     g_NetFragScore.Init(g_pLTServer,"NetFragScore",LTNULL,1.0f);
 	g_NetAudioTaunts.Init(g_pLTServer,"NetAudioTaunts",LTNULL,1.0f);
 	g_NetArmorHealthPercent.Init(g_pLTServer, "NetArmorHealthPercent", LTNULL, 0.0f);
-#ifdef NOLFSRC_MODERN
 	// M-P2-10 / M-P2-11: BigHeadMode, DisplayTriggers
 	P2Server_Init();
-#endif
 
 	// Make sure we are using autodeactivation...
 
@@ -199,10 +191,8 @@ inline float TODHoursToSeconds(float time)
 
 CGameServerShell::CGameServerShell(ILTServer *pServerDE)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P1-02: 60 fps limiter on servers
 	P1Server_Init();
-#endif
 	memset(&m_GameInfo, 0, sizeof(NetGame));
 
 	m_nCurLevel			 = 0;
@@ -398,10 +388,8 @@ LPBASECLASS	CGameServerShell::OnClientEnterWorld(HCLIENT hClient, void *pClientD
 		dwTeamID = pNcd->m_dwTeam;
 		strcpy(szPlayerName,pNcd->m_sName);
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P6-01: no format characters in player names
 	FilterFormatChars(szPlayerName);
-#endif
 	if (GetGameType() == COOPERATIVE_ASSAULT)
 	{
 		// Add this client to the appropriate team...
@@ -831,7 +819,6 @@ void CGameServerShell::ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage)
 
 				return;
 			}
-#ifdef NOLFSRC_MODERN
 
 			// M-P6-10: a locked server checks the password itself (it no
 			// longer publishes it for the client to check)
@@ -857,7 +844,6 @@ void CGameServerShell::ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage)
 					return;
 				}
 			}
-#endif
 
 			// Tell the client they passed the test...
 			HMESSAGEWRITE hResponse = g_pLTServer->StartMessage(hClient, MID_HANDSHAKE);
@@ -898,14 +884,12 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 {
 	switch (messageID)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P1-02: the hosting client paces this server itself
 		case MID_DONT_LOCK_SERVER_FPS:
 		{
 			P1Server_OnDontLockMessage(hSender, hMessage);
 		}
 		break;
-#endif
 		case MID_PLAYER_UPDATE :
 		{
 			HandleUpdatePlayerMsg(hSender, hMessage);
@@ -1117,10 +1101,8 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 			char szString[100];
 			szString[0] = 0;
 			hMessage->ReadStringFL(szString, sizeof(szString));
-#ifdef NOLFSRC_MODERN
 			// M-P6-01: no format characters in chat
 			FilterFormatChars(szString);
-#endif
 
 			// So it shows up in GameSrv..
             if(szString[0] && !(g_pLTServer->GetClientInfoFlags(hSender) & CIF_LOCAL))
@@ -1149,10 +1131,8 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 			char szString[100];
 			szString[0] = 0;
 			hMessage->ReadStringFL(szString, sizeof(szString));
-#ifdef NOLFSRC_MODERN
 			// M-P6-01: no format characters in chat
 			FilterFormatChars(szString);
-#endif
 
 			// So it shows up in GameSrv..
             if(szString[0] && !(g_pLTServer->GetClientInfoFlags(hSender) & CIF_LOCAL))
@@ -1189,10 +1169,8 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 			char szString[100];
 			szString[0] = 0;
 			hMessage->ReadStringFL(szString, sizeof(szString));
-#ifdef NOLFSRC_MODERN
 			// M-P6-01: no format characters in chat
 			FilterFormatChars(szString);
-#endif
 
 			// So it shows up in GameSrv..
             if(szString[0] && !(g_pLTServer->GetClientInfoFlags(hSender) & CIF_LOCAL))
@@ -1338,7 +1316,6 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 			HandleConsoleCmdMsg(hSender, hMessage);
 		}
 		break;
-#ifdef NOLFSRC_MODERN
 		// M-P2-08: a console line from the local player's console
 		case MID_CONSOLE_COMMAND_CLIENT :
 		{
@@ -1351,7 +1328,6 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 			P2Server_OnSetPos(hSender, hMessage);
 		}
 		break;
-#endif
 
 		case MID_DIFFICULTY:
 		{
@@ -2439,10 +2415,8 @@ void CGameServerShell::Update(LTFLOAT timeElapsed)
 		}
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-11: DisplayTriggers
 	P2Server_Update();
-#endif
 
 	// Did the server want to say something?
 
@@ -2481,10 +2455,8 @@ void CGameServerShell::Update(LTFLOAT timeElapsed)
 
 	// See if we should change worlds.
 	CheckMultiSwitchWorlds();
-#ifdef NOLFSRC_MODERN
 	// M-P1-02: 60 fps limiter on multiplayer servers
 	P1Server_EndUpdate(GetGameType() != SINGLE);
-#endif
 }
 
 
@@ -3843,10 +3815,8 @@ LTBOOL CGameServerShell::InitGameSpy()
 	if (m_GameSpyMgr.Init(GAMESPY_GAME_NAME, sVer, GAMESPY_SECRET_KEY, 0, wPort, (wPort+166), GSMF_USEGAMEPORTFORHEARTBEAT))
 	{
 		m_GameSpyMgr.SetSendHandler(&m_SendHandler);
-#ifdef NOLFSRC_MODERN
 		// M-P6-02: report to a master server
 		P6_SetServerMaster(&m_GameSpyMgr);
-#endif
 	}
 	else
 	{

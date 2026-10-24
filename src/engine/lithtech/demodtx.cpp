@@ -84,9 +84,7 @@ void dsi_ServerErrorQ42C(char* pFormat, ...);            // 0x0042e6f0
 // clientstreams.cpp.  Varargs, cdecl, formats into a 10000-byte buffer and
 // calls OutputDebugStringA.
 void ci_DebugOutQ42C(char* pMsg, ...);                   // 0x004297d0
-#ifdef NOLFSRC_MODERN
 void ModernApplyCommandToggles(uint8* pActions);         // M-P5-19, clientconsole.cpp
-#endif
 
 
 // ======================================================================= //
@@ -526,11 +524,9 @@ LTRESULT CDemoMgrQ42C::GatherInput(int* pChanged, int* pnChanged, int* pOn,
 		// and stores one zero register three times (0x0042c4e4).
 		memset(m_pClientMgr->m_fAxisOffsets, 0, sizeof(m_pClientMgr->m_fAxisOffsets));
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P5-19: toggled commands (clientconsole.cpp), on live input only
 	else if (!m_pClientMgr->m_n1520)
 		ModernApplyCommandToggles(pNew);
-#endif
 
 	for (i = 0; i < 0xff; i++)
 	{

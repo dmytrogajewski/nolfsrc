@@ -57,11 +57,9 @@ LTBOOL CFolderCrosshair::Build()
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_CROSSHAIR,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_CROSSHAIR,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_CROSSHAIR,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	//use crosshair
 	CToggleCtrl* pToggle = AddToggle(IDS_USE_CROSSHAIR, IDS_HELP_CROSSHAIR, kGap, &m_bCrosshair );
@@ -226,15 +224,10 @@ LTBOOL CFolderCrosshair::Render ( HSURFACE hDestSurf )
 	if (bRendered)
 	{
         LTIntPt pos = m_pStyle->GetPos();
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: below the style control, where it is drawn in the 4:3 area
 		pos = P3_MenuPos(pos);
 		pos.x += m_nItemSpacing;
 		pos.y += m_nItemSpacing + m_pStyle->GetHeight();
-#else
-		pos.x += m_nItemSpacing + g_pInterfaceResMgr->GetXOffset();
-		pos.y += m_nItemSpacing + m_pStyle->GetHeight() + g_pInterfaceResMgr->GetYOffset();
-#endif
 		int nSize = (int)(g_vtCrosshairGapMax.GetFloat() + g_vtCrosshairBarMax.GetFloat());
         LTRect rect(pos.x,pos.y,pos.x+nSize,pos.y+nSize);
 

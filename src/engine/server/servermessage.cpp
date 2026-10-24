@@ -234,11 +234,7 @@ inline LTRESULT CLTServer::UnloadModel(char *pFilename)
 	CFileIdentifier* pFile;
 
 	if (!fs_GetFileIdentifier(&m_pServerMgr->m_FileMgr, pFilename, 0, (void**)&pFile))
-#ifdef NOLFSRC_MODERN
 		RETURN_ERROR_INFO(1, "UnloadModel", LT_MISSINGFILE, pFilename);
-#else
-		RETURN_ERROR_INFO(1, "ThreadLoadTexture", LT_MISSINGFILE, pFilename);
-#endif
 
 	LTRESULT dResult = sm_UnloadModel(m_pServerMgr, pFilename, pFile);
 	if (dResult != LT_OK)
@@ -253,11 +249,7 @@ inline LTRESULT CLTServer::UnloadTexture(char *pFilename)
 	CFileIdentifier* pFile;
 
 	if (!fs_GetFileIdentifier(&m_pServerMgr->m_FileMgr, pFilename, 0, (void**)&pFile))
-#ifdef NOLFSRC_MODERN
 		RETURN_ERROR_INFO(1, "UnloadTexture", LT_MISSINGFILE, pFilename);
-#else
-		RETURN_ERROR_INFO(1, "ThreadLoadTexture", LT_MISSINGFILE, pFilename);
-#endif
 
 	BroadcastFileMessage(FT_TEXTURE, 0x18, pFile->m_nFileID, 1);
 	return LT_OK;

@@ -321,21 +321,13 @@ LTRESULT LMessageImpl::ReadCompVectorFL(LTVector& vec)
         }
 
 		nA = ((uint32)(nFlags & 0x18) << 13) + nLowA;
-#ifdef NOLFSRC_MODERN
 		fA = ((float)nA * (1.0f / 262143.0f)) * fMax;
-#else
-		fA = (float)nA * fMax * (1.0f / 262144.0f);
-#endif
 
 		if (nFlags & 0x20)
 			fA = fA * -1.0f;
 
 		nB += (uint32)(nFlags & 0x03) << 16;
-#ifdef NOLFSRC_MODERN
 		fB = ((float)nB * (1.0f / 262143.0f)) * fMax;
-#else
-		fB = (float)nB * fMax * (1.0f / 262144.0f);
-#endif
 
 		if (nFlags & 0x04)
 			fB = fB * -1.0f;

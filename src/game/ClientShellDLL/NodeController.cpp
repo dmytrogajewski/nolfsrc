@@ -18,10 +18,8 @@
 #include "CharacterFX.h"
 #include "SoundMgr.h"
 #include "VarTrack.h"
-#ifdef NOLFSRC_MODERN
 // M-P2-10: big head mode
 #include "cshell/p2_bighead.h"
-#endif
 
 VarTrack	g_vtLipSyncMaxRot;
 VarTrack	g_vtLipSyncFreq;
@@ -260,12 +258,8 @@ void CNodeController::Update()
 
 	GAME_ASSERT(m_cNodeControls >= 0);
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-10: big head mode needs the callback even with nothing else to control
 	if ( m_cNodeControls > 0 || P2BigHead_Factor() > 0.0f )
-#else
-	if ( m_cNodeControls > 0 )
-#endif
 	{
         g_pLTClient->ModelNodeControl(GetCFX()->GetServerObj(), CNodeController::NodeControlFn, this);
 	}
@@ -1433,10 +1427,8 @@ void CNodeController::HandleNodeControl(HOBJECT hObj, HMODELNODE hNode, LTMatrix
 	{
 		*pGlobalMat = *pGlobalMat * pNode->matTransform;
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P2-10: and the head, bigger
 	P2BigHead_ScaleNode(hObj, hNode, pGlobalMat);
-#endif
 }
 
 

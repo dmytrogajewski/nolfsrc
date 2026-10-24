@@ -58,24 +58,18 @@
 #include "FolderHost.h"
 #include "FolderHostOptions.h"
 #include "FolderHostLevels.h"
-#ifdef NOLFSRC_MODERN
 // M-P3-11: the main menu of the day; M-P3-13: the Interface options folder
 #include "cshell/p3_ui.h"
 #include "cshell/p3_folderinterface.h"
-#endif
 
 
 
 
 #include "GameClientShell.h"
-#ifdef NOLFSRC_MODERN
 // M-P4-02: jukebox
 #include "cshell/p4_jukebox.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P7-06: the Controller options folder
 #include "cshell/p7_foldercontroller.h"
-#endif
 extern CGameClientShell* g_pGameClientShell;
 
 //////////////////////////////////////////////////////////////////////
@@ -213,10 +207,8 @@ LTBOOL CFolderMgr::PreviousFolder()
 
 LTBOOL CFolderMgr::SetCurrentFolder(eFolderID folderID)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P3-11: the main menu is today's main menu
 	folderID = (eFolderID)P3_MainFolder(folderID);
-#endif
 
 	CBaseFolder *pNewFolder=GetFolderFromID(folderID);
 	if (pNewFolder)
@@ -564,7 +556,6 @@ void CFolderMgr::AddFolder(eFolderID folderID)
 		pFolder = debug_new(CFolderSummary);
 		break;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-11: the seasonal main menus
 	case FOLDER_ID_MAIN_CASUAL:
 	case FOLDER_ID_MAIN_WINTER:
@@ -575,19 +566,14 @@ void CFolderMgr::AddFolder(eFolderID folderID)
 	case FOLDER_ID_INTERFACE:
 		pFolder = debug_new(CFolderInterface);
 		break;
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P4-02: jukebox
 	case FOLDER_ID_JUKEBOX:
 		pFolder = P4_CreateJukeboxFolder();
 		break;
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P7-06: the Controller options folder
 	case FOLDER_ID_CONTROLLER:
 		pFolder = debug_new(CFolderController);
 		break;
-#endif
 	}
 
 	if (pFolder)

@@ -88,14 +88,12 @@
 #define	MID_CONSOLE_TRIGGER				235	// Client to server
 #define MID_EDIT_OBJECTINFO				236	// Server to client
 #define MID_CONSOLE_COMMAND				237	// Client to server
-#ifdef NOLFSRC_MODERN
 // M-P2-08: a console line for the server to run; honoured only from the
 // local client (the Modernizer's number, MODERN.md)
 #define MID_CONSOLE_COMMAND_CLIENT		238	// Client to server
 // M-P2-14: SetPos -- the local player's server object teleported to a
 // position, in single player (ours)
 #define MID_P2_SETPOS					239	// Client to server
-#endif
 
 #define MID_DIFFICULTY					240 // Client to server
 #define MID_GAMETEXMGR					241	// Server to client
@@ -111,11 +109,9 @@
 	#define MID_HANDSHAKE_DONE			3 // You'll do just fine.  Server to client
 	// Handshake version state
 
-#ifdef NOLFSRC_MODERN
 // M-P1-02: the hosting client asks its own server not to limit its frame
 // rate (the value the NOLF Modernizer uses)
 #define MID_DONT_LOCK_SERVER_FPS		250 // Client to server
-#endif
 // Object <-> Object messages...
 
 

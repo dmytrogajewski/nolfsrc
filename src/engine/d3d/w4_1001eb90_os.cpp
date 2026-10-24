@@ -206,7 +206,6 @@ LTBOOL sub_10020c00(void* pArg0, uint32 nArg1, uint32 nArg2, float fArg3,
                     float fArg8, Vec10020c00* pPos,
                     Rot10020c00* pRot);                 // 0x10020c00
 
-#ifdef NOLFSRC_MODERN
 // M-P0-01: widescreen (Hor+) field of view.  The game picks its horizontal
 // field of view for a 4:3 screen (FovX 90, FovY 75 degrees), and the
 // renderer uses it as given, so on a wider screen the picture is stretched
@@ -242,7 +241,6 @@ static float ModernHorPlusFovX(SceneDesc* pScene)
 	return 2.0f * (float)atan(tan(0.5 * pScene->m_fFovX)
 	                          * g_fModernFovXScale);
 }
-#endif
 unsigned int sub_1001eb90(SceneDesc* pScene, void* pMem, unsigned long nMemSize)
 {
 	uint16          nCW;
@@ -343,7 +341,6 @@ unsigned int sub_1001eb90(SceneDesc* pScene, void* pMem, unsigned long nMemSize)
 	g_nTextureUploadSaves   = 0;
 	g_1008be30              = 0.0f;
 
-#ifdef NOLFSRC_MODERN
 	// M-P0-01: widescreen (Hor+) field of view
 	{
 		float fFovX = ModernHorPlusFovX(pScene);
@@ -355,14 +352,6 @@ unsigned int sub_1001eb90(SceneDesc* pScene, void* pMem, unsigned long nMemSize)
 		             (float)pScene->m_Rect[2] - 0.1f, (float)pScene->m_Rect[3] - 0.1f,
 		             (Vec10020c00*)pScene->m_vPos, (Rot10020c00*)pScene->m_rRot);
 	}
-#else
-	sub_10020c00(g_1008b880,
-	             *(uint32*)&pScene->m_fFovX, *(uint32*)&pScene->m_fFovY, 7.0f,
-	             *(uint32*)&pScene->m_fFarZ,
-	             (float)pScene->m_Rect[0], (float)pScene->m_Rect[1],
-	             (float)pScene->m_Rect[2] - 0.1f, (float)pScene->m_Rect[3] - 0.1f,
-	             (Vec10020c00*)pScene->m_vPos, (Rot10020c00*)pScene->m_rRot);
-#endif
 
 	return 1;
 }

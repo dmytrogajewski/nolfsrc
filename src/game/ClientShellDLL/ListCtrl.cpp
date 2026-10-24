@@ -5,10 +5,8 @@
 #include "Stdafx.h"
 #include "ListCtrl.h"
 #include "InterfaceMgr.h"
-#ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution
 #include "cshell/p3_ui.h"
-#endif
 
 namespace
 {
@@ -378,15 +376,10 @@ LTBOOL  CListCtrl::OnEnter ( )
 // Handles the left button down message
 LTBOOL CListCtrl::OnLButtonDown(int x, int y)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the folder hands the point over in this control's frame; its
 	// items were placed on the screen when it drew
 	x = P3_CtrlToScreenX(this, x);
 	y = P3_CtrlToScreenY(this, y);
-#else
-	x += g_pInterfaceResMgr->GetXOffset();
-	y += g_pInterfaceResMgr->GetYOffset();
-#endif
 
 	// Get the control that the click was on
 	int nControlIndex=0;
@@ -424,15 +417,10 @@ LTBOOL CListCtrl::OnLButtonDown(int x, int y)
 // Handles the left button up message
 LTBOOL CListCtrl::OnLButtonUp(int x, int y)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the folder hands the point over in this control's frame; its
 	// items were placed on the screen when it drew
 	x = P3_CtrlToScreenX(this, x);
 	y = P3_CtrlToScreenY(this, y);
-#else
-	x += g_pInterfaceResMgr->GetXOffset();
-	y += g_pInterfaceResMgr->GetYOffset();
-#endif
 	m_fNextScrollTime = -1.0f;
 	// Get the control that the click was on
 	int nControlIndex=0;
@@ -472,15 +460,10 @@ LTBOOL CListCtrl::OnLButtonUp(int x, int y)
 // Handles the mouse move message
 LTBOOL CListCtrl::OnMouseMove(int x, int y)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the folder hands the point over in this control's frame; its
 	// items were placed on the screen when it drew
 	x = P3_CtrlToScreenX(this, x);
 	y = P3_CtrlToScreenY(this, y);
-#else
-	x += g_pInterfaceResMgr->GetXOffset();
-	y += g_pInterfaceResMgr->GetYOffset();
-#endif
 	int nControlUnderPoint=0;
 	CLTGUICtrl *pCtrl = GetControlUnderPoint(x, y, &nControlUnderPoint);
 	if (m_pUp && CanScrollUp()) 
@@ -758,15 +741,10 @@ void CListCtrl::OnSelChange()
 /******************************************************************/
 LTBOOL CListCtrl::OnLButtonDblClick(int x, int y)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the folder hands the point over in this control's frame; its
 	// items were placed on the screen when it drew
 	x = P3_CtrlToScreenX(this, x);
 	y = P3_CtrlToScreenY(this, y);
-#else
-	x += g_pInterfaceResMgr->GetXOffset();
-	y += g_pInterfaceResMgr->GetYOffset();
-#endif
 	m_fNextScrollTime = -1.0f;
 	// Get the control that the click was on
 	int nControlIndex=0;

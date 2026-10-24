@@ -51,7 +51,9 @@ ClientWorldSync::ClientWorldSync(std::shared_ptr<ClientScene> scene,std::shared_
     if (!scene_ || !resources_) throw std::invalid_argument("client world sync needs its scene and resources");
 }
 ClientWorldSync::~ClientWorldSync() { while (!tracked_.empty()) stop(tracked_.begin()->first); }
-void ClientWorldSync::reset() { while (!tracked_.empty()) stop(tracked_.begin()->first); objects_.clear(); sounds_.clear(); pending_attachments_.clear(); server_attachments_.clear(); server_time_=0; }
+// Sounds' sent state stays: the server keeps its side per client for the
+// whole connection, keyed by file IDs that outlive the world.
+void ClientWorldSync::reset() { while (!tracked_.empty()) stop(tracked_.begin()->first); objects_.clear(); pending_attachments_.clear(); server_attachments_.clear(); server_time_=0; }
 void ClientWorldSync::attach_pending(std::uint16_t child) {
     std::vector<PendingAttachment> ready;
     std::erase_if(pending_attachments_,[&](const PendingAttachment& pending) { if (pending.child!=child) return false; ready.push_back(pending); return true; });

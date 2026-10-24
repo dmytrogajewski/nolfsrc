@@ -100,6 +100,8 @@ public:
     std::string world_name() const;
     HOBJECT main_world() const;
     std::shared_ptr<const CServerWorld> world_data() const;
+    // A server portal flags change (world model index, portal index).
+    LTRESULT portal_flags(uint32 world,uint32 portal,uint16 flags);
     SkyInfo sky() const;
     LTRESULT sky(const SkyInfo&);
     std::vector<MoveObjectReference> sky_objects() const;

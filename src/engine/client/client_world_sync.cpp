@@ -72,12 +72,18 @@ void ClientWorldSync::apply(std::uint8_t packet,std::span<const std::byte> bytes
     case 10: unguaranteed_packet(message); break;
     case 15: filenames(message,files); break;
     case 18: if (events_.special_effect) events_.special_effect(nullptr,message); break;
+    // OnPortalFlagsPacket (lithtech.exe 0x0047ad20): a door opened or closed
+    // a portal, or the world's open portals on entry.
+    case 19: {
+        const auto world=input.u16(),portal=input.u16(); const auto flags=input.u8();
+        if (scene_->portal_flags(world,portal,flags)!=LT_OK) invalid("unknown portal"); break;
+    }
     case 25: light_animations(message); break;
     case 26:
         light_direction_=LTVector{input.f32(),input.f32(),input.f32()};
         light_color_=LTVector{input.f32(),input.f32(),input.f32()};
         ambient_=input.f32(); break;
-    default: break;   // 19 (file chunk flags), 23/24 (file loads): nothing to apply.
+    default: break;   // 23/24 (file loads): nothing to apply.
     }
 }
 void ClientWorldSync::update_packet(LMessageImpl& message,const ServerFiles& files) {

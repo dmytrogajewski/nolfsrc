@@ -32,23 +32,20 @@ int GetRandom()
 	return(rand());
 }
 
+// An empty range answers its low end. Callers pick from N items with
+// GetRandom(0, N-1); with none the retail code answered -1 half the time,
+// an index the 32-bit build read harmlessly before an array and the 64-bit
+// one does not.
 int GetRandom(int range)
 {
-	if (range == -1)	// check for divide-by-zero case
-	{
-		return((rand() % 2) - 1);
-	}
+	if (range < 0) return 0;
 
 	return(rand() % (range + 1));
 }
 
 int GetRandom(int lo, int hi)
 {
-	if ((hi - lo + 1) == 0)		// check for divide-by-zero case
-	{
-		if (rand() & 1) return(lo);
-		else return(hi);
-	}
+	if (hi < lo) return lo;
 
 	return((rand() % (hi - lo + 1)) + lo);
 }

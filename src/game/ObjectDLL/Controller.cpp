@@ -59,6 +59,14 @@ Controller::Controller()
 	m_fDuration = 0.0f;
 	m_State = CState_Off;
     m_bFirstUpdate = LTTRUE;
+	// Saved before any FADE or FLICKER sets them.
+	m_fNextFlickerTime = 0.0f;
+	m_fIntervalMin = 0.0f;
+	m_fIntervalMax = 0.0f;
+	m_FlickerCounter = 0;
+	m_FlickerMsg[0] = 0;
+	m_WaveType = Wave_Linear;
+	m_ParamType = Param_Alpha;
 }
 
 
@@ -87,6 +95,14 @@ uint32 Controller::EngineMessageFn(uint32 messageID, void *pData, LTFLOAT fData)
 		case MID_UPDATE:
 		{
 			Update();
+		}
+		break;
+
+		// A removed target must not be faded on: OnLinkBroken was never
+		// reached, and the handle went on being used.
+		case MID_LINKBROKEN:
+		{
+			OnLinkBroken((HOBJECT)pData);
 		}
 		break;
 

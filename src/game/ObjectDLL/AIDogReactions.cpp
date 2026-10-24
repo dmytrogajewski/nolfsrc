@@ -64,7 +64,7 @@ void AI_Dog::DoReaction(HSTRING hstrReaction, CAISense* pAISense, LTBOOL bIndivi
 	{
 		// If it doesn't match one of these, it must be a command
 
-        sprintf(szTrigger, g_pLTServer->GetStringData(hstrReaction));
+        sprintf(szTrigger, "%s", g_pLTServer->GetStringData(hstrReaction));
 	}
 
 	DidReaction(pAISense, bIndividual);

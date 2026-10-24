@@ -7,6 +7,7 @@
 #include <iostream>
 #include <map>
 #include <random>
+#include <sstream>
 
 namespace {
 using nolf::platform::MusicTiming;
@@ -25,6 +26,8 @@ struct Simulated final : nolf::platform::MusicPerformance {
     std::uint32_t serial=0;
     float gain=1;
     std::vector<std::pair<std::string,std::uint64_t>> started;
+    struct Motif final : nolf::platform::MusicMotif { std::string name; };
+    std::vector<std::pair<std::string,MusicTiming>> motifs;
     unsigned scopes=0;
     void scope() override { ++scopes; }
     std::shared_ptr<const nolf::platform::MusicSegment> load(std::string_view name) override {
@@ -39,6 +42,10 @@ struct Simulated final : nolf::platform::MusicPerformance {
         if (timing==MusicTiming::Beat && now>start) at=start+(now-start+measure/4-1)/(measure/4)*(measure/4);
         scheduled[at]=std::static_pointer_cast<const Segment>(segment);
     }
+    std::shared_ptr<const nolf::platform::MusicMotif> load_motif(std::string_view style,std::string_view name) override {
+        if (!resolver(style)) return nullptr; auto motif=std::make_shared<Motif>(); motif->name=std::string(name); return motif;
+    }
+    void play_motif(const std::shared_ptr<const nolf::platform::MusicMotif>& motif,MusicTiming timing) override { motifs.emplace_back(static_cast<const Motif&>(*motif).name,timing); }
     void volume(float value) override { gain=value; }
     nolf::platform::MusicPlayback playback() const override {
         if (!current) return {serial,0,false};
@@ -71,7 +78,7 @@ struct Fixture {
     explicit Fixture(std::string_view control,std::map<std::string,std::uint64_t> lengths = {}) {
         std::filesystem::create_directories(root/"Music"/"Test");
         std::ofstream(root/"Music"/"Test"/"Test.txt")<<control;
-        for (const char* name : {"A.sgt","B.sgt","C.sgt","D.sgt","E.sgt","T.sgt","U.sgt"}) std::ofstream(root/"Music"/"Test"/name)<<"segment";
+        for (const char* name : {"A.sgt","B.sgt","C.sgt","D.sgt","E.sgt","T.sgt","U.sgt","Test.sty"}) std::ofstream(root/"Music"/"Test"/name)<<"segment";
         assets->mount_directory(root);
         music=std::make_unique<nolf::ClientMusic>(nolf::MusicServices{assets,
             [this,lengths](nolf::platform::MusicResolver resolver,unsigned r) { require(r==rate,"music rate"); auto p=std::make_unique<Simulated>(); p->resolver=std::move(resolver); p->lengths=lengths; performance=p.get(); return p; },
@@ -93,7 +100,8 @@ using Names=std::vector<std::string>;
 constexpr char control[]=
     "NUMINTENSITIES 5\nINITIALINTENSITY 1\nINITIALVOLUME -300\n"
     "INTENSITY 1 -1 0 A.sgt, B.sgt\nINTENSITY 2 0 3 C.sgt D.sgt\nINTENSITY 3 2 0 E.sgt\nINTENSITY 4 -1 0 Missing.sgt A.sgt\nINTENSITY 5 -1 0 Missing.sgt\n"
-    "TRANSITION 1 2 MEASURE MANUAL T.sgt\nTRANSITION 2 1 SEGMENT AUTOMATIC U.sgt\nTRANSITION 1 3 BOGUS MANUAL\nTRANSITION 3 1 IMMEDIATE OTHER\n";
+    "TRANSITION 1 2 MEASURE MANUAL T.sgt\nTRANSITION 2 1 SEGMENT AUTOMATIC U.sgt\nTRANSITION 1 3 BOGUS MANUAL\nTRANSITION 3 1 IMMEDIATE OTHER\n"
+    "MOTIF Test.sty HornHit BEAT\nMOTIF Test.sty Swell\nMOTIF Missing.sty Gone BEAT\n";
 void checks() {
     {
         Fixture f(control); auto& m=*f.music;
@@ -123,7 +131,14 @@ void checks() {
         require(unity>.2f && unity<=1 && m.SetVolume(-2000)==LT_OK && std::abs(f.performance->gain-unity*.1f)<1e-6f &&
             m.SetVolume(2000)==LT_OK && std::abs(f.performance->gain-unity*10)<1e-5f && m.SetVolume(5000)==LT_OK && std::abs(f.performance->gain-unity*10)<1e-5f &&
             m.SetVolume(-30000)==LT_OK && f.performance->gain<unity*1e-9f,"volume mapping wrong");
-        require(m.Pause(LTDMEnactDefault)==LT_OK && m.UnPause()==LT_OK && m.PlaySecondary("A.sgt",LTDMEnactDefault)==LT_ERROR && m.PlayMotif(nullptr,"M",LTDMEnactDefault)==LT_ERROR,"unsupported operations misreported");
+        require(m.Pause(LTDMEnactDefault)==LT_OK && m.UnPause()==LT_OK && m.PlaySecondary("A.sgt",LTDMEnactDefault)==LT_ERROR,"unsupported operations misreported");
+        // Motifs are found by name alone, as the game names its theme and not
+        // the style; a default request takes the boundary its MOTIF line names.
+        require(m.PlayMotif("nolftheme","hornhit",LTDMEnactDefault)==LT_OK && m.PlayMotif(nullptr,"Swell",LTDMEnactDefault)==LT_OK &&
+            m.PlayMotif(nullptr,"HornHit",LTDMEnactImmediatly)==LT_OK && m.PlayMotif(nullptr,"Gone",LTDMEnactDefault)==LT_ERROR && m.PlayMotif(nullptr,"M",LTDMEnactDefault)==LT_ERROR,
+            "motif requests misreported");
+        require((f.performance->motifs==std::vector<std::pair<std::string,MusicTiming>>{{"HornHit",MusicTiming::Beat},{"Swell",MusicTiming::Measure},{"HornHit",MusicTiming::Instant}}),
+            "motifs not played at their boundaries");
         require(std::async(std::launch::async,[&] { return m.ChangeIntensity(1,LTDMEnactDefault); }).get()==LT_ERROR,"music used from another thread");
         require(m.TermLevel()==LT_OK && m.GetNumIntensities()==0 && m.TermLevel()==LT_ERROR,"level termination failed"); f.level();
         require(m.Term()==LT_OK && m.Play()==LT_ERROR,"music termination failed");
@@ -156,16 +171,23 @@ void checks() {
 // Logs what the scheduler asks of the real performance and when segments start.
 struct Traced final : nolf::platform::MusicPerformance {
     struct Named final : nolf::platform::MusicSegment { std::shared_ptr<const nolf::platform::MusicSegment> inner; std::string name; double length() const override { return inner->length(); } };
-    std::unique_ptr<nolf::platform::MusicPerformance> inner; std::uint64_t frames=0; std::uint32_t serial=0; std::ostream* log=nullptr;
+    std::unique_ptr<nolf::platform::MusicPerformance> inner; std::uint64_t frames=0; std::uint32_t serial=0; std::ostream* log=nullptr; std::vector<std::string>* failed=nullptr;
     double now() const { return double(frames)/rate; }
     void scope() override { inner->scope(); }
     std::shared_ptr<const nolf::platform::MusicSegment> load(std::string_view name) override {
-        auto segment=inner->load(name); if (!segment) return nullptr; auto named=std::make_shared<Named>(); named->inner=std::move(segment); named->name=std::string(name); return named;
+        auto segment=inner->load(name); if (!segment) { if (failed) failed->emplace_back(name); return nullptr; } auto named=std::make_shared<Named>(); named->inner=std::move(segment); named->name=std::string(name); return named;
     }
     void play(const std::shared_ptr<const nolf::platform::MusicSegment>& segment,MusicTiming timing) override {
         const auto* named=static_cast<const Named*>(segment.get());
         if (log) *log<<"  "<<now()<<"s request "<<(named ? named->name : "stop")<<" timing "<<int(timing)<<'\n';
         inner->play(named ? named->inner : nullptr,timing);
+    }
+    std::shared_ptr<const nolf::platform::MusicMotif> load_motif(std::string_view style,std::string_view name) override {
+        auto motif=inner->load_motif(style,name); if (!motif && failed) failed->push_back(std::string(style)+" "+std::string(name)); return motif;
+    }
+    void play_motif(const std::shared_ptr<const nolf::platform::MusicMotif>& motif,MusicTiming timing) override {
+        if (log) *log<<"  "<<now()<<"s motif timing "<<int(timing)<<'\n';
+        inner->play_motif(motif,timing);
     }
     void volume(float gain) override { inner->volume(gain); }
     nolf::platform::MusicPlayback playback() const override { return inner->playback(); }
@@ -175,25 +197,39 @@ struct Traced final : nolf::platform::MusicPerformance {
         serial=state.serial;
     }
 };
-// Every original control file loads on the real synthesizer, and each of its
-// intensities renders finite audio through the scheduler.
+// Every original control file loads on the real synthesizer with every
+// segment it names, and each of its intensities renders finite audio through
+// the scheduler.
 void corpus(const char* data,const char* demo) {
-    auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(data); std::shared_ptr<Device> device;
-    nolf::ClientMusic music({assets,nolf::platform::make_dmusic_performance,[&](nolf::platform::AudioFormat format) { device=std::make_shared<Device>(); device->output=format; device->keep=true; return device; }});
-    require(music.Init()==LT_OK,"original music init failed"); unsigned levels=0,intensities=0,audible=0; double peak=0;
+    auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(data); std::shared_ptr<Device> device; std::vector<std::string> failed;
+    nolf::ClientMusic music({assets,[&](nolf::platform::MusicResolver resolver,unsigned r) { auto t=std::make_unique<Traced>(); t->inner=nolf::platform::make_dmusic_performance(std::move(resolver),r); t->failed=&failed; return t; },
+        [&](nolf::platform::AudioFormat format) { device=std::make_shared<Device>(); device->output=format; device->keep=true; return device; }});
+    require(music.Init()==LT_OK,"original music init failed"); unsigned levels=0,intensities=0,audible=0,motifs=0; double peak=0;
     std::map<std::string,std::string> controls; for (const auto& name : assets->names()) if (name.starts_with("music/") && name.ends_with(".txt") && std::count(name.begin(),name.end(),'/')==2) controls.emplace(name.substr(0,name.rfind('/')+1),name.substr(name.rfind('/')+1));
     for (const auto& [directory,control] : controls) {
         require(music.InitLevel(directory.c_str(),control.c_str(),nullptr,nullptr,nullptr)==LT_OK,"original music level failed");
+        // A segment whose band names a missing collection, or whose style
+        // track has an entry without a style, still plays what it has.
+        if (!failed.empty()) throw std::runtime_error("original music segment failed to load: "+directory+failed.front());
         for (int intensity=1;intensity<=music.GetNumIntensities();++intensity) {
             device->samples.clear(); require(music.ChangeIntensity(intensity,LTDMEnactImmediatly)==LT_OK || music.GetCurIntensity()==intensity,"original intensity change failed");
             for (int step=0;step<60;++step) { device->queued=0; music.pump(); }
             double energy=0; for (const auto sample : device->samples) { require(std::isfinite(sample),"original music rendered non-finite samples"); energy+=double(sample)*sample; peak=std::max(peak,double(std::abs(sample))); }
             audible+=energy>1e-3; ++intensities;
         }
+        // Each motif its control file preloads plays over the last intensity.
+        const auto text=assets->read(directory+control); std::string lines(reinterpret_cast<const char*>(text.data()),text.size());
+        for (std::size_t at=0;(at=lines.find("\nMOTIF",at))!=std::string::npos;++at) {
+            std::istringstream line(lines.substr(at+7,lines.find('\n',at+1)-at-7)); std::string style,name; line>>style>>name;
+            require(music.PlayMotif(nullptr,name.c_str(),LTDMEnactImmediatly)==LT_OK,"original motif did not play");
+            for (int step=0;step<20;++step) { device->queued=0; music.pump(); }
+            for (const auto sample : device->samples) require(std::isfinite(sample),"original motif rendered non-finite samples");
+            ++motifs;
+        }
         require(music.TermLevel()==LT_OK,"original music level termination failed"); ++levels;
     }
     require(peak<1,"original music clipped");
-    std::cout<<"Native music: "<<levels<<" original control files, "<<intensities<<" intensities rendered, "<<audible<<" audible, peak "<<peak<<'\n';
+    std::cout<<"Native music: "<<levels<<" original control files, "<<intensities<<" intensities rendered, "<<audible<<" audible, "<<motifs<<" motifs, peak "<<peak<<'\n';
     if (!demo) return;
     // Theme, ambient, medium, high then back down, for listening.
     Traced* traced=nullptr; nolf::ClientMusic theme({assets,[&](nolf::platform::MusicResolver resolver,unsigned r) { auto t=std::make_unique<Traced>(); t->inner=nolf::platform::make_dmusic_performance(std::move(resolver),r); t->log=&std::cout; traced=t.get(); return t; },

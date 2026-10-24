@@ -1,0 +1,124 @@
+diff --git a/src/Band.c b/src/Band.c
+index 9ccbabe..36c0e0b 100644
+--- a/src/Band.c
++++ b/src/Band.c
+@@ -117,7 +117,18 @@ DmResult DmBand_download(DmBand* slf, DmLoader* loader) {
+ 		}
+ 
+ 		rv = DmLoader_getDownloadableSound(loader, &instrument->reference, &instrument->dls);
++		if (rv == DmResult_MEMORY_EXHAUSTED || rv == DmResult_MUTEX_ERROR) {
++			return DmResult_SUCCESS;
++		}
++
++		// A collection that cannot be found leaves its channel silent; the band, like DirectMusic's partial
++		// download, still plays everything else.
+ 		if (rv != DmResult_SUCCESS || instrument->dls == NULL) {
++			Dm_report(DmLogLevel_WARN,
++			          "DmBand: Instrument '%s' (%s) is not available; channel %d stays silent",
++			          instrument->reference.name ? instrument->reference.name : "",
++			          instrument->reference.file ? instrument->reference.file : "",
++			          instrument->channel);
+ 			continue;
+ 		}
+ 
+@@ -133,7 +144,7 @@ DmResult DmBand_download(DmBand* slf, DmLoader* loader) {
+ 		          slf->info.unam);
+ 	}
+ 
+-	return rv;
++	return DmResult_SUCCESS;
+ }
+ 
+ void DmInstrument_free(DmInstrument* slf) {
+diff --git a/src/Style.c b/src/Style.c
+index 9a857fc..cd6894c 100644
+--- a/src/Style.c
++++ b/src/Style.c
+@@ -79,26 +79,24 @@ DmPart* DmStyle_findPart(DmStyle* slf, DmPartReference* pref) {
+ 	return NULL;
+ }
+ 
++// A command is one value of DMUS_COMMANDT_TYPES, not a set of bits; the
++// patterns it selects carry DMUS_EMBELLISHT_TYPES flags, in which a break is
++// 2 and an intro 4.
+ static uint32_t Dm_toEmbellishmentFlagset(DmCommandType cmd) {
+-	uint32_t f = 0;
+-
+-	if (cmd & DmCommand_FILL) {
+-		f |= 1;
+-	}
+-
+-	if (cmd & DmCommand_INTRO) {
+-		f |= 2;
+-	}
+-
+-	if (cmd & DmCommand_BREAK) {
+-		f |= 4;
+-	}
+-
+-	if (cmd & DmCommand_END) {
+-		f |= 8;
++	switch (cmd) {
++	case DmCommand_FILL:
++		return 1;
++	case DmCommand_BREAK:
++		return 2;
++	case DmCommand_INTRO:
++		return 4;
++	case DmCommand_END:
++		return 8;
++	case DmCommand_END_AND_INTRO:
++		return 8 | 4;
++	default:
++		return 0;
+ 	}
+-
+-	return f;
+ }
+ 
+ // See: https://documentation.help/DirectMusic/howmusicvariesduringplayback.htm
+@@ -127,8 +125,10 @@ DmPattern* DmStyle_getRandomPattern(DmStyle* slf, uint32_t groove, DmCommandType
+ 			}
+ 
+ 			// Fix for Gothic 2 in which some patterns are empty but have a groove range of 1-100 with no embellishment
+-			// set.
+-			if (pttn->embellishment == DmCommand_GROOVE && pttn->length_measures == 1) {
++			// set. Only those: a one-measure groove pattern with a level of its own (an ending, a transition, a
++			// silence) is what its segment asks for.
++			if (pttn->embellishment == 0 && pttn->length_measures == 1 && pttn->groove_bottom <= 1 &&
++			    pttn->groove_top >= 100) {
+ 				continue;
+ 			}
+ 
+diff --git a/src/Synth.c b/src/Synth.c
+index 0e1026b..4c3d325 100644
+--- a/src/Synth.c
++++ b/src/Synth.c
+@@ -172,7 +172,9 @@ static DmResult DmSynth_assignInstrumentChannels(DmSynth* slf, DmBand* band) {
+ 			continue;
+ 		}
+ 
+-		uint32_t bank = (ins->patch & 0xFF00U) >> 8;
++		// The presets carry their DLS bank, MSB << 8 | LSB, and every drum kit is bank 128 (see Dm_createHydra).
++		// The LSB alone found no preset whenever the MSB was set, and the channel kept the font's first one.
++		uint32_t bank = ins->patch & 0x80000000U ? 128U : ((ins->patch >> 8) & 0x7FU) | (((ins->patch >> 16) & 0x7FU) << 8);
+ 		uint32_t patch = ins->patch & 0xFFU;
+ 
+ 		tsf_set_volume(fnt->syn, slf->volume);
+diff --git a/src/io/Segment.c b/src/io/Segment.c
+index 9704138..c79b846 100644
+--- a/src/io/Segment.c
++++ b/src/io/Segment.c
+@@ -255,6 +255,12 @@ static DmResult DmSegment_parseStyleTrack(DmMessageList* slf, DmRiff* rif) {
+ 		if (DmRiff_is(&cnk, DM_FOURCC_LIST, DM_FOURCC_STRF)) {
+ 			DmSegment_parseStyleItem(&msg.style, &cnk);
+ 
++			// A style item without a reference names no style; DirectMusic keeps the one playing.
++			if (msg.style.reference.valid_data == 0) {
++				DmRiff_reportDone(&cnk);
++				continue;
++			}
++
+ 			DmResult rv = DmMessageList_add(slf, msg);
+ 			if (rv != DmResult_SUCCESS) {
+ 				return rv;

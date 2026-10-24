@@ -40,12 +40,15 @@ struct ClientMusic::State {
     struct Pending { Step step; Segment segment; int value=0; };
     struct Intensity { std::vector<Segment> segments; int loop=0,next=0; };
     struct Transition { LTDMEnactTypes enact=LTDMEnactNextMeasure; bool manual=true; Segment segment; };
+    // A MOTIF line: the motif and the boundary its line names for a default request.
+    struct Motif { std::shared_ptr<const platform::MusicMotif> motif; LTDMEnactTypes enact=LTDMEnactDefault; };
     struct Level {
         std::string directory,banks;
         int intensities=0,initial=0,current=0;
         long volume=0;
         std::vector<Intensity> intensity;
         std::vector<Transition> transitions;
+        std::map<std::string,Motif> motifs;
         std::map<std::string,Segment> loaded;
         Transition& transition(int from,int to) { return transitions[std::size_t(from)*(intensities+1)+to]; }
     };
@@ -94,6 +97,15 @@ struct ClientMusic::State {
         if (intensity.next>0) pending.push_back({Step::Next,nullptr,intensity.next});
         queued_after=first_playing ? std::optional<std::size_t>(0) : std::nullopt;
         level->current=next; return LT_OK;
+    }
+    // The original plays a preloaded motif as a secondary segment, found by
+    // name alone; a default request takes its line's boundary, and a request
+    // for the next segment starts it with the next segment.
+    LTRESULT motif(const char* name,LTDMEnactTypes start) {
+        if (!ready() || !name) return LT_ERROR;
+        const auto found=level->motifs.find(lower(name)); if (found==level->motifs.end()) return LT_ERROR;
+        const auto enact=start==LTDMEnactDefault ? found->second.enact : start;
+        performance->play_motif(found->second.motif,timing(enact)); return LT_OK;
     }
     void stop(LTDMEnactTypes start) {
         if (start!=LTDMEnactNextSegment) performance->play(nullptr,timing(start));
@@ -179,6 +191,12 @@ LTRESULT ClientMusic::InitLevel(const char* directory,const char* control,const 
             if (key->words.size()>4) transition.segment=s.segment(key->words[4]);
             transition.enact=enact; transition.manual=manual;
         }
+        for (const auto* key : file.keys("MOTIF")) {
+            if (key->words.size()<2) continue;
+            State::Motif motif; motif.motif=s.performance->load_motif(key->words[0],key->words[1]); if (!motif.motif) continue;
+            if (key->words.size()>2) if (const auto enact=StringToEnactType(key->words[2].c_str()); enact!=LTDMEnactInvalid) motif.enact=enact;
+            l.motifs.insert_or_assign(lower(key->words[1]),std::move(motif));
+        }
         s.pending.clear(); s.queued_after.reset(); l.current=0; return LT_OK;
     } catch (...) { s.level.reset(); return LT_ERROR; }
 }
@@ -198,7 +216,7 @@ LTRESULT ClientMusic::SetVolume(const long volume) {
 LTRESULT ClientMusic::ChangeIntensity(const int intensity,const LTDMEnactTypes start) { try { return state_->change(intensity,start); } catch (...) { return LT_ERROR; } }
 LTRESULT ClientMusic::PlaySecondary(const char*,const LTDMEnactTypes) { return LT_ERROR; }
 LTRESULT ClientMusic::StopSecondary(const char*,const LTDMEnactTypes) { return state_->ready() ? LT_OK : LT_ERROR; }
-LTRESULT ClientMusic::PlayMotif(const char*,const char*,const LTDMEnactTypes) { return LT_ERROR; }
+LTRESULT ClientMusic::PlayMotif(const char*,const char* motif,const LTDMEnactTypes start) { try { return state_->motif(motif,start); } catch (...) { return LT_ERROR; } }
 LTRESULT ClientMusic::StopMotif(const char*,const char*,const LTDMEnactTypes) { return state_->ready() ? LT_OK : LT_ERROR; }
 int ClientMusic::GetCurIntensity() { return state_->ready() ? state_->level->current : 0; }
 LTDMEnactTypes ClientMusic::StringToEnactType(const char* name) {

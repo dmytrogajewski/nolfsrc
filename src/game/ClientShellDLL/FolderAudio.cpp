@@ -60,11 +60,9 @@ LTBOOL CFolderAudio::Build()
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_AUDIO,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_AUDIO,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_AUDIO,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	uint32 dwAdvancedOptions = g_pInterfaceMgr->GetAdvancedOptions();
 

@@ -30,9 +30,7 @@
 #include "iltcustomdraw.h"
 #include "VarTrack.h"
 #include "CharacterFX.h"
-#ifdef NOLFSRC_MODERN
 #include "cshell/p5_gameplay.h"	// M-P5-18
-#endif
 
 extern CGameClientShell* g_pGameClientShell;
 extern LTBOOL g_bInfiniteAmmo;
@@ -242,9 +240,7 @@ LTBOOL CWeaponModel::Create(ILTClient* pClientDE, uint8 nWeaponId, uint8 nAmmoId
 	m_nAmmoId = nAmmoId;
 	m_pAmmo	= g_pWeaponMgr->GetAmmo(nAmmoId);
     if (!m_pAmmo) return LTFALSE;
-#ifdef NOLFSRC_MODERN
 	P5_RememberAmmo(m_nWeaponId, m_nAmmoId);	// M-P5-18
-#endif
 
 	// Important to update this before we access PlayerStats...
 
@@ -3386,12 +3382,8 @@ LTBOOL CWeaponModel::GetBestAvailableAmmoType(uint8 nWeaponId, int & nAmmoType)
 //
 // ----------------------------------------------------------------------- //
 
-#ifdef NOLFSRC_MODERN
 // M-P5-12: bKeepChooser
 void CWeaponModel::ChangeWeapon(uint8 nCommandId, LTBOOL bCanDeselect, LTBOOL bKeepChooser)
-#else
-void CWeaponModel::ChangeWeapon(uint8 nCommandId, LTBOOL bCanDeselect)
-#endif
 {
 	if (!CanChangeToWeapon(nCommandId)) return;
 
@@ -3405,12 +3397,8 @@ void CWeaponModel::ChangeWeapon(uint8 nCommandId, LTBOOL bCanDeselect)
 		return;
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P5-12
 	if (!bKeepChooser && (g_pInterfaceMgr->IsChoosingWeapon() || g_pInterfaceMgr->IsChoosingAmmo()))
-#else
-	if (g_pInterfaceMgr->IsChoosingWeapon() || g_pInterfaceMgr->IsChoosingAmmo())
-#endif
 		g_pInterfaceMgr->CloseChoosers();
 
 	// Handle deselection of current weapon...
@@ -3470,15 +3458,11 @@ void CWeaponModel::DoWeaponChange(uint8 nWeaponId)
 	if (pStats->HaveWeapon(nWeaponId))
 	{
 		int nAmmoId = WMGR_INVALID_ID;
-#ifdef NOLFSRC_MODERN
 		// M-P5-18: the ammo the weapon was last used with, if there is
 		// any left; else the retail choice
 		nAmmoId = P5_RememberedAmmo(nWeaponId);
 		if (nAmmoId != WMGR_INVALID_ID ||
 			(GetBestAvailableAmmoType(nWeaponId, nAmmoId) && (nAmmoId != WMGR_INVALID_ID)))
-#else
-		if (GetBestAvailableAmmoType(nWeaponId, nAmmoId) && (nAmmoId != WMGR_INVALID_ID))
-#endif
 		{
 			g_pGameClientShell->ChangeWeapon(nWeaponId, nAmmoId, pStats->GetAmmoCount(nAmmoId));
 		}
@@ -3527,9 +3511,7 @@ void CWeaponModel::AutoSelectWeapon()
 
 		m_nAmmoId	= nAmmoId;
 		m_pAmmo		= g_pWeaponMgr->GetAmmo(m_nAmmoId);
-#ifdef NOLFSRC_MODERN
 		P5_RememberAmmo(m_nWeaponId, m_nAmmoId);	// M-P5-18
-#endif
 
 		// Reload our clip...
 
@@ -3811,9 +3793,7 @@ void CWeaponModel::ChangeAmmo(uint8 nNewAmmoId, LTBOOL bForce)
 	{
 		m_nAmmoId	= nNewAmmoId;
 		m_pAmmo		= g_pWeaponMgr->GetAmmo(m_nAmmoId);
-#ifdef NOLFSRC_MODERN
 		P5_RememberAmmo(m_nWeaponId, m_nAmmoId);	// M-P5-18
-#endif
 
 		// Make sure we reset the anis...
 
@@ -4406,7 +4386,6 @@ void CWeaponModel::UpdateMovementPerturb()
     LTFLOAT fYawDiff = (LTFLOAT)fabs(vPlayerRot.y - m_fLastYaw);
 	m_fLastPitch = vPlayerRot.x;
 	m_fLastYaw = vPlayerRot.y;
-#ifdef NOLFSRC_MODERN
 	// M-P1-23: the turn since the last frame, as the turn of a 60th of a
 	// second (what it was tuned at), so a faster frame rate does not aim
 	// steadier
@@ -4415,7 +4394,6 @@ void CWeaponModel::UpdateMovementPerturb()
 		fPitchDiff *= (1.0f / 60.0f) / fDelta;
 		fYawDiff *= (1.0f / 60.0f) / fDelta;
 	}
-#endif
     LTFLOAT fRot = g_vtPerturbRotationEffect.GetFloat() * (fPitchDiff + fYawDiff) / (2.0f + g_vtFastTurnRate.GetFloat() * fDelta);
 	if (fRot > 1.0f)
 		fRot = 1.0f;

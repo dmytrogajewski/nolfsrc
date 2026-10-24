@@ -37,7 +37,6 @@
 #ifndef _GSMASTER_H_
 #define _GSMASTER_H_
 
-#ifdef NOLFSRC_MODERN
 
 #include <windows.h>
 #include <winsock.h>
@@ -102,6 +101,5 @@ static BOOL GSM_Resolve(const char* sAddr, int nDefaultPort, unsigned long* pIP,
 // into sOut. FALSE if the key is not there.
 static BOOL GSM_FindKey(const char* data, const char* key, char* output, int size) { return nolf::gamespy::find_key(data, key, output, size); }
 
-#endif // NOLFSRC_MODERN
 
 #endif // _GSMASTER_H_

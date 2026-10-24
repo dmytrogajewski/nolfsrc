@@ -57,16 +57,12 @@ BOOL CALLBACK GameDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case WM_ACTIVATEAPP:
 		{
 			g_bActive = wParam;
-#ifdef NOLFSRC_MODERN
 			// Repaint through WM_PAINT.  Under Wine (Proton) a splash
 			// drawn here, while the activation is changing, comes out in
 			// false colours and stays that way; the same draw from
 			// WM_PAINT is right.  WM_PAINT reads g_bActive, so the
 			// palette is still selected as retail selects it here.
 			InvalidateRect(hWnd, NULL, FALSE);
-#else
-			PaintSplash(hWnd, wParam == 0);
-#endif
 			return(FALSE);
 		}
 

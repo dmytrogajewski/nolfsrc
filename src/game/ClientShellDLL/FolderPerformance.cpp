@@ -105,11 +105,9 @@ LTBOOL CFolderPerformance::Build()
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_PERFORMANCE,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_PERFORMANCE,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_PERFORMANCE,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	CreateTitle(IDS_TITLE_PERFORMANCE);
 

@@ -860,7 +860,6 @@ void CMD_STRUCT::Save(HMESSAGEWRITE hWrite)
         g_pLTServer->FreeString(hstr);
 	}
 }
-#ifdef NOLFSRC_MODERN
 // ----------------------------------------------------------------------- //
 //
 //	ROUTINE:	CCommandMgr::CancelPendingOn
@@ -889,4 +888,3 @@ void CCommandMgr::CancelPendingOn(const char* pTarget)
 		}
 	}
 }
-#endif

@@ -51,9 +51,7 @@
 #include "ltbasedefs.h"
 #include "ltlink.h"
 #include "iclientshell.h"
-#ifdef NOLFSRC_MODERN
 #include "..\..\modern\engine\p1_frametime.h"   // M-P1-23
-#endif
 
 
 // ----------------------------------------------------------------------- //
@@ -2305,13 +2303,9 @@ void cs_UpdateAnimations(CClientMgrView* pMgr)
 	CAnimTrackerView* pTracker;
 	int msDelta;
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-23: the fraction of a millisecond carried to the next frame
 	static float s_fP1Carry;
 	msDelta = (int)P1_FrameMs(pMgr->m_fFrameTime, &s_fP1Carry);
-#else
-	msDelta = (int)(pMgr->m_fFrameTime * 1000.0f);
-#endif
 
 	if (msDelta > 0)
 	{
@@ -2650,12 +2644,10 @@ void r_GetRequestedMode(RMode* pMode)
 		strncpy(pMode->m_RenderDLL, pVar->m_pStringVal, sizeof(pMode->m_RenderDLL) - 1);
 	else
 		strcpy(pMode->m_RenderDLL, "d3d.ren");
-#ifdef NOLFSRC_MODERN
 	// The modern build ships d3d9.ren as its default and our d3d.ren as
 	// d3d7.ren: a config naming d3d.ren gets the default.
 	if (!_stricmp(pMode->m_RenderDLL, "d3d.ren"))
 		strcpy(pMode->m_RenderDLL, "d3d9.ren");
-#endif
 
 	pVar = con_FindVarQ40F(&g_ClientConsoleStateRef, "carddesc");
 	if (pVar && pVar->m_pStringVal)

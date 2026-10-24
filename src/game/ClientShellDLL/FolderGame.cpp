@@ -9,10 +9,8 @@
 
 #include "GameClientShell.h"
 #include "GameSettings.h"
-#ifdef NOLFSRC_MODERN
 // M-P5-12, M-P5-19: quick switch and crouch toggle strings
 #include "cres/p5.h"
-#endif
 
 
 namespace
@@ -40,12 +38,10 @@ CFolderGame::CFolderGame()
 	m_nWeaponSway = 0;
 	m_nPickupMsgDur = 0;
 	m_bObjMessages = LTTRUE;
-#ifdef NOLFSRC_MODERN
 	// M-P5-12
 	m_bQuickSwitch = LTFALSE;
 	// M-P5-19
 	m_bCrouchToggle = LTFALSE;
-#endif
 
 }
 
@@ -65,11 +61,9 @@ LTBOOL CFolderGame::Build()
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_GAME,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_GAME,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_GAME,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	//crosshair menu
 	AddTextItem(IDS_CONTROLS_CROSSHAIR, FOLDER_CMD_CROSSHAIR, IDS_HELP_CROSSHAIRMENU);
@@ -94,12 +88,10 @@ LTBOOL CFolderGame::Build()
 	pToggle->SetOnString(IDS_YES);
 	pToggle->SetOffString(IDS_NO);
 
-#ifdef NOLFSRC_MODERN
 	// M-P5-19: crouch toggle
 	pToggle = AddToggle(IDS_P5_CROUCHTOGGLE, IDS_P5_HELP_CROUCHTOGGLE, kGap, &m_bCrouchToggle );
 	pToggle->SetOnString(IDS_YES);
 	pToggle->SetOffString(IDS_NO);
-#endif
 
 	// Add the Difficulty option
 	m_pDifficultyCtrl = AddCycleItem(IDS_DIFFICULTY,IDS_HELP_DIFFICULTY,kGap-25,25,&m_nDifficulty);
@@ -131,12 +123,10 @@ LTBOOL CFolderGame::Build()
 	pToggle->SetOnString(IDS_YES);
 	pToggle->SetOffString(IDS_NO);
 
-#ifdef NOLFSRC_MODERN
 	// M-P5-12: quick switch
 	pToggle = AddToggle(IDS_P5_QUICKSWITCH, IDS_P5_HELP_QUICKSWITCH, kGap, &m_bQuickSwitch );
 	pToggle->SetOnString(IDS_YES);
 	pToggle->SetOffString(IDS_NO);
-#endif
 	// Make sure to call the base class
 	if (! CBaseFolder::Build()) return LTFALSE;
 
@@ -177,12 +167,10 @@ void CFolderGame::OnFocus(LTBOOL bFocus)
 		m_nWeaponSway = (int)(10.0f * GetConsoleFloat("WeaponSway",1.0f));
 		m_nPickupMsgDur = (int)(2.0f * GetConsoleFloat("PickupMessageDuration",5.0f));
 		m_bObjMessages = ( GetConsoleInt("ObjectiveMessages",1) > 0 );
-#ifdef NOLFSRC_MODERN
 		// M-P5-12
 		m_bQuickSwitch = ( GetConsoleInt("QuickSwitch",0) > 0 );
 		// M-P5-19
 		m_bCrouchToggle = ( GetConsoleInt("CrouchToggle",0) > 0 );
-#endif
 
         UpdateData(LTFALSE);
 	}
@@ -203,12 +191,10 @@ void CFolderGame::OnFocus(LTBOOL bFocus)
 		WriteConsoleFloat("WeaponSway",((LTFLOAT)m_nWeaponSway / 10.0f));
 		WriteConsoleFloat("PickupMessageDuration",((LTFLOAT)m_nPickupMsgDur / 2.0f));
 		WriteConsoleInt("ObjectiveMessages",m_bObjMessages);
-#ifdef NOLFSRC_MODERN
 		// M-P5-12
 		WriteConsoleInt("QuickSwitch",(int)m_bQuickSwitch);
 		// M-P5-19
 		WriteConsoleInt("CrouchToggle",(int)m_bCrouchToggle);
-#endif
 
 		g_pLTClient->WriteConfigFile("autoexec.cfg");
 

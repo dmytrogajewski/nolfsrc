@@ -11,10 +11,8 @@
 #include "InterfaceMgr.h"
 #include "GameSettings.h"
 #include "FolderJoystick.h"
-#ifdef NOLFSRC_MODERN
 // M-P7-06: the Controller options folder
 #include "cres/p7.h"
-#endif
 
 namespace
 {
@@ -63,11 +61,9 @@ LTBOOL CFolderControls::Build()
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_CONTROLS,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_CONTROLS,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_CONTROLS,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	//customize
 	AddTextItem(IDS_CUSTOM_CONTROLS, FOLDER_CMD_CUSTOM_CONTROLS, IDS_HELP_CUSTOMCONTROLS);
@@ -81,30 +77,12 @@ LTBOOL CFolderControls::Build()
 	// Mouse
 	AddTextItem(IDS_KEYBOARD, FOLDER_CMD_KEYBOARD, IDS_HELP_KEYBOARD);
 
-#ifdef NOLFSRC_MODERN
 	// M-P7-06: the controller's own options
 	AddTextItem(IDS_P7_CONTROLLER, FOLDER_CMD_CONTROLLER, IDS_P7_HELP_CONTROLLER);
-#endif
 
-#ifdef NOLFSRC_MODERN
 	// M-P7-01, M-P7-06: no DirectInput joystick: the controller (gamepad,
 	// Controller above) is the only one, and the retail joystick set-up
 	// would bind its sticks a second time
-#else
-	// use joystick
-	uint32 dwAdvancedOptions = g_pInterfaceMgr->GetAdvancedOptions();
-
-	CToggleCtrl* pToggle = AddToggle(IDS_JOYSTICK_USE, IDS_HELP_USEJOYSTICK, kGap, &m_bUseJoystick);
-	pToggle->NotifyOnChange(FOLDER_CMD_UPDATE,this);
-	pToggle->SetOnString(IDS_YES);
-	pToggle->SetOffString(IDS_NO);
-	pToggle->Enable( (dwAdvancedOptions & AO_JOYSTICK) );
-
-
-	// joystick
-	m_pJoystickCtrl = AddTextItem(IDS_JOYSTICK, FOLDER_CMD_JOYSTICK, IDS_HELP_JOYSTICK);
-	m_pJoystickCtrl->Enable( (dwAdvancedOptions & AO_JOYSTICK) );
-#endif
 
 	//restore
 	AddTextItem(IDS_RESTOREDEFAULTS, FOLDER_CMD_RESET_DEFAULTS, IDS_HELP_RESTORE);
@@ -162,13 +140,11 @@ uint32 CFolderControls::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwPa
 			m_pFolderMgr->SetCurrentFolder(FOLDER_ID_KEYBOARD);
 			break;
 		}
-#ifdef NOLFSRC_MODERN
 	case FOLDER_CMD_CONTROLLER:
 		{
 			m_pFolderMgr->SetCurrentFolder(FOLDER_ID_CONTROLLER);
 			break;
 		}
-#endif
 	case FOLDER_CMD_JOYSTICK:
 		{
 			m_pFolderMgr->SetCurrentFolder(FOLDER_ID_JOYSTICK);
@@ -239,12 +215,8 @@ void CFolderControls::OnFocus(LTBOOL bFocus)
 
 		CFolderJoystick *pJoy = (CFolderJoystick *)m_pFolderMgr->GetFolderFromID(FOLDER_ID_JOYSTICK);
 		if (!pJoy->IsJoystickConfigured()) m_bUseJoystick = LTFALSE;
-#ifdef NOLFSRC_MODERN
 		// M-P7-06: no joystick entries (see Build)
 		m_bUseJoystick = LTFALSE;
-#else
-		m_pJoystickCtrl->Enable(m_bUseJoystick);
-#endif
 
         UpdateData(LTFALSE);
 	}

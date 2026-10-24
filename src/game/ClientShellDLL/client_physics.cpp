@@ -174,11 +174,9 @@ LTBOOL BounceMovingObject(PhysicsState *pUserState, MovingObject *pObject,
 		// (c_fMinPixels*c_fMinPixels/fDelta is the maximum magnitude).
 
 		fDelta = fDelta > 0.5f ? 0.1f : (fDelta < 0.001f ? 0.001f : fDelta);
-#ifdef NOLFSRC_MODERN
 		// M-P1-23: the threshold as at the 60 frames a second it was
 		// tuned at; divided by a short frame, things stopped bouncing sooner
 		fDelta = 1.0f / 60.0f;
-#endif
 
         LTFLOAT fMaxMag = ((c_fMinPixels*c_fMinPixels)/fDelta);
 

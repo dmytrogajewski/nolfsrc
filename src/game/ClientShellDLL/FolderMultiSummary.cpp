@@ -342,17 +342,10 @@ LTBOOL CFolderMultiSummary::Render(HSURFACE hDestSurf)
 	{
 		LTIntPt firstPos = pTeamCtrl->GetPos();
 		LTIntPt lastPos = pLastCtrl->GetPos();
-#ifdef NOLFSRC_MODERN
 		// M-P3-06: around the rows, where they are drawn in the 4:3 area
 		firstPos = P3_MenuPos(firstPos);
 		lastPos = P3_MenuPos(lastPos);
 		lastPos.y += GetSmallFont()->GetHeight();
-#else
-		firstPos.x += xo;
-		firstPos.y += yo;
-		lastPos.x += xo;
-		lastPos.y += yo + GetSmallFont()->GetHeight();
-#endif
 
 		LTRect rcTeam(firstPos.x-8, firstPos.y-8, firstPos.x+kName+kScore+8, lastPos.y+8);
 
@@ -379,13 +372,8 @@ LTBOOL CFolderMultiSummary::Render(HSURFACE hDestSurf)
 	if (pLocalCtrl)
 	{
 		LTIntPt localPos = pLocalCtrl->GetPos();
-#ifdef NOLFSRC_MODERN
 		// M-P3-06: over the local player's row, where it is drawn
 		localPos = P3_MenuPos(localPos);
-#else
-		localPos.x += xo;
-		localPos.y += yo;
-#endif
 		if (nLocalCol)
 			localPos.x += kName+kScore+kGap;
 

@@ -5,10 +5,8 @@
 #include "Stdafx.h"
 #include "engine/portable/string.h"
 #include "LayoutMgr.h"
-#ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution
 #include "cshell/p3_ui.h"
-#endif
 
 
 #define LO_BASIC_TAG					"BasicLayout"
@@ -293,20 +291,14 @@ char s_aFolderTag[FOLDER_ID_UNASSIGNED+1][32] =
 	"FolderHostLevels",		//FOLDER_ID_HOST_LEVELS,
 	"LoadScreenSingle",		//FOLDER_ID_LOADSCREEN_SINGLE,
 	"LoadScreenMulti",		//FOLDER_ID_LOADSCREEN_MULTI,
-#ifdef NOLFSRC_MODERN
 	// M-P3-11, M-P3-13 (P3), then P4's: the modern build's folders
 	"FolderMainCasual",		//FOLDER_ID_MAIN_CASUAL,
 	"FolderMainWinter",		//FOLDER_ID_MAIN_WINTER,
 	"FolderInterface",		//FOLDER_ID_INTERFACE,
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P4-02: jukebox
 	"FolderJukebox",		//FOLDER_ID_JUKEBOX,
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P7-06: the Controller options folder
 	"FolderController",		//FOLDER_ID_CONTROLLER,
-#endif
 
 	LO_DEFAULT_TAG			//FOLDER_ID_UNASSIGNED,
 
@@ -1431,10 +1423,8 @@ LTFLOAT CLayoutMgr::GetMaskScale(eOverlayMask eMask)
 		break;
 	case OVM_SPACE:
         fRet = (LTFLOAT)m_buteMgr.GetDouble(LO_MASK_TAG, LO_MASK_SPACESCALE, 0.0f);
-#ifdef NOLFSRC_MODERN
 		// M-P3-09: the helmet, drawn for 4:3, grows to cover a wider screen
 		fRet *= P3_WideScreenCover();
-#endif
 		break;
 	case OVM_STATIC:
         fRet = (LTFLOAT)m_buteMgr.GetDouble(LO_MASK_TAG, LO_MASK_STATICSCALE, 0.0f);

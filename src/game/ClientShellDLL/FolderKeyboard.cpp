@@ -50,11 +50,9 @@ LTBOOL CFolderKeyboard::Build()
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_KEYBOARD,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_KEYBOARD,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_KEYBOARD,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	//turn speed
 	CSliderCtrl *pSlider = AddSlider(IDS_NORMALTURN, IDS_HELP_NORMALTURN, kGap, kWidth, &m_nNormalTurn);

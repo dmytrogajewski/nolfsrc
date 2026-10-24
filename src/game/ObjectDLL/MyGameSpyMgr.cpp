@@ -130,15 +130,11 @@ BOOL CMyGameSpyMgr::OnRulesQuery()
 	
 	if (gd.m_bUsePassword)
 	{
-#ifdef NOLFSRC_MODERN
 		// fixed: a server's join password is sent to anyone who asks
 		// (RETAIL_BUGS.md, M-P6-10): only that one is needed; the server
 		// checks it in the handshake (an empty one locks nothing, as before)
 		if (gd.m_szPassword[0])
 			SendResponseInfo("PasswordRequired", 1);
-#else
-		SendResponseInfo("Password", gd.m_szPassword);
-#endif
 	}
 
 

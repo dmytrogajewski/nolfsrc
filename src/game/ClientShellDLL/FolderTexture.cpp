@@ -10,15 +10,10 @@
 #include "GameClientShell.h"
 #include "GameSettings.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 // M-P1-26: a fourth preset, Ultra
 #include "cshell/p1_modern.h"
 #define TEX_LEVELS			4
 #define TEX_POTENTIAL		{LTTRUE,LTTRUE,LTTRUE,LTTRUE}
-#else
-#define TEX_LEVELS			3
-#define TEX_POTENTIAL		{LTTRUE,LTTRUE,LTTRUE}
-#endif
 
 namespace
 {
@@ -29,7 +24,6 @@ namespace
 
 	int nInitVal[6];
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-26: Ultra puts every slider at its top, an offset of -2. It
 	// cancels the 1 that some textures' own files add (357 of them, among
 	// them the character heads and the skyboxes), which High leaves at half
@@ -43,17 +37,6 @@ namespace
 		{2,1,0,-2},
 		{2,1,0,-2},
 	};
-#else
-	int kDefaultValues[6][3] =
-	{
-		{1,0,0},
-		{1,1,0},
-		{1,1,0},
-		{1,1,0},
-		{2,1,0},
-		{2,1,0},
-	};
-#endif
 }
 
 
@@ -89,12 +72,10 @@ LTBOOL CFolderTexture::Build()
 	}
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_TEXTURE,"SliderWidth"))
 		kSliderWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_TEXTURE,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kTotalWidth = P3_MenuLen(kTotalWidth);
 	kHeaderWidth = kTotalWidth - kSpacerWidth;
 	kSliderWidth = P3_MenuLen(kSliderWidth);
-#endif
 
 	CreateTitle(IDS_TITLE_TEXTURE);
 
@@ -102,9 +83,7 @@ LTBOOL CFolderTexture::Build()
 	m_pOverallCtrl->AddString(IDS_LOW);
 	m_pOverallCtrl->AddString(IDS_MEDIUM);
 	m_pOverallCtrl->AddString(IDS_HIGH);
-#ifdef NOLFSRC_MODERN
 	m_pOverallCtrl->AddString(IDS_P1_TEX_ULTRA);
-#endif
 	m_pOverallCtrl->AddString(IDS_CUSTOMIZED);
 
 	m_pSlider[0]=AddSlider(IDS_TEXTURE_WORLD, IDS_HELP_TEXTURE_WORLD, kTotalWidth, kSliderWidth, &m_nSliderVal[0]);
@@ -305,10 +284,8 @@ LTBOOL CFolderTexture::OnLButtonUp(int x, int y)
 		}
 		else if (IsSlider(pCtrl))
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P3-01: the point in the slider's own frame
 			P3_PointToCtrl(pCtrl, x, y);
-#endif
 			LTBOOL bSlid = pCtrl->OnLButtonUp(x, y);
 			if (bSlid)
 			{

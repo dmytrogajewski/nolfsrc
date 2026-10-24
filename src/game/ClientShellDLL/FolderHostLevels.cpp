@@ -134,18 +134,10 @@ LTBOOL CFolderHostLevels::Build()
 	pFont = GetSmallFont();
 	pos.x = rcAvailRect.left + nIndent;
 	pos.y = rcAvailRect.top + nBarHeight;
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	int nListHeight = P3_MenuLen((rcAvailRect.bottom - rcAvailRect.top) - nBarHeight);
-#else
-	int nListHeight = (rcAvailRect.bottom - rcAvailRect.top) - nBarHeight;
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	int nListWidth = P3_MenuLen((rcAvailRect.right - rcAvailRect.left) - nArrowWidth);
-#else
-	int nListWidth = (rcAvailRect.right - rcAvailRect.left) - nArrowWidth;
-#endif
 
 	m_pAvailLevels = debug_new(CListCtrl);
     m_pAvailLevels->Create(nListHeight, LTTRUE, nListWidth);
@@ -166,18 +158,10 @@ LTBOOL CFolderHostLevels::Build()
 	pFont = GetSmallFont();
 	pos.x = rcSelRect.left + nIndent;
 	pos.y = rcSelRect.top + nBarHeight;
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nListHeight = P3_MenuLen((rcSelRect.bottom - rcSelRect.top) - nBarHeight);
-#else
-	nListHeight = (rcSelRect.bottom - rcSelRect.top) - nBarHeight;
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nListWidth = P3_MenuLen((rcSelRect.right - rcSelRect.left) - nArrowWidth);
-#else
-	nListWidth = (rcSelRect.right - rcSelRect.left) - nArrowWidth;
-#endif
 
 	m_pSelLevels = debug_new(CListCtrl);
     m_pSelLevels->Create(nListHeight, LTTRUE, nListWidth);
@@ -576,7 +560,6 @@ LTBOOL CFolderHostLevels::Render(HSURFACE hDestSurf)
 
 void CFolderHostLevels::DrawFrame(HSURFACE hDestSurf, LTRect *rect, LTBOOL bSel)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the frame around a list, at its place in the 4:3 area
 	{
 		HLTCOLOR hFrameColor = (bSel ? m_hSelectedColor : m_hNonSelectedColor);
@@ -593,28 +576,6 @@ void CFolderHostLevels::DrawFrame(HSURFACE hDestSurf, LTRect *rect, LTBOOL bSel)
 		g_pLTClient->FillRect(hDestSurf, &rcLine, hFrameColor);
 		return;
 	}
-#else
-	int xo = g_pInterfaceResMgr->GetXOffset();
-	int yo = g_pInterfaceResMgr->GetYOffset();
-
-    HLTCOLOR hColor = (bSel ? m_hSelectedColor : m_hNonSelectedColor);
-
-
-    LTRect tmpRect(xo+rect->left, yo+rect->top+nBarHeight, xo+rect->right, yo+rect->top+nBarHeight+2);
-    g_pLTClient->FillRect(hDestSurf,&tmpRect,hColor);
-
-	tmpRect.bottom = yo+rect->bottom;
-	tmpRect.top = tmpRect.bottom - 2;
-    g_pLTClient->FillRect(hDestSurf,&tmpRect,hColor);
-
-    tmpRect = LTRect(xo+rect->left, yo+rect->top+nBarHeight+2, xo+rect->left+2, yo+rect->bottom-2);
-    g_pLTClient->FillRect(hDestSurf,&tmpRect,hColor);
-
-	tmpRect.right = xo+rect->right;
-	tmpRect.left = tmpRect.right - 2;
-    g_pLTClient->FillRect(hDestSurf,&tmpRect,hColor);
-
-#endif
 }
 
 

@@ -10,7 +10,6 @@
 #include "GameClientShell.h"
 #include "GameSettings.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 // M-P1-09: texture filtering; M-P1-18: antialiasing
 #include "cshell/p1_modern.h"
 
@@ -76,7 +75,6 @@ namespace
 		return i;
 	}
 }
-#endif
 
 namespace
 {
@@ -117,13 +115,11 @@ CFolderAdvDisplay::CFolderAdvDisplay()
 	m_bTripleBuffer = LTFALSE;
 	m_bFixSparkleys = LTFALSE;
 	m_bTrilinear = LTFALSE;
-#ifdef NOLFSRC_MODERN
 	// M-P1-09: texture filtering
 	m_nP1Filter = 0;
 	m_nP1FilterShown = 0;
 	m_nP1AA = 0;
 	m_nP1AAShown = 0;
-#endif
 
 	m_pShadows = LTNULL;
 //	m_pOverdraw = LTNULL;
@@ -147,12 +143,10 @@ LTBOOL CFolderAdvDisplay::Build()
 	}
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_ADVDISPLAY,"SliderWidth"))
 		kSliderWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_ADVDISPLAY,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kTotalWidth = P3_MenuLen(kTotalWidth);
 	kHeaderWidth = kTotalWidth - kSpacerWidth;
 	kSliderWidth = P3_MenuLen(kSliderWidth);
-#endif
 
 	CreateTitle(IDS_TITLE_ADVDISPLAY);
 
@@ -187,7 +181,6 @@ LTBOOL CFolderAdvDisplay::Build()
 //	m_pOverdraw->SetOnString(IDS_ON);
 //	m_pOverdraw->SetOffString(IDS_OFF);
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-09: texture filtering replaces the trilinear toggle
 	CCycleCtrl* pP1Filter = AddCycleItem(IDS_P1_TEXFILTER,IDS_P1_HELP_TEXFILTER,kHeaderWidth,kSpacerWidth,&m_nP1Filter);
 	for (int nP1 = 0; nP1 < kP1NumFilters; nP1++)
@@ -201,11 +194,6 @@ LTBOOL CFolderAdvDisplay::Build()
 	pP1AA->AddString(IDS_P1_ANTIALIAS_2X);
 	pP1AA->AddString(IDS_P1_ANTIALIAS_4X);
 	pP1AA->AddString(IDS_P1_ANTIALIAS_8X);
-#else
-	pToggle = AddToggle(IDS_TRILINEAR, IDS_HELP_TRILINEAR, kTotalWidth, &m_bTrilinear );
-	pToggle->SetOnString(IDS_ON);
-	pToggle->SetOffString(IDS_OFF);
-#endif
 
 	pToggle = AddToggle(IDS_TRIPLE_BUFF, IDS_HELP_TRIPLE_BUFF, kTotalWidth, &m_bTripleBuffer );
 	pToggle->SetOnString(IDS_ON);
@@ -269,11 +257,9 @@ void CFolderAdvDisplay::OnFocus(LTBOOL bFocus)
         m_bTripleBuffer = (GetConsoleInt("TripleBuffer",0) > 0) && (dwAdvancedOptions & AO_TRIPLEBUFFER);
         m_bFixSparkleys = (GetConsoleInt("FixSparkleys",0) > 0);
         m_bTrilinear = (GetConsoleInt("Trilinear",0) > 0);
-#ifdef NOLFSRC_MODERN
 		// M-P1-09: texture filtering
 		m_nP1Filter = m_nP1FilterShown = P1CurrentFilter();
 		m_nP1AA = m_nP1AAShown = P1CurrentAA();
-#endif
 
 		m_nShadows = 0;
 		if (GetConsoleInt("DrawShadows",0) > 0)
@@ -300,7 +286,6 @@ void CFolderAdvDisplay::OnFocus(LTBOOL bFocus)
 		WriteConsoleInt("EnvMapEnable",m_bEnvMapEnable);
 		WriteConsoleInt("TripleBuffer",m_bTripleBuffer && (dwAdvancedOptions & AO_TRIPLEBUFFER));
 		WriteConsoleInt("FixSparkleys",m_bFixSparkleys);
-#ifdef NOLFSRC_MODERN
 		// M-P1-09: texture filtering, written only when changed (so that
 		// values the cycle has no choice for are kept)
 		if (m_nP1Filter != m_nP1FilterShown && m_nP1Filter >= 0 && m_nP1Filter < kP1NumFilters)
@@ -309,14 +294,10 @@ void CFolderAdvDisplay::OnFocus(LTBOOL bFocus)
 			WriteConsoleInt("Trilinear",s_aP1Filters[m_nP1Filter].nTrilinear);
 			WriteConsoleInt("Anisotropic",s_aP1Filters[m_nP1Filter].nAnisotropic);
 		}
-#else
-		WriteConsoleInt("Trilinear",m_bTrilinear);
-#endif
 
 		WriteConsoleInt("DrawShadows",(m_nShadows > 0) );
 		WriteConsoleInt("MaxModelShadows",(m_nShadows > 0) );
 		WriteConsoleInt("ModelShadowProj",(m_nShadows > 1) );
-#ifdef NOLFSRC_MODERN
 
 		// M-P1-18: antialiasing, which the renderer reads when it starts:
 		// restart it (once, with a triple-buffer change below)
@@ -330,7 +311,6 @@ void CFolderAdvDisplay::OnFocus(LTBOOL bFocus)
 				g_pInterfaceMgr->SetSwitchingRenderModes(LTFALSE);
 			}
 		}
-#endif
 
 		if (bOldTB != m_bTripleBuffer)
 		{

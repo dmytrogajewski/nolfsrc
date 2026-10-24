@@ -123,11 +123,9 @@ void CJoystickAxisBase::Build(ILTClient *pClientDE, CBaseFolder *pDestFolder)
 		kGap = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_JOYSTICK,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_JOYSTICK,"SliderWidth"))
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_JOYSTICK,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kGap = P3_MenuLen(kGap);
 	kWidth = P3_MenuLen(kWidth);
-#endif
 
 	// figure out the name of the joystick device
 	SetDeviceName(pClientDE);

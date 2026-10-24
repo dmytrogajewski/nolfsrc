@@ -20,10 +20,8 @@
 #include "MsgIDs.h"
 #include "ObjectMsgs.h"
 #include "Attachments.h"
-#ifdef NOLFSRC_MODERN
 // M-P2-10: big head mode
 #include "object/p2_server.h"
-#endif
 
 static CVarTrack g_vtShowNodeRadii;
 static CVarTrack g_vtNodeRadiusUseOverride;
@@ -562,13 +560,11 @@ LTFLOAT CCharacterHitBox::GetNodeRadius(ModelSkeleton eModelSkeleton,
 		}
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-10: a bigger head is a bigger target
 	if (g_pModelButeMgr->GetSkeletonNodeLocation(eModelSkeleton, eModelNode) == HL_HEAD)
 	{
 		fRadius *= P2Server_BigHeadFactor();
 	}
-#endif
 	return fRadius;
 }
 
@@ -740,12 +736,8 @@ void CCharacterHitBox::CreateNodeRadiusModels()
 			INIT_OBJECTCREATESTRUCT(theStruct);
 
 			theStruct.m_Pos = vPos;
-#ifdef NOLFSRC_MODERN
 			// M-P2-11: the sphere model is 364.abc; there is no 264.abc
 			SAFE_STRCPY(theStruct.m_Filename, "SFX\\Expl\\Models\\364.abc");
-#else
-			SAFE_STRCPY(theStruct.m_Filename, "SFX\\Expl\\Models\\264.abc");
-#endif
 			theStruct.m_Flags = FLAG_VISIBLE;
 			theStruct.m_ObjectType = OT_MODEL;
 
@@ -753,12 +745,8 @@ void CCharacterHitBox::CreateNodeRadiusModels()
             LPBASECLASS pModel = g_pLTServer->CreateObject(hClass, &theStruct);
 			if (!pModel) return;
 
-#ifdef NOLFSRC_MODERN
 			// M-P2-11: the sphere model needs twice the radius to cover it
             LTFLOAT fNodeRadius = GetNodeRadius(eModelSkeleton, eCurrentNode) * 2.0f;
-#else
-            LTFLOAT fNodeRadius = GetNodeRadius(eModelSkeleton, eCurrentNode);
-#endif
 
             LTVector vScale;
 			vScale.Init(fNodeRadius, fNodeRadius, fNodeRadius);

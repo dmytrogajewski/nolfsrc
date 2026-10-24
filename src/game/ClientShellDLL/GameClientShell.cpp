@@ -52,27 +52,17 @@
 
 #include "CRC32.h"
 
-#ifdef NOLFSRC_MODERN
 // P2: developer console, big head mode, speed-run block
 #include "cshell/p2_client.h"
-#endif
 #include <stdarg.h>
 #include <stdio.h>
-#ifdef NOLFSRC_MODERN
 #include "cshell/p6_multiplayer.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P1: timing, input, window and display options
 #include "cshell/p1_modern.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P5: gameplay fixes and features (quick switch, toggle zoom, shadows)
 #include "cshell/p5_gameplay.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P7: controller support
 #include "cshell/p7_pad.h"
-#endif
 
 #define min(a,b)	((a) < (b) ? (a) : (b))
 #define max(a,b)	((a) > (b) ? (a) : (b))
@@ -1009,10 +999,8 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 #endif
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-01/03/08/10/12: P1's console variables, optimizesurfaces
 	P1Config_InitVars();
-#endif
     m_MoveMgr.Init();
 	m_editMgr.Init();
 	m_cheatMgr.Init();
@@ -1071,31 +1059,19 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 
 		RMode rMode;
 
-#ifdef NOLFSRC_MODERN
 		// M-P1-08: if an error occurred, try 800x600x32...
 
 		rMode.m_Width		= 800;
 		rMode.m_Height		= 600;
 		rMode.m_BitDepth	= 32;
-#else
-		// If an error occurred, try 640x480x16...
-
-		rMode.m_Width		= 640;
-		rMode.m_Height		= 480;
-		rMode.m_BitDepth	= 16;
-#endif
 		rMode.m_bHardware	= pMode->m_bHardware;
 
 		sprintf(rMode.m_RenderDLL, "%s", pMode->m_RenderDLL);
 		sprintf(rMode.m_InternalName, "%s", pMode->m_InternalName);
 		sprintf(rMode.m_Description, "%s", pMode->m_Description);
 
-#ifdef NOLFSRC_MODERN
 		// M-P1-08: the fallback mode
         g_pLTClient->DebugOut("Setting render mode to 800x600x32...\n");
-#else
-        g_pLTClient->DebugOut("Setting render mode to 640x480x16...\n");
-#endif
 
         if (g_pLTClient->SetRenderMode(&rMode) != LT_OK)
 		{
@@ -1103,12 +1079,8 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 
             rMode.m_bHardware = LTFALSE;
 
-#ifdef NOLFSRC_MODERN
 			// the modern build's default renderer (no d3d.ren there)
 			sprintf(rMode.m_RenderDLL, "d3d9.ren");
-#else
-			sprintf(rMode.m_RenderDLL, "d3d.ren");
-#endif
 			sprintf(rMode.m_InternalName, "");
 			sprintf(rMode.m_Description, "");
 
@@ -1303,14 +1275,12 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 	{
 		if (bMultiConnect && sConnect)
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P6-10: +connect takes a locked server's password from
 			// +NetJoinPassword (no join folder asks for it)
 			{
 				HCONSOLEVAR hJoinPassword = g_pLTClient->GetConsoleVar("NetJoinPassword");
 				P6_SetJoinPassword(hJoinPassword ? g_pLTClient->GetVarValueString(hJoinPassword) : LTNULL);
 			}
-#endif
 			if (!DoJoinGame(sConnect))
 			{
 				m_InterfaceMgr.LoadFailed();
@@ -1348,24 +1318,18 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 	m_eDifficulty = (GameDifficulty)nDiff;
 	m_bFadeBodies = (LTBOOL)GetConsoleInt("FadeBodies",0);
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-01: the developer console and the rest of P2's client side
 	P2_OnEngineInitialized();
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P5-12, M-P5-13: QuickSwitch and the ToggleZoom action
 	P5_OnEngineInitialized();
-#endif
 	// Check for playdemo....
 
     if (hVar = g_pLTClient->GetConsoleVar("playdemo"))
 	{
         DoLoadWorld("", NULL, NULL, LOAD_NEW_GAME, NULL, g_pLTClient->GetVarValueString(hVar));
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P1-08, M-P1-12: CursorCenter off, one-time config upgrade
 	P1Config_AfterInit();
-#endif
 
 	return LT_OK;
 }
@@ -1381,10 +1345,8 @@ uint32 CGameClientShell::OnEngineInitialized(RMode *pMode, LTGUID *pAppGuid)
 
 void CGameClientShell::OnEngineTerm()
 {
-#ifdef NOLFSRC_MODERN
 	// M-P2-01: unhook the console from the engine before anything goes
 	P2_OnEngineTerm();
-#endif
     UnhookWindow();
 
 	if (m_hCamera)
@@ -1423,7 +1385,6 @@ void CGameClientShell::OnEvent(uint32 dwEventID, uint32 dwParam)
 
 		case LTEVENT_DISCONNECT :
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P6-05: a timeout (typically at a level change): join the
 			// same server again instead of dropping to the menus
 			if (g_pGameClientShell->IsMultiplayerGame() &&
@@ -1436,7 +1397,6 @@ void CGameClientShell::OnEvent(uint32 dwEventID, uint32 dwParam)
 				m_bInWorld = LTFALSE;
 				return;
 			}
-#endif
 			if (g_pGameClientShell->IsMultiplayerGame())
 			{
 				m_szServerAddress[0]	= LTNULL;
@@ -1479,10 +1439,8 @@ void CGameClientShell::OnEvent(uint32 dwEventID, uint32 dwParam)
 		break;
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-03, M-P1-06, M-P1-10: window placement, mouse capture, tint
 	P1_OnClientEvent(dwEventID);
-#endif
 	m_InterfaceMgr.OnEvent(dwEventID, dwParam);
 }
 
@@ -1540,10 +1498,8 @@ void CGameClientShell::OnEnterWorld()
 
 	m_bFirstUpdate = LTTRUE;
 	m_ePlayerState = PS_UNKNOWN;
-#ifdef NOLFSRC_MODERN
 	// M-P6-05: in a world again: the timeout rejoins are available again
 	P6_ResetRejoin();
-#endif
 
 	m_vShakeAmount.Init();
 
@@ -1574,10 +1530,8 @@ void CGameClientShell::OnEnterWorld()
 	m_vLastReverbPos.Init();
 
 	m_MoveMgr.OnEnterWorld();
-#ifdef NOLFSRC_MODERN
 	// M-P2-10: the server learns our BigHeadMode (single player / host)
 	P2_OnEnterWorld();
-#endif
 }
 
 
@@ -1679,10 +1633,8 @@ void CGameClientShell::Update()
 		m_bForceDisconnect = LTFALSE;
 		return;
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P2-12: the speed-run block follows the mission and level
 	P2_Update();
-#endif
 
 	// Set up the time for this frame...
     m_fFrameTime = g_pLTClient->GetFrameTime();
@@ -1690,7 +1642,6 @@ void CGameClientShell::Update()
 	{
 		m_fFrameTime = MAX_FRAME_DELTA;
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P6-05: a rejoin scheduled by a timeout disconnect
 	P6_UpdateRejoin();
 
@@ -1702,7 +1653,6 @@ void CGameClientShell::Update()
 
 	// M-P1-22: a borderless window at the desktop's resolution
 	P1Window_Update();
-#endif
 
 	// Update tint if applicable (always do this to make sure tinting
 	// gets finished)...
@@ -1899,10 +1849,8 @@ void CGameClientShell::PostUpdate()
 
 
 	m_InterfaceMgr.PostUpdate();
-#ifdef NOLFSRC_MODERN
 	// M-P1-01, M-P1-25: the frame limiter (FramerateLimit)
 	P1Timing_EndFrame();
-#endif
 }
 
 // ----------------------------------------------------------------------- //
@@ -2649,13 +2597,9 @@ void CGameClientShell::TurnOffAlternativeCamera(uint8 nCamType)
 
 	// Set shadows back to whatever they were set to before...
 
-#ifdef NOLFSRC_MODERN
 	// M-P5-14: the saved value is 0 after a cinematic's first frame (and
 	// before any cinematic); go back to the player's setting
 	P5_OnCinematicCameraOff();
-#else
-	WriteConsoleInt("MaxModelShadows", g_nCinSaveModelShadows);
-#endif
 }
 
 
@@ -2717,15 +2661,11 @@ void CGameClientShell::CalculateCameraRotation()
 	// Get axis offsets...
 
 	float offsets[3];
-#ifdef NOLFSRC_MODERN
 	// M-P1-03: raw mouse look (the retail axis offsets with OldMouseLook 1)
 	P1Input_GetAxisOffsets(offsets);
 
 	// M-P7-03: and the controller's right stick
 	P7Pad_AddLook(offsets);
-#else
-    g_pLTClient->GetAxisOffsets(offsets);
-#endif
 
 	if (m_bRestoreOrientation)
 	{
@@ -3251,12 +3191,8 @@ void CGameClientShell::UpdateWeaponModel()
     LTBOOL bFire = LTFALSE;
 
 	// Only check if we're firing if we aren't choosing ammo/weapons...
-#ifdef NOLFSRC_MODERN
 	// M-P5-12: with quick switch the open weapon chooser does not stop fire
 	if (!m_InterfaceMgr.IsChoosingAmmo() && (!m_InterfaceMgr.IsChoosingWeapon() || P5_QuickSwitchOn()))
-#else
-	if (!m_InterfaceMgr.IsChoosingAmmo() && !m_InterfaceMgr.IsChoosingWeapon())
-#endif
 	{
 		if ((m_dwPlayerFlags & BC_CFLG_FIRING) || (m_dwPlayerFlags & BC_CFLG_ALT_FIRING) &&
 			!IsPlayerDead() && !m_bSpectatorMode)
@@ -4194,7 +4130,6 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 			g_pLTClient->WriteToMessageDWord(hResponse, nPassword);
 			g_pLTClient->WriteToMessageDWord(hResponse, nWeaponCRC);
 			g_pLTClient->WriteToMessageDWord(hResponse, nClientCRC);
-#ifdef NOLFSRC_MODERN
 			// M-P6-10: the join password, for a server that checks it
 			{
 				char sPassword[MAX_PASSWORD];
@@ -4206,7 +4141,6 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 				for (int i = 0; i < nLen; i++)
 					g_pLTClient->WriteToMessageByte(hResponse, (uint8)sPassword[i]);
 			}
-#endif
 			g_pLTClient->EndMessage(hResponse);
 		}
 		break;
@@ -4240,10 +4174,8 @@ void CGameClientShell::ProcessHandshake(HMESSAGEREAD hMessage)
 
 void CGameClientShell::OnCommandOn(int command)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P2-01: no game command while the developer console is open
 	if (P2_OnCommandOn(command)) return;
-#endif
 	// Let the interface handle the command first...
 
 	if (IsPlayerInWorld())
@@ -4360,14 +4292,12 @@ void CGameClientShell::OnCommandOn(int command)
 			}
 		}
 		break;
-#ifdef NOLFSRC_MODERN
 		// M-P5-13: toggle zoom -- a zoom-in step, or out after the last one
 		case COMMAND_ID_TOGGLE_ZOOM :
 		{
 			OnCommandOn(P5_ToggleZoomCommand(m_nZoomView));
 		}
 		break;
-#endif
 
 		case COMMAND_ID_TURNAROUND :
 		{
@@ -6865,10 +6795,8 @@ void CGameClientShell::FirstUpdate()
 	UpdateContainerFX();
 	ClearCurContainerCode();
 	UpdateContainerFX();
-#ifdef NOLFSRC_MODERN
 	// M-P5-14: undo shadows lost to a cinematic before a save or a quit
 	P5_OnWorldStarted();
-#endif
 }
 
 // --------------------------------------------------------------------------- //
@@ -7085,10 +7013,8 @@ void CGameClientShell::RenderCamera(LTBOOL bDrawInterface)
     g_pLTClient->Start3D();
     g_pLTClient->RenderCamera(m_hCamera);
     g_pLTClient->StartOptimized2D();
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: the screen tint as an overlay (EnableScreenTinting 0)
 	m_ScreenTintMgr.P1DrawOverlay();
-#endif
 
 	m_InterfaceMgr.Draw();
 
@@ -7476,10 +7402,8 @@ void CGameClientShell::InitMultiPlayer()
     hWrite = g_pLTClient->StartMessage(MID_PLAYER_INITVARS);
     g_pLTClient->WriteToMessageByte(hWrite, (uint8)pSettings->RunLock());
     g_pLTClient->EndMessage(hWrite);
-#ifdef NOLFSRC_MODERN
 	// M-P1-02: a hosting client paces its own server
 	P1Timing_SendDontLockServer(IsHosting() ? true : false);
-#endif
 }
 
 
@@ -9111,21 +9035,15 @@ LTBOOL CGameClientShell::DoJoinGame(char* sIp)
 	int nRetries = GetConsoleInt("NetJoinRetry", 0);
 	while (nRetries >= 0)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P6-06: log each join attempt
 		P6_LogJoinAttempt(sIp, GetConsoleInt("NetJoinRetry", 0) - nRetries + 1, GetConsoleInt("NetJoinRetry", 0) + 1);
-#endif
 		// If successful, then we're done.
         if( g_pLTClient->StartGame( &req ) == LT_OK )
 		{
-#ifdef NOLFSRC_MODERN
 			P6_LogJoinResult(sIp, LTTRUE);
-#endif
             return(LTTRUE);
 		}
-#ifdef NOLFSRC_MODERN
 		P6_LogJoinResult(sIp, LTFALSE);
-#endif
 
 		// Wait a sec and try again.
 		if (nRetries > 0) nolf::platform::sleep_for(std::chrono::seconds(1));

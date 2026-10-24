@@ -1,10 +1,8 @@
 #include "Stdafx.h"
 #include "iltclient.h"
 #include "LightScaleMgr.h"
-#ifdef NOLFSRC_MODERN
 // M-P1-10: Intel graphics fix
 #include "cshell/p1_modern.h"
-#endif
 
 LTBOOL CLightScaleMgr::Init()
 {
@@ -92,7 +90,6 @@ void CLightScaleMgr::ClearLightScale (LTFLOAT nRed, LTFLOAT nGreen, LTFLOAT nBlu
 
 void CLightScaleMgr::SetLightScale()
 {
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: EnableLightScale 0 keeps the light scale at 1 (some Intel
 	// drivers turn the screen black with it, e.g. under water)
 	if (!P1Config_LightScale())
@@ -100,7 +97,6 @@ void CLightScaleMgr::SetLightScale()
 		Disable();
 		return;
 	}
-#endif
 	// go though looking for the first interface type
 
 	LS_EFFECT* pEffect = m_pEffects;

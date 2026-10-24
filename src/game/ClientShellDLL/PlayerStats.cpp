@@ -25,14 +25,10 @@
 #include "SoundMgr.h"
 #include "SurfaceFunctions.h"
 #include "CharacterFX.h"
-#ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution
 #include "cshell/p3_ui.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P5-10: the ammo HUD surface
 #include "cshell/p5_gameplay.h"
-#endif
 
 extern CGameClientShell* g_pGameClientShell;
 
@@ -1414,7 +1410,6 @@ void CPlayerStats::DrawPlayerStats(HSURFACE hScreen, int nLeft, int nTop, int nR
 		{
 			if (g_pInterfaceMgr->GetSunglassMode() == SUN_NONE)
 				DrawScope(hScreen,nLeft,nTop,nRight,nBottom);
-#ifdef NOLFSRC_MODERN
 			else
 			{
 				// M-P3-21: zoomed through the sunglasses the scope's mask
@@ -1422,7 +1417,6 @@ void CPlayerStats::DrawPlayerStats(HSURFACE hScreen, int nLeft, int nTop, int nR
 				// DrawScope does (M-P3-02)
 				P3_DrawSideBars(hScreen, SETRGB(0,0,0));
 			}
-#endif
 		} break;
 
 	case OVM_SCUBA:
@@ -1451,180 +1445,12 @@ void CPlayerStats::DrawPlayerStats(HSURFACE hScreen, int nLeft, int nTop, int nR
 	}
 
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-14: the frame-rate counter
 	P3_DrawFramerate(hScreen);
 
 	// M-P3-12: the bound weapons, damage icons, air meter, health, armour
 	// and ammo, scaled with the screen
 	P3DrawHUD(hScreen, bShowStats);
-#else
-	DrawBoundWeapons(hScreen);
-
-	CDamageFXMgr *pDFX = g_pGameClientShell->GetDamageFXMgr();
-	if (pDFX)
-	{
-		int nDamageX = (int) ((float)m_DamageBasePos.x * xRatio);
-		int nDamageY = (int) ((float)m_DamageBasePos.y * yRatio);
-		if (pDFX->IsBleeding())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hBleeding, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-		if (pDFX->IsPoisoned())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hPoisoned, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-		if (pDFX->IsStunned())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hStunned, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-		if (pDFX->IsSleeping())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hSleeping, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-		if (pDFX->IsBurning())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hBurning, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-		if (pDFX->IsChoking())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hChoking, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-		if (pDFX->IsElectrocuted())
-		{
-			g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hElectrocute, LTNULL, nDamageX, nDamageY, hTransColor);
-			nDamageY += m_nDamageIconSize;
-		}
-
-	}
-
-
-	// draw air meter if we have less than 100% air
-
-	if (m_fAirPercent < 1.0f)
-	{
-		int nAirX = (int) ((float)m_AirBasePos.x * xRatio);
-		int nAirY = (int) ((float)m_AirBasePos.y * yRatio);
-		if (m_bUseAirBar)
-		{
-			int nBarX = nAirX + m_AirBarOffset.x;
-			int nBarY = nAirY + m_AirBarOffset.y;
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hHUDAir, LTNULL, nBarX, nBarY, hTransColor);
-			if (m_fAirPercent < 0.25f)
-			{
-                LTRect rcPower = m_rcAir;
-				rcPower.left += nBarX;
-				rcPower.top += nBarY;
-				rcPower.right = rcPower.left + (int)(100.0f * m_fAirPercent);
-				rcPower.bottom += nBarY;
-                g_pLTClient->ScaleSurfaceToSurfaceTransparent(hScreen, m_hAirBar, &rcPower, &m_rcAirBar, kTransBlack);
-			}
-		}
-		if (m_bUseAirIcon)
-		{
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hAirIcon, LTNULL, nAirX+m_AirIconOffset.x, nAirY+m_AirIconOffset.y, hTransColor);
-		}
-		if (m_bUseAirText)
-		{
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hAirStr, LTNULL, nAirX+m_AirTextOffset.x, nAirY+m_AirTextOffset.y, hTransColor);
-		}
-	}
-
-	// draw the HUD
-	if (bShowStats)
-	{
-		int nHealthX = (int) ((float)m_HealthBasePos.x * xRatio);
-		int nHealthY = (int) ((float)m_HealthBasePos.y * yRatio);
-		if (m_bUseHealthBar)
-		{
-			int nBarX = nHealthX + m_HealthBarOffset.x;
-			int nBarY = nHealthY + m_HealthBarOffset.y;
-
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hHUDHealth, NULL, nBarX, nBarY, hTransColor);
-			// draw flashing health as required
-			if (m_bHealthFlash ||  (m_nHealth <= (m_nMaxHealth/10)))
-			{
-                LTRect rcTemp = m_rcHealth;
-				rcTemp.left += nBarX;
-				rcTemp.top += nBarY;
-				rcTemp.right += nBarX;
-				rcTemp.bottom += nBarY;
-
-                g_pLTClient->ScaleSurfaceToSurfaceTransparent(hScreen, m_hHealthBar, &rcTemp, &m_rcHealthBar, kTransBlack);
-			}
-
-			// draw flashing Armor as required
-			if (m_bArmorFlash )
-			{
-                LTRect rcTemp = m_rcArmor;
-				rcTemp.left += nBarX;
-				rcTemp.top += nBarY;
-				rcTemp.right += nBarX;
-				rcTemp.bottom += nBarY;
-
-                g_pLTClient->ScaleSurfaceToSurfaceTransparent(hScreen, m_hArmorBar, &rcTemp, &m_rcArmorBar, kTransBlack);
-			}
-			UpdateFlash();
-		}
-		if (m_bUseHealthIcon)
-		{
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hHealthIcon, LTNULL, nHealthX + m_HealthIconOffset.x, nHealthY + m_HealthIconOffset.y, hTransColor);
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hArmorIcon, LTNULL, nHealthX + m_ArmorIconOffset.x , nHealthY + m_ArmorIconOffset.y, hTransColor);
-		}
-		if (m_bUseHealthText)
-		{
-			char szStr[5] = "";
-			sprintf(szStr,"%d",m_nHealth);
-			g_pForeFont->Draw(szStr, hScreen, nHealthX + m_HealthTextOffset.x+1, nHealthY + m_HealthTextOffset.y+1, LTF_JUSTIFY_LEFT);
-			g_pForeFont->Draw(szStr, hScreen, nHealthX + m_HealthTextOffset.x, nHealthY + m_HealthTextOffset.y, LTF_JUSTIFY_LEFT,hHealthTint);
-
-			sprintf(szStr,"%d",m_nArmor);
-			g_pForeFont->Draw(szStr, hScreen, nHealthX + m_ArmorTextOffset.x+1, nHealthY + m_ArmorTextOffset.y+1, LTF_JUSTIFY_LEFT);
-			g_pForeFont->Draw(szStr, hScreen, nHealthX + m_ArmorTextOffset.x, nHealthY + m_ArmorTextOffset.y, LTF_JUSTIFY_LEFT,hArmorTint);
-		}
-
-		// Don't draw the ammo if the weapon is diabled...
-
-		CWeaponModel* pWeapon = g_pGameClientShell->GetWeaponModel();
-		if (!pWeapon) return;
-
-		if (m_bDrawAmmo && !pWeapon->IsDisabled())
-		{
-			// Only display ammo icons for weapons with infinite ammo...
-
-			WEAPON* pW = g_pWeaponMgr->GetWeapon(m_nCurrentWeapon);
-			if (!pW) return;
-
-			int nAmmoX = (int) ((float)m_AmmoBasePos.x * xRatio);
-			int nAmmoY = (int) ((float)m_AmmoBasePos.y * yRatio);
-			if (m_bUseAmmoBar && !pW->bInfiniteAmmo)
-			{
-                g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hHUDAmmo, NULL, (nAmmoX + m_AmmoBarOffset.x) - m_rcAmmoHUD.right, nAmmoY + m_AmmoBarOffset.y, hTransColor);
-			}
-
-			if (m_hAmmoIcon)
-			{
-				g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hAmmoIcon, LTNULL, nAmmoX+m_AmmoIconOffset.x, nAmmoY+m_AmmoIconOffset.y, hTransColor);
-			}
-
-			if (m_bUseAmmoText && !pW->bInfiniteAmmo)
-			{
-				char str[20];
-				int nAmmoInClip = g_pGameClientShell->GetWeaponModel()->GetAmmoInClip();
-				int nAmmo = m_pnAmmo[m_nCurrentAmmo] - nAmmoInClip;
-				sprintf(str,"%d/%d", nAmmoInClip, nAmmo < 0 ? 0 : nAmmo);
-				g_pForeFont->Draw(str, hScreen, nAmmoX+m_AmmoTextOffset.x+1, nAmmoY+m_AmmoTextOffset.y+1, LTF_JUSTIFY_LEFT);
-				g_pForeFont->Draw(str, hScreen, nAmmoX+m_AmmoTextOffset.x, nAmmoY+m_AmmoTextOffset.y, LTF_JUSTIFY_LEFT,hAmmoTint);
-			}
-		}
-	}
-#endif
 
 }
 
@@ -2582,12 +2408,8 @@ void CPlayerStats::UpdateAmmoSurfaces()
 	int nWidth  = Max(nClipWidth,nBarWidth) + abs(m_AmmoClipOffset.y) + 2;
 	int nHeight = Max(m_AmmoSz.y,m_nBarHeight) + abs(m_AmmoClipOffset.y) + 2;
 
-#ifdef NOLFSRC_MODERN
 	// M-P5-10: no wider than the screen (the camera disabler's clip is 10000)
 	if (P5_FitAmmoHUD(nWidth, nHeight, m_rcAmmoHUD))
-#else
-	if (nWidth > m_rcAmmoHUD.right || nHeight > m_rcAmmoHUD.bottom)
-#endif
 	{
 		if (m_hHUDAmmo)
             g_pLTClient->DeleteSurface (m_hHUDAmmo);
@@ -2792,10 +2614,8 @@ void CPlayerStats::DrawScope(HSURFACE hScreen, int nLeft, int nTop, int nRight, 
 	int cx = nLeft + (nScreenWidth) / 2;
 	int cy = nTop + (nScreenHeight) / 2;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-02: the scope covers the 4:3 area; black out the world beside it
 	P3_DrawSideBars(hScreen, kBlack);
-#endif
 	int nRadius = (int)( g_vtScopeLRRadius.GetFloat() * (float)nScreenHeight );
 
     LTRect srect;
@@ -4132,7 +3952,6 @@ void CPlayerStats::DrawBoundWeapons(HSURFACE hScreen)
 	}
 }
 
-#ifdef NOLFSRC_MODERN
 // ----------------------------------------------------------------------- //
 //
 //	M-P3-12: the HUD scaled by UIScale times the screen's height ratio.
@@ -4341,7 +4160,6 @@ void CPlayerStats::P3DrawBoundWeapons(HSURFACE hScreen, float fScale)
 		y += nIconSize;
 	}
 }
-#endif
 
 // --------------------------------------------------------------------------- //
 //

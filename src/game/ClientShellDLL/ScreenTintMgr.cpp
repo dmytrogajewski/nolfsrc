@@ -14,10 +14,8 @@
 #include "ScreenTintMgr.h"
 #include "GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 // M-P1-10: Intel graphics fix
 #include "cshell/p1_modern.h"
-#endif
 
 
 CScreenTintMgr::CScreenTintMgr()
@@ -27,27 +25,22 @@ CScreenTintMgr::CScreenTintMgr()
 		m_avTints[i].Init(0.0f,0.0f,0.0f);
 	}
     m_bChanged = LTFALSE;
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: the overlay tint
 	m_bP1Overlay = LTFALSE;
 	m_vP1Tint.Init(0.0f,0.0f,0.0f);
 	m_hP1Surface = LTNULL;
 	m_bP1SurfaceOld = LTTRUE;
-#endif
 }
 
 CScreenTintMgr::~CScreenTintMgr()
 {
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: the overlay tint
 	if (m_hP1Surface && g_pLTClient)
 		g_pLTClient->DeleteSurface(m_hP1Surface);
-#endif
 }
 
 void CScreenTintMgr::Update()
 {
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: switching between the camera tint and the overlay redoes it
 	LTBOOL bP1Overlay = P1Config_ScreenTinting() ? LTFALSE : LTTRUE;
 	if (bP1Overlay != m_bP1Overlay)
@@ -55,7 +48,6 @@ void CScreenTintMgr::Update()
 		m_bP1Overlay = bP1Overlay;
 		m_bChanged = LTTRUE;
 	}
-#endif
 	if (!m_bChanged)
 		return;
 
@@ -76,7 +68,6 @@ void CScreenTintMgr::Update()
 		vTemp.z = 1.0f;
     m_bChanged = LTFALSE;
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: as an overlay, P1DrawOverlay draws it and the camera has none
 	if (m_vP1Tint.x != vTemp.x || m_vP1Tint.y != vTemp.y || m_vP1Tint.z != vTemp.z)
 	{
@@ -87,7 +78,6 @@ void CScreenTintMgr::Update()
 	{
 		vTemp.Init(0.0f,0.0f,0.0f);
 	}
-#endif
 	HLOCALOBJ hCamera = g_pGameClientShell->GetCamera();
     g_pLTClient->SetCameraLightAdd(hCamera, &vTemp);
 
@@ -112,7 +102,6 @@ void CScreenTintMgr::ClearAll()
 		Clear((eTintEffect)i);
 	}
 }
-#ifdef NOLFSRC_MODERN
 // ----------------------------------------------------------------------- //
 //
 //	M-P1-10: the screen tint as a 2D overlay
@@ -167,4 +156,3 @@ void CScreenTintMgr::P1Invalidate()
 {
 	m_bP1SurfaceOld = LTTRUE;
 }
-#endif

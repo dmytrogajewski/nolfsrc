@@ -97,7 +97,6 @@ private:
 
 	CMoArray<FolderDisplayRenderer>	m_rendererArray;		// The array of renderers
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-06, M-P1-22: the window mode (P1_WINDOW_*)
 	int								m_nP1WindowMode;
 	CCycleCtrl*						m_pP1WindowModeCtrl;
@@ -106,7 +105,6 @@ private:
 	LTBOOL							m_bP1IntelFix;
 	CToggleCtrl*					m_pP1IntelFixCtrl;
 	void							P1UpdateIntelFix();		// enabled for the renderer selected
-#endif
 
 };
 

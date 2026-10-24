@@ -236,7 +236,6 @@ LTBOOL CParticleSystemFX::Update()
 	fTimeDelta = fTimeDelta > 0.0666f ? 0.0666f : fTimeDelta;
 	int nToAdd = (int) floor(m_cs.fParticlesPerSecond * fTimeDelta);
     nToAdd = LTMIN(nToAdd, (int)(MAX_PARTICLES_PER_SECOND * fTimeDelta));
-#ifdef NOLFSRC_MODERN
 	// The count is rounded down and the clock restarted every update, so at
 	// a frame rate where a frame owes less than one particle none is ever
 	// added: keep the time until one is owed (RETAIL_BUGS.md).
@@ -244,7 +243,6 @@ LTBOOL CParticleSystemFX::Update()
 	{
         return LTTRUE;
 	}
-#endif
 
 	nToAdd = GetNumParticles(nToAdd);
 

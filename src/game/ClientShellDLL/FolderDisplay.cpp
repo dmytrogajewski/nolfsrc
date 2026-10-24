@@ -16,10 +16,8 @@
 #include "GameClientShell.h"
 #include "GameSettings.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 // M-P1-06, M-P1-22, M-P1-10: the window mode, Intel graphics fix
 #include "cshell/p1_modern.h"
-#endif
 
 namespace
 {
@@ -91,14 +89,12 @@ CFolderDisplay::CFolderDisplay()
     m_pRendererCtrl     = LTNULL;
     m_pResolutionCtrl   = LTNULL;
 	m_pHardwareCursor	= LTNULL;
-#ifdef NOLFSRC_MODERN
 	// M-P1-06, M-P1-22, M-P1-10: the window mode, Intel graphics fix
 	m_nP1WindowMode		= P1_WINDOW_FULLSCREEN;
 	m_pP1WindowModeCtrl	= LTNULL;
 	m_bP1ForceModeSet	= LTFALSE;
 	m_bP1IntelFix		= LTFALSE;
 	m_pP1IntelFixCtrl	= LTNULL;
-#endif
 }
 
 CFolderDisplay::~CFolderDisplay()
@@ -145,7 +141,6 @@ LTBOOL CFolderDisplay::Build()
 	// Setup the resolution control based on the currently selected renderer
 	SetupResolutionCtrl();
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-06, M-P1-22: the window mode: full screen, a window, or a
 	// borderless window (at the desktop's resolution, so the resolution
 	// list is greyed out for it)
@@ -154,7 +149,6 @@ LTBOOL CFolderDisplay::Build()
 	m_pP1WindowModeCtrl->AddString(IDS_P1_WINDOW_WINDOWED);
 	m_pP1WindowModeCtrl->AddString(IDS_P1_WINDOW_BORDERLESS);
 	m_pP1WindowModeCtrl->NotifyOnChange(FOLDER_CMD_UPDATE,this);
-#endif
 	CToggleCtrl *pToggle = AddToggle(IDS_DISPLAY_TEXTURE,IDS_HELP_TEXTUREDEPTH,175,&m_bTexture32);
 	pToggle->SetOnString(IDS_DISPLAY_32BIT);
 	pToggle->SetOffString(IDS_DISPLAY_16BIT);
@@ -163,12 +157,10 @@ LTBOOL CFolderDisplay::Build()
 	m_pHardwareCursor->SetOnString(IDS_ON);
 	m_pHardwareCursor->SetOffString(IDS_OFF);
 	
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: Intel graphics fix, for d3d7.ren only (P1UpdateIntelFix)
 	m_pP1IntelFixCtrl = AddToggle(IDS_P1_INTELFIX,IDS_P1_HELP_INTELFIX,175,&m_bP1IntelFix);
 	m_pP1IntelFixCtrl->SetOnString(IDS_ON);
 	m_pP1IntelFixCtrl->SetOffString(IDS_OFF);
-#endif
 
 
 	CalculateLastDrawn();
@@ -191,7 +183,6 @@ void CFolderDisplay::Escape()
 
 uint32 CFolderDisplay::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwParam2)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P1-22: a borderless window is at the desktop's resolution
 	if (dwCommand == FOLDER_CMD_UPDATE)
 	{
@@ -200,7 +191,6 @@ uint32 CFolderDisplay::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwPar
 			m_pResolutionCtrl->Enable(m_nP1WindowMode != P1_WINDOW_BORDERLESS);
 		return 1;
 	}
-#endif
 	return CBaseFolder::OnCommand(dwCommand,dwParam1,dwParam2);
 };
 
@@ -284,14 +274,12 @@ void CFolderDisplay::BuildRendererArray()
 
 	// Build the list of render modes
     RMode *pRenderModes=g_pLTClient->GetRenderModes();
-#ifdef NOLFSRC_MODERN
 	// M-P1-07: the mode in use
 	RMode p1InUse;
 	if (g_pLTClient->GetRenderMode(&p1InUse) != LT_OK)
 	{
 		p1InUse.m_BitDepth = 0;
 	}
-#endif
 
 	// Iterate through the list of render modes adding each one to the array
 	RMode *pCurrentMode=pRenderModes;
@@ -299,7 +287,6 @@ void CFolderDisplay::BuildRendererArray()
 	{
 		if (pCurrentMode->m_Width >= 640 && pCurrentMode->m_Height >= 480)
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P1-07: every aspect ratio (wide screens' native modes), but
 			// no 16-bit modes -- unless it is the one in use, so that
 			// opening this folder does not change the mode by itself
@@ -307,11 +294,6 @@ void CFolderDisplay::BuildRendererArray()
 				!(pCurrentMode->m_Width == p1InUse.m_Width &&
 				  pCurrentMode->m_Height == p1InUse.m_Height &&
 				  p1InUse.m_BitDepth == 16))
-#else
-			// disallow non-standard aspect ratios
-			uint32 testWidth = (pCurrentMode->m_Height * 4 / 3);
-			if (pCurrentMode->m_Width != testWidth)
-#endif
 			{
 			
 				// Go to the next render mode
@@ -424,7 +406,6 @@ LTBOOL CFolderDisplay::SetRenderer(int nRendererIndex, int nResolutionIndex)
 {
 	// Get the new renderer structure
 	RMode newMode=GetRendererModeStruct(nRendererIndex, nResolutionIndex);
-#ifdef NOLFSRC_MODERN
 	// M-P1-22: a borderless window is at the desktop's resolution
 	if (m_nP1WindowMode == P1_WINDOW_BORDERLESS)
 	{
@@ -433,18 +414,13 @@ LTBOOL CFolderDisplay::SetRenderer(int nRendererIndex, int nResolutionIndex)
 		newMode.m_Width  = (uint32)nDeskW;
 		newMode.m_Height = (uint32)nDeskH;
 	}
-#endif
 
 	// If the current renderer is the same as the one we are changing to, then don't set the renderer!
 	RMode currentMode;
     if (g_pLTClient->GetRenderMode(&currentMode) == LT_OK)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P1-06: switching to or from a window needs the mode set again
 		if (IsRendererEqual(&newMode, &currentMode) && !m_bP1ForceModeSet)
-#else
-		if (IsRendererEqual(&newMode, &currentMode))
-#endif
 		{
             return LTFALSE;
 		}
@@ -553,12 +529,10 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 
 		m_bHardwareCursor = (GetConsoleInt("HardwareCursor",0) > 0 && GetConsoleInt("DisableHardwareCursor",0) == 0);
 		m_pHardwareCursor->Enable(GetConsoleInt("DisableHardwareCursor",0) == 0);
-#ifdef NOLFSRC_MODERN
 		// M-P1-06, M-P1-22, M-P1-10: the window mode, Intel graphics fix
 		m_nP1WindowMode = P1Window_GetMode();
 		m_pResolutionCtrl->Enable(m_nP1WindowMode != P1_WINDOW_BORDERLESS);
 		m_bP1IntelFix = P1Config_IntelFixOn();
-#endif
 
 		// The current render mode
 		RMode currentMode;
@@ -586,7 +560,6 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 				}
 			}
 		}
-#ifdef NOLFSRC_MODERN
 		// M-P1-22: a mode not in the list (16-bit, from the command line)
 		// left the first renderer selected, which leaving the folder then
 		// set; take the renderer in use, at the size in use if listed.
@@ -619,16 +592,13 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 				break;
 			}
 		}
-#endif
 		m_bTexture32 = pSettings->GetBoolVar("32BitTextures");
 	
 
         UpdateData(LTFALSE);
 		SetSelection(1);
-#ifdef NOLFSRC_MODERN
 		// M-P1-10: the Intel graphics fix is for d3d7.ren only
 		P1UpdateIntelFix();
-#endif
 
 	}
 	else
@@ -641,7 +611,6 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 			LTBOOL bTexture32 = pSettings->GetBoolVar("32BitTextures");
 
 			WriteConsoleInt("HardwareCursor",(int)m_bHardwareCursor);
-#ifdef NOLFSRC_MODERN
 			// M-P1-10: Intel graphics fix -- no light scaling, the tint as
 			// an overlay
 			if (P1Config_IntelFixOn() != (m_bP1IntelFix ? true : false))
@@ -657,7 +626,6 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 				P1Window_SetMode(m_nP1WindowMode);
 				m_bP1ForceModeSet = LTTRUE;
 			}
-#endif
 
 			pSettings->SetBoolVar("32BitTextures",m_bTexture32);
 
@@ -671,14 +639,12 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 				int oldMO = (int)pSettings->GetFloatVar("MipmapOffset");
 
 				LTBOOL bSet = SetRenderer(m_pRendererCtrl->GetSelIndex(), m_pResolutionCtrl->GetSelIndex());
-#ifdef NOLFSRC_MODERN
 				// M-P1-06: windowed mode
 				m_bP1ForceModeSet = LTFALSE;
 
 				// M-P1-10: the Intel graphics fix follows the renderer
 				if (bSet)
 					g_pGameClientShell->GetLightScaleMgr()->Enable();
-#endif
 
 				// If we didn't switch resolutions and the mipmap offset changed, rebind textures.
 				if(!bSet)
@@ -719,7 +685,6 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 	CBaseFolder::OnFocus(bFocus);
 }
 
-#ifdef NOLFSRC_MODERN
 // M-P1-10: the Intel graphics fix works around Intel's DirectX 7 driver,
 // which only d3d7.ren draws through: the toggle is greyed out for any
 // other renderer selected (and the fix does not apply there, P1Config_*).
@@ -734,7 +699,6 @@ void CFolderDisplay::P1UpdateIntelFix()
 
 	m_pP1IntelFixCtrl->Enable(bD3D7 ? LTTRUE : LTFALSE);
 }
-#endif
 
 // Returns the currently selected resolution
 FolderDisplayResolution CFolderDisplay::GetCurrentSelectedResolution()
@@ -817,10 +781,8 @@ LTBOOL CFolderDisplay::OnLButtonUp(int x, int y)
 					if (handled)
 					{
 						SetupResolutionCtrl();
-#ifdef NOLFSRC_MODERN
 						// M-P1-10: the Intel graphics fix is for d3d7.ren only
 						P1UpdateIntelFix();
-#endif
 
 						// Set the resolution for the control
 						SetCurrentCtrlResolution(currentResolution);
@@ -874,10 +836,8 @@ LTBOOL CFolderDisplay::OnRButtonUp(int x, int y)
 					if (handled)
 					{
 						SetupResolutionCtrl();
-#ifdef NOLFSRC_MODERN
 						// M-P1-10: the Intel graphics fix is for d3d7.ren only
 						P1UpdateIntelFix();
-#endif
 						// Set the resolution for the control
 						SetCurrentCtrlResolution(currentResolution);
 					}
@@ -906,11 +866,9 @@ LTBOOL CFolderDisplay::OnRButtonUp(int x, int y)
 LTBOOL CFolderDisplay::OnLeft()
 {
 	if (!CBaseFolder::OnLeft()) return LTFALSE;
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: the Intel graphics fix is for d3d7.ren only
 	if (GetSelectedControl() == m_pRendererCtrl)
 		P1UpdateIntelFix();
-#endif
 	if (GetSelectedControl() == m_pHardwareCursor)
 	{
 		m_pHardwareCursor->UpdateData(LTTRUE);
@@ -931,11 +889,9 @@ LTBOOL CFolderDisplay::OnLeft()
 LTBOOL CFolderDisplay::OnRight()
 {
 	if (!CBaseFolder::OnRight()) return LTFALSE;
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: the Intel graphics fix is for d3d7.ren only
 	if (GetSelectedControl() == m_pRendererCtrl)
 		P1UpdateIntelFix();
-#endif
 	if (GetSelectedControl() == m_pHardwareCursor)
 	{
 		m_pHardwareCursor->UpdateData(LTTRUE);

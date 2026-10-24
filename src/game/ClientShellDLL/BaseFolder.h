@@ -15,10 +15,8 @@
 #include "dynarray.h"
 #include "BaseScaleFX.h"
 #include "StaticTextCtrl.h"
-#ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution (every folder draws through it)
 #include "cshell/p3_ui.h"
-#endif
 
 
 #define MAX_INT_ATTACHMENTS 5
@@ -219,10 +217,8 @@ protected:
     virtual LTBOOL   OnDown();
     virtual LTBOOL   OnLeft();
     virtual LTBOOL   OnRight();
-#ifdef NOLFSRC_MODERN
     // M-P7-05: left and right between the fixed controls of a row
     LTBOOL          StepFixedRow(int nDir);
-#endif
     virtual LTBOOL   OnEnter();
     virtual LTBOOL   OnPageUp();
     virtual LTBOOL   OnPageDown();

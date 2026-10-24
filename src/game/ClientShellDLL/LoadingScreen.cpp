@@ -16,14 +16,10 @@
 #include "GameClientShell.h"
 #include "WinUtil.h"
 #include "BaseFolder.h"
-#ifdef NOLFSRC_MODERN
 // M-P1-01, M-P1-11: loading-screen timing
 #include "cshell/p1_modern.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P2-03 / M-P2-12: console lock, speed-run is-loading flag
 #include "cshell/p2_client.h"
-#endif
 
 extern CGameClientShell* g_pGameClientShell;
 
@@ -65,11 +61,7 @@ void CLoadingScreen::CreateScaleFX(char *szFXName)
 		{
 			LTVector vNewPos;
 			g_pLTClient->GetObjectPos(hSFX, &vNewPos);
-#ifdef NOLFSRC_MODERN
 			// M-P3-01: keeps its depth, as the scaled menu page fills the screen's height
-#else
-			vNewPos.z *= g_pInterfaceResMgr->GetXRatio();
-#endif
 			g_pLTClient->SetObjectPos(hSFX, &vNewPos);
 		}
 	}
@@ -106,11 +98,7 @@ void CLoadingScreen::CreateCharFX(INT_CHAR *pChar)
 	    g_pLTClient->RotateAroundAxis(&rRot, &m_vU, fRot);
 
 		VEC_MULSCALAR(vTemp, m_vF, vModPos.z);
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: keeps its depth, as the scaled menu page fills the screen's height
-#else
-		VEC_MULSCALAR(vTemp, vTemp, g_pInterfaceResMgr->GetXRatio());
-#endif
 		VEC_ADD(vPos, vPos, vTemp);
 
 		VEC_MULSCALAR(vTemp, m_vR, vModPos.x);
@@ -344,16 +332,9 @@ LTBOOL CLoadingScreen::Init()
 	m_TextPos = g_pLayoutMgr->GetLoadStringPos();
 	m_PhotoPos = g_pLayoutMgr->GetLoadPhotoPos();
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-05: at their places in the 4:3 area
 	m_TextPos = P3_MenuPos(m_TextPos);
 	m_PhotoPos = P3_MenuPos(m_PhotoPos);
-#else
-	m_TextPos.x += g_pInterfaceResMgr->GetXOffset();
-	m_TextPos.y +=  g_pInterfaceResMgr->GetYOffset();
-	m_PhotoPos.x += g_pInterfaceResMgr->GetXOffset();
-	m_PhotoPos.y +=  g_pInterfaceResMgr->GetYOffset();
-#endif
 
 	// Remember whether or not we're in multiplayer
 	m_bDrawMultiplayer = g_pGameClientShell->IsMultiplayerGame();// && g_pInterfaceMgr->IsFragCountDrawn();
@@ -417,14 +398,9 @@ LTBOOL CLoadingScreen::Update()
 
 //		g_pInterfaceMgr->GetClientInfoMgr()->Draw(LTTRUE, LTTRUE);
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-05: the mission photo scaled with the page
 	if (m_hWorldPhoto)
 		P3_DrawScaledSolid(hDestSurf,m_hWorldPhoto,m_PhotoPos.x,m_PhotoPos.y,P3_MenuScale());
-#else
-	if (m_hWorldPhoto)
-		g_pLTClient->DrawSurfaceToSurface(hDestSurf,m_hWorldPhoto,LTNULL,m_PhotoPos.x,m_PhotoPos.y);
-#endif
 
 	CLTGUIFont *pFont = g_pInterfaceResMgr->GetTitleFont();
 	
@@ -466,10 +442,8 @@ LTBOOL CLoadingScreen::Update()
 
 	if (xo > 0)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P3-22: the side margins black, as the menus'
 		hShadeColor = SETRGB(0,0,0);
-#endif
 		rect.left = 0;
 		rect.right = xo;
 		rect.top = yo;
@@ -530,10 +504,8 @@ LTBOOL CLoadingScreen::Show(LTBOOL bRun)
 	// Go into the right state..
 	m_eCurState = STATE_SHOW;
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-03 / M-P2-12: a loading screen is up
 	P2_OnLoadingScreen(LTTRUE);
-#endif
 	// Update once so the screen's showing
 	Update();
 
@@ -577,10 +549,8 @@ LTBOOL CLoadingScreen::Hide()
 	// Change state
 	m_eCurState = STATE_INIT;
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-03 / M-P2-12: and gone again
 	P2_OnLoadingScreen(LTFALSE);
-#endif
 	// Clean up
 	Term();
 

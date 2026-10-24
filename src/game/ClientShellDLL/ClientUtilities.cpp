@@ -41,14 +41,10 @@ bool IsKeyDown(int key) {
     }
     return key >= 0 && key < int(client_keys.size()) && client_keys[std::size_t(key)];
 }
-#ifdef NOLFSRC_MODERN
 // M-P2-03: the console key's strings
 #include "cres/p2.h"
-#endif
-#ifdef NOLFSRC_MODERN
 // M-P5-13: the toggle-zoom control's strings
 #include "cres/p5.h"
-#endif
 
 extern CGameClientShell* g_pGameClientShell;
 
@@ -89,14 +85,10 @@ CommandID g_CommandArray[] =
 	{ IDS_CONTROL_CROSSHAIRTOGGLE,	COMMAND_ID_CROSSHAIRTOGGLE,	IDS_ACTIONSTRING_CROSSHAIRTOGGLE,	COM_MISC },
 	{ IDS_CONTROL_SAY,				COMMAND_ID_MESSAGE,			IDS_ACTIONSTRING_SAY,				COM_MISC },
 	{ IDS_CONTROL_TEAM_SAY,			COMMAND_ID_TEAM_MESSAGE,	IDS_ACTIONSTRING_TEAM_SAY,			COM_MISC },
-#ifdef NOLFSRC_MODERN
 	// M-P5-13: toggle zoom
 	{ IDS_P5_CONTROL_TOGGLE_ZOOM,	COMMAND_ID_TOGGLE_ZOOM,		IDS_P5_ACTIONSTRING_TOGGLE_ZOOM,	COM_VIEW },
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P2-03: the developer console
 	{ IDS_CONTROL_CONSOLE,			COMMAND_ID_TOGGLE_CONSOLE,	IDS_ACTIONSTRING_CONSOLE,			COM_MISC },
-#endif
 
 	// This control must always remain as the last one in the array
 	{ IDS_CONTROL_UNASSIGNED,		COMMAND_ID_UNASSIGNED,		IDS_ACTIONSTRING_UNASSIGNED,		COM_MISC }
@@ -498,7 +490,6 @@ namespace
 		"Space", VK_SPACE,
 		"CapsLock", VK_CAPITAL,
 
-#ifdef NOLFSRC_MODERN
 		// M-P2-03: keys the console can be bound to. DirectInput names a key
 		// after the system's keyboard layout, so the key left of 1 has
 		// several names; 0xC0 is VK_OEM_3, which VC6's headers lack.
@@ -511,7 +502,6 @@ namespace
 		"NumLock", VK_NUMLOCK,
 		"Insert", VK_INSERT,
 		"Delete", VK_DELETE,
-#endif
 		"",-999,
 	};
 }

@@ -47,6 +47,17 @@ void checks() {
     auto again=tracked(41,0x1); again.u16(5).u8(1).u16(PLAYSOUND_LOOP).u32(0);
     sync.apply(8,again.data,files); sync.reset();
     require(stopped.size()==2 && stopped[1]==reinterpret_cast<HLTSOUND>(2),"world reset left a server sound playing");
+    // A one-shot sound sends its flags only when they change, and the server
+    // remembers what it sent for the whole connection: after a world reset
+    // the next play of the same file still parses with them.
+    std::vector<std::pair<uint8,uint32>> heard;
+    events={}; events.sound=[&](PlaySoundInfo& info,const std::string&,float) -> HLTSOUND { heard.push_back({info.m_nVolume,info.m_UserData}); return nullptr; };
+    nolf::ClientWorldSync one_shots(std::make_shared<nolf::ClientScene>(),std::make_shared<nolf::Resources>(root),engine,events);
+    Bytes first; first.u8(0).u8(0).u16(5).u8(1).u16(PLAYSOUND_CTRL_VOL).u8(40).u32(7);
+    one_shots.apply(8,first.data,files); one_shots.reset();
+    Bytes repeat; repeat.u8(0).u8(0).u16(5).u8(0).u8(60).u32(9);
+    one_shots.apply(8,repeat.data,files);
+    require(heard.size()==2 && heard[0]==std::pair<uint8,uint32>{40,7} && heard[1]==std::pair<uint8,uint32>{60,9},"world reset forgot a sound's sent flags");
 }
 }
 int main() { try { checks(); std::cout<<"Native world sync tracked sounds play and stop on removal and on reset\n"; return 0; } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; } }

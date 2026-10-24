@@ -10,7 +10,11 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "Explosion.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -294,9 +298,10 @@ uint32 Explosion::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREA
 	{
  		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
-			if ((stricmp(szMsg, "START") == 0) || (stricmp(szMsg, "ON") == 0))
+			if ((nolf::ascii_compare(szMsg, "START") == 0) || (nolf::ascii_compare(szMsg, "ON") == 0))
 			{
 				Start();
 			}
@@ -655,7 +660,7 @@ LTRESULT CExplosionPlugin::PreHook_EditStringList(const char* szRezPath,
 {
 	// See if we can handle the property...
 
-	if (_strcmpi("ImpactFXName", szPropName) == 0)
+	if (nolf::ascii_compare("ImpactFXName", szPropName) == 0)
 	{
 		m_FXButeMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
@@ -665,10 +670,10 @@ LTRESULT CExplosionPlugin::PreHook_EditStringList(const char* szRezPath,
 
 		return LT_OK;
 	}
-	else if (_strcmpi("DamageType", szPropName) == 0)
+	else if (nolf::ascii_compare("DamageType", szPropName) == 0)
 	{
 	   if (!aszStrings || !pcStrings) return LT_UNSUPPORTED;
-		_ASSERT(aszStrings && pcStrings);
+		GAME_ASSERT(aszStrings && pcStrings);
 
 		// Add an entry for each supported damage type
 
@@ -676,7 +681,7 @@ LTRESULT CExplosionPlugin::PreHook_EditStringList(const char* szRezPath,
 		{
 			if (!DTInfoArray[i].bGadget)
 			{
-				_ASSERT(cMaxStrings > (*pcStrings) + 1);
+				GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 				uint32 dwNameLen = strlen(DTInfoArray[i].pName);
 

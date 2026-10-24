@@ -10,10 +10,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "PlayerObj.h"
 #include "iltserver.h"
-#include "CommandIds.h"
+#include "CommandIDs.h"
 #include "ServerUtilities.h"
 #include "HHWeaponModel.h"
 #include "GameServerShell.h"
@@ -478,7 +480,9 @@ LTBOOL CPlayerObj::ProcessTriggerMsg(HMESSAGEREAD hRead)
 {
     LTBOOL bRet = LTFALSE;
 
-	const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+	const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+
+	const char* szMsg = szMsgStorage.c_str();
 
 	char szMsgCopy[1024];
 	strcpy(szMsgCopy, szMsg);
@@ -486,67 +490,67 @@ LTBOOL CPlayerObj::ProcessTriggerMsg(HMESSAGEREAD hRead)
 	char* pMsgType = strtok(szMsgCopy, " ");
 	if (pMsgType)
 	{
-		if (stricmp("Music", pMsgType) == 0)
+		if (nolf::ascii_compare("Music", pMsgType) == 0)
 		{
 			bRet = HandleMusicMessage(szMsg);
 		}
-		else if (stricmp("Objective", pMsgType) == 0)
+		else if (nolf::ascii_compare("Objective", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
 			bRet = HandleObjectiveMessage(pMsgType);
 		}
-		else if (stricmp("Transmission", pMsgType) == 0)
+		else if (nolf::ascii_compare("Transmission", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
 			bRet = HandleTransmissionMessage(pMsgType);
 		}
-		else if (stricmp("Credits", pMsgType) == 0)
+		else if (nolf::ascii_compare("Credits", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
 			bRet = HandleCreditsMessage(pMsgType);
 		}
-		else if (stricmp("Popup", pMsgType) == 0)
+		else if (nolf::ascii_compare("Popup", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
 			bRet = HandlePopupMessage(pMsgType);
 		}
-		else if (stricmp("FadeIn", pMsgType) == 0)
+		else if (nolf::ascii_compare("FadeIn", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
             bRet = HandleFadeScreenMessage(pMsgType, LTTRUE);
 		}
-		else if (stricmp("FadeOut", pMsgType) == 0)
+		else if (nolf::ascii_compare("FadeOut", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
             bRet = HandleFadeScreenMessage(pMsgType, LTFALSE);
 		}
-		else if (stricmp("MissionText", pMsgType) == 0)
+		else if (nolf::ascii_compare("MissionText", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
 			bRet = HandleMissionTextMessage(pMsgType);
 		}
-		else if (stricmp("MissionFailed", pMsgType) == 0)
+		else if (nolf::ascii_compare("MissionFailed", pMsgType) == 0)
 		{
 			pMsgType = strtok(NULL, "");
 			bRet = HandleMissionFailedMessage(pMsgType);
 		}
-		else if (stricmp("LockMusic", pMsgType) == 0 || stricmp("LockMood", pMsgType) == 0)
+		else if (nolf::ascii_compare("LockMusic", pMsgType) == 0 || nolf::ascii_compare("LockMood", pMsgType) == 0)
 		{
             g_pMusicMgr->LockMood();
 		}
-		else if (stricmp("UnlockMusic", pMsgType) == 0 || stricmp("UnlockMood", pMsgType) == 0)
+		else if (nolf::ascii_compare("UnlockMusic", pMsgType) == 0 || nolf::ascii_compare("UnlockMood", pMsgType) == 0)
 		{
 			g_pMusicMgr->UnlockMood();
 		}
-		else if (stricmp("LockEvent", pMsgType) == 0 || stricmp("LockMotif", pMsgType) == 0)
+		else if (nolf::ascii_compare("LockEvent", pMsgType) == 0 || nolf::ascii_compare("LockMotif", pMsgType) == 0)
 		{
             g_pMusicMgr->LockEvent();
 		}
-		else if (stricmp("UnlockEvent", pMsgType) == 0 || stricmp("UnlockMotif", pMsgType) == 0)
+		else if (nolf::ascii_compare("UnlockEvent", pMsgType) == 0 || nolf::ascii_compare("UnlockMotif", pMsgType) == 0)
 		{
 			g_pMusicMgr->UnlockEvent();
 		}
-		else if (stricmp("RemoveBodies", pMsgType) == 0)
+		else if (nolf::ascii_compare("RemoveBodies", pMsgType) == 0)
 		{
 			HCLASS  hClass = g_pLTServer->GetClass("Body");
 			HOBJECT hCurObject = LTNULL;
@@ -641,19 +645,19 @@ LTBOOL CPlayerObj::HandleObjectiveMessage(char* pMsg)
     if (!pArg || !pArg[0]) return LTFALSE;
 
     uint8 nRequest = OBJECTIVE_ADD_ID;
-	if (_stricmp(pArg, "Add") == 0)
+	if (nolf::ascii_compare(pArg, "Add") == 0)
 	{
 		nRequest = OBJECTIVE_ADD_ID;
 	}
-	else if (_stricmp(pArg, "Remove") == 0)
+	else if (nolf::ascii_compare(pArg, "Remove") == 0)
 	{
 		nRequest = OBJECTIVE_REMOVE_ID;
 	}
-	else if (_stricmp(pArg, "RemoveAll") == 0)
+	else if (nolf::ascii_compare(pArg, "RemoveAll") == 0)
 	{
 		nRequest = OBJECTIVE_CLEAR_ID;
 	}
-	else if (_stricmp(pArg, "Completed") == 0)
+	else if (nolf::ascii_compare(pArg, "Completed") == 0)
 	{
 		nRequest = OBJECTIVE_COMPLETE_ID;
 	}
@@ -792,11 +796,11 @@ LTBOOL CPlayerObj::HandleCreditsMessage(char* pMsg)
 
 	uint8 nMsg = 255;
 
-	if (stricmp("OFF", pMsg) == 0)
+	if (nolf::ascii_compare("OFF", pMsg) == 0)
 		nMsg = 0;
-	else if (stricmp("ON", pMsg) == 0)
+	else if (nolf::ascii_compare("ON", pMsg) == 0)
 		nMsg = 1;
-	else if (stricmp("INTRO", pMsg) == 0)
+	else if (nolf::ascii_compare("INTRO", pMsg) == 0)
 		nMsg = 2;
 
 
@@ -3965,11 +3969,11 @@ LTBOOL CPlayerObj::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 
 	// See if we've turned to the dark side...
 
-	if (stricmp(TRIGGER_TRAITOR, pTokens[0]) == 0)
+	if (nolf::ascii_compare(TRIGGER_TRAITOR, pTokens[0]) == 0)
 	{
 		m_cc = BAD;  // We've been a bad boy...
 	}
-	else if (stricmp(TRIGGER_FACEOBJECT, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_FACEOBJECT, pTokens[0]) == 0)
 	{
 		if (nArgs > 1)
 		{
@@ -4018,11 +4022,11 @@ LTBOOL CPlayerObj::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 			}
 		}
 	}
-	else if (stricmp(TRIGGER_RESETINVENTORY, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_RESETINVENTORY, pTokens[0]) == 0)
 	{
 		ResetInventory(LTFALSE);
 	}
-	else if (stricmp(TRIGGER_ACQUIREWEAPON, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_ACQUIREWEAPON, pTokens[0]) == 0)
 	{
 		char buf[256];
 		buf[0] = '\0';
@@ -4034,7 +4038,7 @@ LTBOOL CPlayerObj::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 
 		AcquireWeapon(buf);
 	}
-	else if (stricmp(TRIGGER_ACQUIREGEAR, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_ACQUIREGEAR, pTokens[0]) == 0)
 	{
 		char buf[64];
 		buf[0] = '\0';
@@ -4046,15 +4050,15 @@ LTBOOL CPlayerObj::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 
 		AcquireGear(buf);
 	}
-	else if (stricmp(TRIGGER_CHANGEWEAPON, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_CHANGEWEAPON, pTokens[0]) == 0)
 	{
 		ChangeToWeapon(pTokens[1]);
 	}
-	else if (stricmp(TRIGGER_FULLHEALTH, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_FULLHEALTH, pTokens[0]) == 0)
 	{
 		HealCheat();
 	}
-	else if (stricmp(TRIGGER_DISMOUNT, pTokens[0]) == 0)
+	else if (nolf::ascii_compare(TRIGGER_DISMOUNT, pTokens[0]) == 0)
 	{
 		if (m_ePPhysicsModel != PPM_NORMAL)
 		{

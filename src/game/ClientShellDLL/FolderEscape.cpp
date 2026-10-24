@@ -1,7 +1,7 @@
 // FolderEscape.cpp: implementation of the CFolderEscape class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderEscape.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

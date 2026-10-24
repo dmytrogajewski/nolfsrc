@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "TranslucentWorldModel.h"
 #include "iltserver.h"
 #include "ObjectMsgs.h"
@@ -180,7 +182,8 @@ uint32 TranslucentWorldModel::ObjectMessageFn(HOBJECT hSender, uint32 messageID,
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleTrigger(hSender, szMsg);
 		}
 		break;
@@ -343,7 +346,7 @@ void TranslucentWorldModel::HandleTrigger(HOBJECT hSender, const char* szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], "CHANGEALPHA") == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], "CHANGEALPHA") == 0)
 			{
 				if (parse.m_nArgs > 2 && parse.m_Args[1] && parse.m_Args[2])
 				{
@@ -362,7 +365,7 @@ void TranslucentWorldModel::HandleTrigger(HOBJECT hSender, const char* szMsg)
 					}
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "ON") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "ON") == 0)
 			{
                 uint32 dwUsrFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
                 g_pLTServer->SetObjectUserFlags(m_hObject, dwUsrFlags | USRFLG_VISIBLE);
@@ -370,7 +373,7 @@ void TranslucentWorldModel::HandleTrigger(HOBJECT hSender, const char* szMsg)
                 //uint32 dwFlags = g_pLTServer->GetObjectFlags(m_hObject);
                 //g_pLTServer->SetObjectFlags(m_hObject, dwFlags | FLAG_VISIBLE);
 			}
-			else if (_stricmp(parse.m_Args[0], "OFF") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "OFF") == 0)
 			{
                 uint32 dwUsrFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
                 g_pLTServer->SetObjectUserFlags(m_hObject, dwUsrFlags & ~USRFLG_VISIBLE);

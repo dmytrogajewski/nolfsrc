@@ -17,6 +17,10 @@
 #include "ltbasetypes.h"
 
 extern LTGUID NOLFGUID;
+// Shared by native process hosts and the original game module.
+inline constexpr LTGUID kNolfApplicationGuid = {
+    0x8afa62a1, 0x1ae, 0x11d5, 0xb9, 0x5c, 0x0, 0x60, 0x97, 0x9, 0x83, 0xe
+};
 
 enum GameType
 {

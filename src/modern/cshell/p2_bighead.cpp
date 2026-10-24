@@ -9,7 +9,8 @@
 // After NOLF Modernizer's big head mode (credit there; MODERN.md, P2); our
 // own code. See p2_bighead.h.
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "GameClientShell.h"
 #include "VarTrack.h"
 #include "MsgIDs.h"
@@ -63,7 +64,7 @@ void P2BigHead_ScaleNode(HOBJECT hObj, HMODELNODE hNode, LTMatrix* pGlobalMat)
 	if (g_pLTClient->GetModelNodeName(hObj, hNode, szName, sizeof(szName)) != LT_OK)
 		return;
 
-	if (stricmp(szName, P2BIGHEAD_NODE) == 0)
+	if (nolf::ascii_compare(szName, P2BIGHEAD_NODE) == 0)
 		pGlobalMat->Scale(fFactor, fFactor, fFactor);
 }
 

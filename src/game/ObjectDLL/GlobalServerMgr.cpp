@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "GlobalServerMgr.h"
 
 // ----------------------------------------------------------------------- //
@@ -23,18 +23,18 @@
 
 LTBOOL CGlobalServerMgr::Init()
 {
-	m_ServerSoundMgr.Init(g_pLTServer);
+	if (!m_ServerSoundMgr.Init(g_pLTServer)) return LTFALSE;
 
     // Since Client & Server are the same on PS2, we only need to do this once (when called by the client)
     if (!CGlobalMgr::Init(g_pLTServer)) return LTFALSE;
 
-    m_AIButeMgr.Init(g_pLTServer);
-    m_AttachButeMgr.Init(g_pLTServer);
-    m_ServerButeMgr.Init(g_pLTServer);
-    m_AnimationMgrHuman.Init();
+    if (!m_AIButeMgr.Init(g_pLTServer)) return LTFALSE;
+    if (!m_AttachButeMgr.Init(g_pLTServer)) return LTFALSE;
+    if (!m_ServerButeMgr.Init(g_pLTServer)) return LTFALSE;
+    if (!m_AnimationMgrHuman.Init()) return LTFALSE;
 
-	m_PropTypeMgr.Init(g_pLTServer);
-	m_IntelMgr.Init(g_pLTServer);
+	if (!m_PropTypeMgr.Init(g_pLTServer)) return LTFALSE;
+	if (!m_IntelMgr.Init(g_pLTServer)) return LTFALSE;
 
     return LTTRUE;
 }

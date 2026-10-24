@@ -1,7 +1,12 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // FolderHostLevels.cpp: implementation of the CFolderHostLevels class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "FolderHostLevels.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -354,7 +359,7 @@ LTBOOL CFolderHostLevels::IsUserLevel(char* sLevel, char** pList)
 {
 	for (int i = 0; pList[i]; i++)
 	{
-		if (stricmp(sLevel, pList[i]) == 0)
+		if (nolf::ascii_compare(sLevel, pList[i]) == 0)
 			return LTTRUE;
 	}
 	return LTFALSE;
@@ -382,7 +387,7 @@ LTBOOL CFolderHostLevels::FillLevelList(CListCtrl *pList, char* sDir)
 	{
 		if (ptr->m_Type == TYPE_FILE)
 		{
-			if (strnicmp(&ptr->m_pBaseFilename[strlen(ptr->m_pBaseFilename) - 4], ".dat", 4) == 0)
+			if (nolf::ascii_compare_n(&ptr->m_pBaseFilename[strlen(ptr->m_pBaseFilename) - 4], ".dat", 4) == 0)
 			{
 				char sLevel[128];
 				strcpy(sLevel, ptr->m_pBaseFilename);
@@ -462,11 +467,11 @@ void CFolderHostLevels::LoadLevelList(CListCtrl *pList)
 
 		if (m_nGameType == COOPERATIVE_ASSAULT)
 		{
-			wsprintf(sLabel, "NetCALevel%i", i);
+			std::snprintf(sLabel,sizeof(sLabel), "NetCALevel%i", i);
 		}
 		else
 		{
-			wsprintf(sLabel, "NetLevel%i", i);
+			std::snprintf(sLabel,sizeof(sLabel), "NetLevel%i", i);
 		}
 
 		GetConsoleString(sLabel, sLevel, "");
@@ -504,11 +509,11 @@ void CFolderHostLevels::SaveLevelList(CListCtrl *pList)
 		char sLabel[32];
 		if (m_nGameType == COOPERATIVE_ASSAULT)
 		{
-			wsprintf(sLabel, "NetCALevel%i", i);
+			std::snprintf(sLabel,sizeof(sLabel), "NetCALevel%i", i);
 		}
 		else
 		{
-			wsprintf(sLabel, "NetLevel%i", i);
+			std::snprintf(sLabel,sizeof(sLabel), "NetLevel%i", i);
 		}
 		CStaticTextCtrl *pCtrl = (CStaticTextCtrl *)pList->GetControl(i);
 		HSTRING hText = pCtrl->GetString();

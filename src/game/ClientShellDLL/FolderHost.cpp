@@ -1,7 +1,11 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // FolderHost.cpp: implementation of the CFolderHost class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderHost.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -634,11 +638,11 @@ void CFolderHost::FillGameStruct(NetGame *pNG)
 
 		if (m_nGameType == COOPERATIVE_ASSAULT)
 		{
-			wsprintf(sLabel, "NetCALevel%i", i);
+			std::snprintf(sLabel,sizeof(sLabel), "NetCALevel%i", i);
 		}
 		else
 		{
-			wsprintf(sLabel, "NetLevel%i", i);
+			std::snprintf(sLabel,sizeof(sLabel), "NetLevel%i", i);
 		}
 
 		GetConsoleString(sLabel, pNG->m_sLevels[i], "");
@@ -649,7 +653,7 @@ void CFolderHost::FillGameStruct(NetGame *pNG)
 		pNG->m_byNumOptions = MAX_GAME_OPTIONS;
 
 
-	for (i = 0; i < pNG->m_byNumOptions; i++)
+	for (int i = 0; i < pNG->m_byNumOptions; i++)
 	{
 		OPTION* pOpt = g_pServerOptionMgr->GetOption(i);
 		if (m_nGameType == pOpt->eGameType || pOpt->eGameType == SINGLE)

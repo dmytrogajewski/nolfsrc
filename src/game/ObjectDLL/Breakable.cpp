@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "Breakable.h"
 #include "Trigger.h"
 #include "ClientServerShared.h"
@@ -893,7 +894,7 @@ LTBOOL Breakable::IsStandingOnMe(HOBJECT hObj)
 
 void Breakable::TriggerMsg(HOBJECT hSender, const char* szMsg)
 {
-	if (_stricmp(szMsg, "Break") == 0)
+	if (nolf::ascii_compare(szMsg, "Break") == 0)
 	{
 		StartBreak(hSender);
 		return;

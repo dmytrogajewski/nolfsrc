@@ -165,21 +165,7 @@ class CQ44CElem;                     // a four-byte pointer's worth of element
 // out-of-line body.  Taking its address (not a forcing caller, which /O2
 // would simply expand; an explicit member instantiation emitted nothing) is
 // what makes VC6 emit the COMDAT.
-DYNA_TEMPLATE
-LTBOOL CMoArray<T, C>::SetSizeInit3( uint32 newSize, T &val, LAlloc *pAlloc )
-{
-	uint32 i;
 
-	if(!SetSize2(newSize, pAlloc))
-		return LTFALSE;
-
-	for(i=0; i < GetSize(); i++)
-	{
-		m_pArray[i] = val;
-	}
-
-	return LTTRUE;
-}
 
 // Forces the COMDAT out.  Not shipped code.
 static LTBOOL (CMoArray<CQ44CElem*, NoCache>::*s_pSetSizeInit3Q44C)(uint32, CQ44CElem*&,

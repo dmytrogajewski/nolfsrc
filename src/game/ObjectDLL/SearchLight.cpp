@@ -10,7 +10,11 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "SearchLight.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -238,7 +242,9 @@ uint32 SearchLight::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGER
             ILTCommon* pCommon = g_pLTServer->Common();
 			if (!pCommon) return 0;
 
-			const char *szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+
+			const char* szMsg = szMsgStorage.c_str();
 
 			// ConParse does not destroy szMsg, so this is safe
 			ConParse parse;
@@ -248,17 +254,17 @@ uint32 SearchLight::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGER
 			{
 				if (parse.m_nArgs > 0 && parse.m_Args[0])
 				{
-					if (_stricmp(parse.m_Args[0], "OFF") == 0)
+					if (nolf::ascii_compare(parse.m_Args[0], "OFF") == 0)
 					{
                         m_bOn = LTFALSE;
 						SetNextUpdate(0.0f);
 					}
-					else if (_stricmp(parse.m_Args[0], "ON") == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], "ON") == 0)
 					{
                         m_bOn = LTTRUE;
                         SetNextUpdate(UPDATE_DELTA);
 					}
-					else if (_stricmp(parse.m_Args[0], "RESET") == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], "RESET") == 0)
 					{
 				        SetLastDetectedEnemy(LTNULL);
 						StopSearching();
@@ -857,7 +863,7 @@ void ControlledSearchLight::SetRotation(LTRotation& rRot)
 		}
 	}
 
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 	SearchLight::SetRotation(rRot);
 }
 
@@ -872,7 +878,7 @@ LTRotation ControlledSearchLight::GetRotation()
 		}
 	}
 
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 	return SearchLight::GetRotation();
 }
 
@@ -888,7 +894,7 @@ void ControlledSearchLight::SetPosition(LTVector& vPos)
 		}
 	}
 
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 	SearchLight::SetPosition(vPos);
 }
 
@@ -903,7 +909,7 @@ LTVector ControlledSearchLight::GetPosition()
 		}
 	}
 
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 	return SearchLight::GetPosition();
 }
 

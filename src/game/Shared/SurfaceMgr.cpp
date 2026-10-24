@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "SurfaceMgr.h"
 #include "CommonUtilities.h"
 #include "FXButeMgr.h"
@@ -203,7 +206,7 @@ SURFACE* CSurfaceMgr::GetSurface(char* pName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pName) == 0))
 		{
 			return *pCur;
 		}
@@ -931,7 +934,7 @@ LTRESULT CSurfaceMgrPlugin::PreHook_EditStringList(
 LTBOOL CSurfaceMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings,
     const uint32 cMaxStrings, const uint32 cMaxStringLength)
 {
-	_ASSERT(aszStrings && pcStrings && g_pSurfaceMgr);
+	GAME_ASSERT(aszStrings && pcStrings && g_pSurfaceMgr);
     if (!aszStrings || !pcStrings || !g_pSurfaceMgr) return LTFALSE;
 
 	// Add an entry for each surface
@@ -946,7 +949,7 @@ LTBOOL CSurfaceMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcString
 
 	while (pCurSurf)
 	{
-		_ASSERT(cMaxStrings > (*pcStrings) + 1);
+		GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 		if (*pCurSurf && (*pCurSurf)->szName[0])
 		{

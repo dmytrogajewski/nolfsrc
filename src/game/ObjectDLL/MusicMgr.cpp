@@ -1,9 +1,10 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "MusicMgr.h"
 #include "GameButeMgr.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 
 // ----------------------------------------------------------------------- //
 
@@ -88,7 +89,7 @@ void CMusicMgr::Init(const char* szMusicControlFile)
 		*pchDot = 0;
 	}
 
-    _strlwr(m_szTheme);
+    nolf::ascii_lowercase(m_szTheme);
 
 	for ( uint32 iMood = 0 ; iMood < kNumMoods ; ++iMood )
 	{

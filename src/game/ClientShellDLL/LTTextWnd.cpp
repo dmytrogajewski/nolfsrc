@@ -1,6 +1,6 @@
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "LTTextWnd.h"
-#include "LTGUIMgr.h"
+#include "ltguimgr.h"
 #include "LTWndMessages.h"
 #include "InterfaceMgr.h"
 #include "GameClientShell.h"

@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "LTMultiWnd.h"
 
 #if defined(_DEBUG)
@@ -133,7 +133,7 @@ BOOL CLTMultiWnd::CreateSurfaces(CStringArray *pcollBitmaps, CLTSurfaceArray* pc
         hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)pcollBitmaps->GetAt(i));
 		if(!hSurf)
 		{
-			TRACE("CLTMultiWnd::InitFromBitmap - ERROR - Could not create the surface: ""%s""\n",pcollBitmaps->GetAt(i));
+			TRACE("CLTMultiWnd::InitFromBitmap - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(pcollBitmaps->GetAt(i)));
 			FreeAllSurfaces(pcollSurfs);
 			return FALSE;
 		}

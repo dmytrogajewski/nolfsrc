@@ -1,5 +1,5 @@
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "AnimationParser.h"
 #include "AnimationParse.h"
 #include "AnimationLex.h"
@@ -96,6 +96,7 @@ LTBOOL CAnimationParser::Parse(const CStr& sFile)
 	s_btError = LTFALSE;
 
 	g_pParser = this;
+	struct ResetParser { ~ResetParser() { g_pParser = nullptr; } } reset;
 
 	s_btError = !g_Lex.Lex(sFile);
 /*

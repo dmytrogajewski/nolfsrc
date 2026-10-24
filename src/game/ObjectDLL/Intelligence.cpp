@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Intelligence.h"
 #include "ObjectMsgs.h"
 #include "PlayerObj.h"
@@ -70,7 +72,7 @@ LTRESULT CIntelPlugin::PreHook_EditStringList(
 	{
 		return LT_OK;
 	}
-	else if (_strcmpi("Type", szPropName) == 0)
+	else if (nolf::ascii_compare("Type", szPropName) == 0)
 	{
 		if (m_IntelMgrPlugin.PreHook_EditStringList(szRezPath,
 			szPropName, aszStrings, pcStrings, cMaxStrings, cMaxStringLength) == LT_OK)
@@ -366,7 +368,8 @@ uint32 Intelligence::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGE
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
 			// ConParse does not destroy szMsg, so this is safe
 			ConParse parse;
@@ -376,21 +379,21 @@ uint32 Intelligence::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGE
 			{
 				if (parse.m_nArgs > 0 && parse.m_Args[0])
 				{
-					if (_stricmp(parse.m_Args[0], s_szActivate) == 0)
+					if (nolf::ascii_compare(parse.m_Args[0], s_szActivate) == 0)
 					{
 						if (!m_bPhotoOnly)
 						{
 							DoActivate(hSender);
 						}
 					}
-					else if (_stricmp(parse.m_Args[0], s_szGadget) == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], s_szGadget) == 0)
 					{
 						if (m_bPhotoOnly)
 						{
 							HandleGadgetMsg(hSender, parse);
 						}
 					}
-					else if (_stricmp(parse.m_Args[0], s_szRespawn) == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], s_szRespawn) == 0)
 					{
 						SetNextUpdate( m_fRespawnDelay / g_IntelRespawnScale.GetFloat(1.0f));
 					}

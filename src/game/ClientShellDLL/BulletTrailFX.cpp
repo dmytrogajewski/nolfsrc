@@ -8,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "BulletTrailFX.h"
 #include "iltclient.h"
 #include "ClientUtilities.h"

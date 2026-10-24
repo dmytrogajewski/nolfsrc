@@ -8,7 +8,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
 #include "RandomSpawner.h"
 #include "ServerUtilities.h"
 #include "ObjectMsgs.h"
@@ -158,7 +161,8 @@ uint32 RandomSpawner::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAG
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -311,11 +315,11 @@ void RandomSpawner::Load(HMESSAGEREAD hRead)
 void RandomSpawner::Setup()
 {
     HCLASS  hSpawner = g_pLTServer->GetClass("Spawner");
-	_ASSERT(hSpawner);
+	GAME_ASSERT(hSpawner);
 	if  ( !hSpawner ) return;
 
     const char* szSpawnerBase = g_pLTServer->GetStringData(m_hstrSpawner);
-	_ASSERT(szSpawnerBase);
+	GAME_ASSERT(szSpawnerBase);
 	if ( !szSpawnerBase ) return;
 
 	int cSpawners = 0;

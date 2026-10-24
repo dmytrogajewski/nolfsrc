@@ -1,6 +1,6 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "Speaker.h"
 
 BEGIN_CLASS(Speaker)
@@ -74,7 +74,8 @@ uint32 Speaker::EngineMessageFn(uint32 messageID, void *pData, LTFLOAT fData)
 			m_damage.SetCanDamage(LTFALSE);
 			m_damage.SetNeverDestroy(LTTRUE);
 
-			g_pLTServer->SetObjectDims(m_hObject, &LTVector(.01f,.01f,.01f));
+			LTVector dimensions(.01f,.01f,.01f);
+			g_pLTServer->SetObjectDims(m_hObject, &dimensions);
 		}
 		break;
 

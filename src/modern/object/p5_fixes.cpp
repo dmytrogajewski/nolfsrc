@@ -1,3 +1,4 @@
+#include <cmath>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : p5_fixes.cpp
@@ -7,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include <float.h>
 #include <math.h>
 #include "object/p5_fixes.h"
@@ -29,7 +30,7 @@
 
 static float P5_MovementSample(const float* afData, uint32 cData, float fTime)
 {
-	if (_isnan(fTime) || fTime < 0.0f) fTime = 0.0f;
+	if (std::isnan(fTime) || fTime < 0.0f) fTime = 0.0f;
 	if (fTime > 1.0f) fTime = 1.0f;
 
 	float fPos = fTime * (float)cData;
@@ -53,7 +54,7 @@ LTFLOAT P5_GetMovementData(const float* afData, uint32 cData, float fTimePrev, f
 
 LTBOOL P5_IsNaN(const LTVector& v)
 {
-	return (_isnan(v.x) || _isnan(v.y) || _isnan(v.z)) ? LTTRUE : LTFALSE;
+	return (std::isnan(v.x) || std::isnan(v.y) || std::isnan(v.z)) ? LTTRUE : LTFALSE;
 }
 
 LTBOOL P5_NormalizeIfNonZero(LTVector& v)

@@ -20,7 +20,10 @@
 //   M-P2-05  ConsoleBackdrop: 0/1 the retail menu's blank tag, 2 black
 //   M-P2-06  "ConsoleHistoryToLog": the scroll-back into the modern log
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "platform/sync.h"
+#include "platform/system.h"
+#include "engine/portable/string.h"
 #include <stdlib.h>
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"
@@ -66,8 +69,7 @@ namespace
 	P2ConLine			s_Lines[P2CON_MAX_LINES];
 	int					s_nLineHead = 0;
 	int					s_nLineCount = 0;
-	CRITICAL_SECTION	s_LinesCS;
-	LTBOOL				s_bCSInit = LTFALSE;
+	nolf::platform::RecursiveMutex s_LinesCS;
 
 	// Commands Up/Down recall: a ring as well.
 	char				s_Recall[P2CON_MAX_RECALL][P2CON_EDIT_LEN];
@@ -130,7 +132,7 @@ static void OnEngineConsoleLine(void* pUser, uint32 nColor, int nLevel, const ch
 	const char* pStart;
 	const char* pEnd;
 
-	if (!pText || !s_bCSInit) return;
+	if (!pText) return;
 
 	// A colour of 0 means "the font's own colours" to CLTGUIFont::Draw:
 	// draw those lines white, like the engine's own default.
@@ -138,7 +140,7 @@ static void OnEngineConsoleLine(void* pUser, uint32 nColor, int nLevel, const ch
 	if (!nColor)
 		nColor = SETRGB(255, 255, 255);
 
-	EnterCriticalSection(&s_LinesCS);
+	std::lock_guard lock(s_LinesCS);
 
 	// One console line per '\n'-separated piece, as the engine's own
 	// console stores them (a trailing '\n' does not make an empty line).
@@ -159,7 +161,6 @@ static void OnEngineConsoleLine(void* pUser, uint32 nColor, int nLevel, const ch
 			break;
 	}
 
-	LeaveCriticalSection(&s_LinesCS);
 }
 
 
@@ -179,7 +180,7 @@ static void GatherHelpName(void* pUser, const char* pName, uint32 nFlags)
 
 static int CompareHelpNames(const void* p1, const void* p2)
 {
-	return stricmp(s_HelpNames[*(const int*)p1], s_HelpNames[*(const int*)p2]);
+	return nolf::ascii_compare(s_HelpNames[*(const int*)p1], s_HelpNames[*(const int*)p2]);
 }
 
 // Lists one group (game programs or engine commands), sorted, several names
@@ -287,7 +288,7 @@ static void HistoryToLogFn(int argc, char** argv)
 {
 	int i, nFirst;
 
-	EnterCriticalSection(&s_LinesCS);
+	std::lock_guard lock(s_LinesCS);
 
 	ModernLog("---- console history (%d lines) ----", s_nLineCount);
 	nFirst = (s_nLineHead - s_nLineCount + P2CON_MAX_LINES) % P2CON_MAX_LINES;
@@ -297,7 +298,6 @@ static void HistoryToLogFn(int argc, char** argv)
 	}
 	ModernLog("---- end of console history ----");
 
-	LeaveCriticalSection(&s_LinesCS);
 
 	g_pLTClient->CPrint("Console history written to %s.", MODERN_LOG_FILE);
 }
@@ -355,11 +355,6 @@ void P2Console_Init()
 {
 	if (s_bInit) return;
 
-	if (!s_bCSInit)
-	{
-		InitializeCriticalSection(&s_LinesCS);
-		s_bCSInit = LTTRUE;
-	}
 
 	s_vtConsoleBackdrop.Init(g_pLTClient, "ConsoleBackdrop", LTNULL, 0.0f);
 
@@ -437,7 +432,7 @@ static void Open()
 	if (s_bVisible || !CanOpen()) return;
 
 	ClearEdit();
-	s_nScroll = 0;
+	{ std::lock_guard lock(s_LinesCS); s_nScroll = 0; }
 	s_bVisible = LTTRUE;
 
 	// Pause a running game; leave one that is already paused (a menu, the
@@ -510,7 +505,7 @@ static void Submit()
 
 	strcpy(szLine, s_szEdit);
 	ClearEdit();
-	s_nScroll = 0;
+	{ std::lock_guard lock(s_LinesCS); s_nScroll = 0; }
 
 	// Leading blanks are not part of the command.
 	for (pLine = szLine; *pLine == ' '; pLine++)
@@ -573,6 +568,7 @@ static void Recall(int nDir)
 
 static void Scroll(int nLines)
 {
+	std::lock_guard lock(s_LinesCS);
 	int nMax = s_nLineCount - s_nVisibleLines;
 	if (nMax < 0) nMax = 0;
 
@@ -605,7 +601,7 @@ LTBOOL P2Console_OnKeyDown(int nKey, int nRep)
 		// M-P2-15: Shift+Esc opens it too, whatever the keyboard layout
 		// puts where the console key is.
 		if (((nKey == nConsoleKey && nKey > 0) ||
-		     (nKey == VK_ESCAPE && (GetKeyState(VK_SHIFT) & 0x8000))) && CanOpen())
+		     (nKey == VK_ESCAPE && IsKeyDown(VK_SHIFT))) && CanOpen())
 		{
 			Open();
 			return LTTRUE;
@@ -648,8 +644,6 @@ LTBOOL P2Console_OnChar(char c)
 	nConsoleKey = ConsoleKey();
 	if (nConsoleKey > 0)
 	{
-		UINT nChar = MapVirtualKey(nConsoleKey, 2) & 0x7fff;
-		if (nChar && (char)nChar == c) return LTTRUE;
 		if (nConsoleKey == VK_OEM_3 && (c == '`' || c == '~')) return LTTRUE;
 	}
 
@@ -741,14 +735,14 @@ void P2Console_Draw()
 
 	// The edit line at the bottom, with a blinking caret.
 	nY = nConHeight - nLineHeight - 2;
-	sprintf(szEdit, "> %s%s", s_szEdit, ((GetTickCount() / 400) & 1) ? "_" : "");
+	sprintf(szEdit, "> %s%s", s_szEdit, ((nolf::platform::monotonic_nanoseconds() / 400000000) & 1) ? "_" : "");
 	pFont->Draw(szEdit, hScreen, 8, nY, LTF_JUSTIFY_LEFT, P2CON_COLOR_EDIT);
 
 	// The scroll-back above it, newest last.
 	s_nVisibleLines = (nY - 4) / nLineHeight;
 	if (s_nVisibleLines < 1) s_nVisibleLines = 1;
 
-	EnterCriticalSection(&s_LinesCS);
+	std::lock_guard lock(s_LinesCS);
 
 	if (s_nScroll > s_nLineCount - 1) s_nScroll = 0;
 
@@ -764,7 +758,6 @@ void P2Console_Draw()
 		pFont->Draw(pLine->szText, hScreen, 8, nY, LTF_JUSTIFY_LEFT, pLine->nColor);
 	}
 
-	LeaveCriticalSection(&s_LinesCS);
 
 	// Scrolled back: say so where the newest line would be.
 	if (s_nScroll > 0)

@@ -8,7 +8,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "ModelButeMgr.h"
 #include "CommonUtilities.h"
 
@@ -294,9 +297,9 @@ LTBOOL CModelButeMgr::Init(ILTCSBase *pInterface, const char* szAttributeFile)
 
 			// Each time must be greater than the previous... and the first one must be zero
 			if(iNScriptPt > 0)
-				_ASSERT(m_aNScripts[iNScript].m_aNScriptPts[iNScriptPt].m_fTime > m_aNScripts[iNScript].m_aNScriptPts[iNScriptPt - 1].m_fTime);
+				GAME_ASSERT(m_aNScripts[iNScript].m_aNScriptPts[iNScriptPt].m_fTime > m_aNScripts[iNScript].m_aNScriptPts[iNScriptPt - 1].m_fTime);
 			else
-				_ASSERT(m_aNScripts[iNScript].m_aNScriptPts[iNScriptPt].m_fTime == 0.0f);
+				GAME_ASSERT(m_aNScripts[iNScript].m_aNScriptPts[iNScriptPt].m_fTime == 0.0f);
 
 			// Get the node's offset position
 			sprintf(s_aAttName, MODELBMGR_NSCRIPT_NODE_POSITION_OFFSET, iNScriptPt);
@@ -430,12 +433,12 @@ void CModelButeMgr::Term()
 
 ModelId CModelButeMgr::GetModelId(const char *szName)
 {
-	_ASSERT(szName);
+	GAME_ASSERT(szName);
 
     int iModel;
     for ( iModel = 0 ; iModel < m_cModels ; iModel++ )
 	{
-        if ( !_stricmp(szName, m_aModels[iModel].m_szName) )
+        if ( !nolf::ascii_compare(szName, m_aModels[iModel].m_szName) )
 		{
 			return (ModelId)iModel;
 		}
@@ -444,70 +447,70 @@ ModelId CModelButeMgr::GetModelId(const char *szName)
 	// Couldn't find anything, return any intentionally bogus value
 
 // !!!    pInterface->CPrint("CModelButeMgr::GetModel - Could not find Model \"%s\"", szName);
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 
 	return (ModelId)iModel;
 }
 
 const char* CModelButeMgr::GetModelName(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_szName;
 }
 
 const char* CModelButeMgr::GetModelSex(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_szSex;
 }
 
 const char* CModelButeMgr::GetModelNationality(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_szNationality;
 }
 
 ModelType CModelButeMgr::GetModelType(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_eModelType;
 }
 
 LTBOOL CModelButeMgr::GetModelEnvironmentMap(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_bModelEnvironmentMap;
 }
 
 ModelSkeleton CModelButeMgr::GetModelSkeleton(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_eModelSkeleton;
 }
 
 LTFLOAT CModelButeMgr::GetModelMass(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_fModelMass;
 }
 
 LTFLOAT CModelButeMgr::GetModelHitPoints(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_fModelHitPoints;
 }
 
 LTFLOAT CModelButeMgr::GetModelMaxHitPoints(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_fModelMaxHitPoints;
 }
@@ -515,14 +518,14 @@ LTFLOAT CModelButeMgr::GetModelMaxHitPoints(ModelId eModelId)
 LTFLOAT CModelButeMgr::GetModelArmor(ModelId eModelId)
 
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_fModelArmor;
 }
 
 LTFLOAT CModelButeMgr::GetModelMaxArmor(ModelId eModelId)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
 
 	return m_aModels[eModelId].m_fModelMaxArmor;
 }
@@ -537,12 +540,12 @@ LTFLOAT CModelButeMgr::GetModelMaxArmor(ModelId eModelId)
 
 ModelStyle CModelButeMgr::GetStyle(const char *szName)
 {
-	_ASSERT(szName);
+	GAME_ASSERT(szName);
 
     int iStyle;
     for ( iStyle = 0 ; iStyle < m_cStyles ; iStyle++ )
 	{
-        if ( !_stricmp(szName, m_aStyles[iStyle].m_szName) )
+        if ( !nolf::ascii_compare(szName, m_aStyles[iStyle].m_szName) )
 		{
 			return (ModelStyle)iStyle;
 		}
@@ -551,7 +554,7 @@ ModelStyle CModelButeMgr::GetStyle(const char *szName)
 	// Couldn't find anything, return any intentionally bogus value
 
 // !!!    pInterface->CPrint("CModelButeMgr::GetStyle - Could not find Style \"%s\"", szName);
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 
 	return (ModelStyle)iStyle;
 }
@@ -571,7 +574,7 @@ ModelStyle CModelButeMgr::GetModelStyleFromProperty(char* pPropVal)
 	{
         LTBOOL bStyle = LTFALSE;
 
-		if (_stricmp(m_aStyles[iStyle].m_szName, pPropVal) == 0)
+		if (nolf::ascii_compare(m_aStyles[iStyle].m_szName, pPropVal) == 0)
 		{
 			return (ModelStyle)iStyle;
 		}
@@ -594,7 +597,7 @@ ModelStyle CModelButeMgr::GetModelStyleFromProperty(char* pPropVal)
 
 int CModelButeMgr::GetSkeletonNumNodes(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return 0;
 
 	return m_aSkeletons[eModelSkeleton].m_cNodes;
@@ -602,12 +605,12 @@ int CModelButeMgr::GetSkeletonNumNodes(ModelSkeleton eModelSkeleton)
 
 ModelNode CModelButeMgr::GetSkeletonNode(ModelSkeleton eModelSkeleton, const char* szName)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return eModelNodeInvalid;
 
 	for ( int iNode = 0 ; iNode < m_aSkeletons[eModelSkeleton].m_cNodes ; iNode++ )
 	{
-        if ( !_stricmp(m_aSkeletons[eModelSkeleton].m_aNodes[iNode].m_szName, szName) )
+        if ( !nolf::ascii_compare(m_aSkeletons[eModelSkeleton].m_aNodes[iNode].m_szName, szName) )
 		{
 			return (ModelNode)iNode;
 		}
@@ -618,7 +621,7 @@ ModelNode CModelButeMgr::GetSkeletonNode(ModelSkeleton eModelSkeleton, const cha
 
 const char* CModelButeMgr::GetSkeletonDefaultFrontDeathAni(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_szDefaultFrontDeathAni;
@@ -626,7 +629,7 @@ const char* CModelButeMgr::GetSkeletonDefaultFrontDeathAni(ModelSkeleton eModelS
 
 const char* CModelButeMgr::GetSkeletonDefaultBackDeathAni(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_szDefaultBackDeathAni;
@@ -634,7 +637,7 @@ const char* CModelButeMgr::GetSkeletonDefaultBackDeathAni(ModelSkeleton eModelSk
 
 const char* CModelButeMgr::GetSkeletonDefaultFrontLongRecoilAni(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_szDefaultFrontLongRecoilAni;
@@ -642,7 +645,7 @@ const char* CModelButeMgr::GetSkeletonDefaultFrontLongRecoilAni(ModelSkeleton eM
 
 const char* CModelButeMgr::GetSkeletonDefaultBackLongRecoilAni(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_szDefaultBackLongRecoilAni;
@@ -650,7 +653,7 @@ const char* CModelButeMgr::GetSkeletonDefaultBackLongRecoilAni(ModelSkeleton eMo
 
 const char* CModelButeMgr::GetSkeletonDefaultFrontShortRecoilAni(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_szDefaultFrontShortRecoilAni;
@@ -658,7 +661,7 @@ const char* CModelButeMgr::GetSkeletonDefaultFrontShortRecoilAni(ModelSkeleton e
 
 const char* CModelButeMgr::GetSkeletonDefaultBackShortRecoilAni(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_szDefaultBackShortRecoilAni;
@@ -666,7 +669,7 @@ const char* CModelButeMgr::GetSkeletonDefaultBackShortRecoilAni(ModelSkeleton eM
 
 ModelNode CModelButeMgr::GetSkeletonDefaultHitNode(ModelSkeleton eModelSkeleton)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return eModelNodeInvalid;
 
 	return m_aSkeletons[eModelSkeleton].m_eModelNodeDefaultHit;
@@ -674,8 +677,8 @@ ModelNode CModelButeMgr::GetSkeletonDefaultHitNode(ModelSkeleton eModelSkeleton)
 
 const char* CModelButeMgr::GetSkeletonNodeName(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szName;
@@ -683,8 +686,8 @@ const char* CModelButeMgr::GetSkeletonNodeName(ModelSkeleton eModelSkeleton, Mod
 
 uint32 CModelButeMgr::GetSkeletonNodeFlags(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return 0;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_dwFlags;
@@ -692,8 +695,8 @@ uint32 CModelButeMgr::GetSkeletonNodeFlags(ModelSkeleton eModelSkeleton, ModelNo
 
 const char* CModelButeMgr::GetSkeletonNodeFrontDeathAni(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szFrontDeathAni;
@@ -701,7 +704,7 @@ const char* CModelButeMgr::GetSkeletonNodeFrontDeathAni(ModelSkeleton eModelSkel
 
 const char* CModelButeMgr::GetSkeletonNodeBackDeathAni(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szBackDeathAni;
@@ -709,8 +712,8 @@ const char* CModelButeMgr::GetSkeletonNodeBackDeathAni(ModelSkeleton eModelSkele
 
 const char* CModelButeMgr::GetSkeletonNodeFrontLongRecoilAni(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szFrontLongRecoilAni;
@@ -718,7 +721,7 @@ const char* CModelButeMgr::GetSkeletonNodeFrontLongRecoilAni(ModelSkeleton eMode
 
 const char* CModelButeMgr::GetSkeletonNodeBackLongRecoilAni(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szBackLongRecoilAni;
@@ -726,8 +729,8 @@ const char* CModelButeMgr::GetSkeletonNodeBackLongRecoilAni(ModelSkeleton eModel
 
 const char* CModelButeMgr::GetSkeletonNodeFrontShortRecoilAni(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szFrontShortRecoilAni;
@@ -735,7 +738,7 @@ const char* CModelButeMgr::GetSkeletonNodeFrontShortRecoilAni(ModelSkeleton eMod
 
 const char* CModelButeMgr::GetSkeletonNodeBackShortRecoilAni(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
 	if (eModelSkeletonInvalid == eModelSkeleton) return LTNULL;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_szBackShortRecoilAni;
@@ -743,8 +746,8 @@ const char* CModelButeMgr::GetSkeletonNodeBackShortRecoilAni(ModelSkeleton eMode
 
 LTFLOAT CModelButeMgr::GetSkeletonNodeDamageFactor(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return 0.0f;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_fDamageFactor;
@@ -752,8 +755,8 @@ LTFLOAT CModelButeMgr::GetSkeletonNodeDamageFactor(ModelSkeleton eModelSkeleton,
 
 ModelNode CModelButeMgr::GetSkeletonNodeParent(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return eModelNodeInvalid;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_eModelNodeParent;
@@ -761,8 +764,8 @@ ModelNode CModelButeMgr::GetSkeletonNodeParent(ModelSkeleton eModelSkeleton, Mod
 
 ModelNode CModelButeMgr::GetSkeletonNodeRecoilParent(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return eModelNodeInvalid;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_eModelNodeRecoilParent;
@@ -770,8 +773,8 @@ ModelNode CModelButeMgr::GetSkeletonNodeRecoilParent(ModelSkeleton eModelSkeleto
 
 HitLocation CModelButeMgr::GetSkeletonNodeLocation(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return HL_UNKNOWN;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_eHitLocation;
@@ -779,8 +782,8 @@ HitLocation CModelButeMgr::GetSkeletonNodeLocation(ModelSkeleton eModelSkeleton,
 
 LTFLOAT CModelButeMgr::GetSkeletonNodeHitRadius(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return 0.0f;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_fHitRadius;
@@ -788,8 +791,8 @@ LTFLOAT CModelButeMgr::GetSkeletonNodeHitRadius(ModelSkeleton eModelSkeleton, Mo
 
 LTFLOAT CModelButeMgr::GetSkeletonNodeHitPriority(ModelSkeleton eModelSkeleton, ModelNode eModelNode)
 {
-	_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
-	_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
+	GAME_ASSERT(eModelSkeleton >= 0 && eModelSkeleton < m_cSkeletons);
+	GAME_ASSERT(eModelNode >= 0 && eModelNode < m_aSkeletons[eModelSkeleton].m_cNodes);
 	if (eModelSkeletonInvalid == eModelSkeleton) return 0.0f;
 
 	return m_aSkeletons[eModelSkeleton].m_aNodes[eModelNode].m_fHitPriority;
@@ -805,45 +808,45 @@ LTFLOAT CModelButeMgr::GetSkeletonNodeHitPriority(ModelSkeleton eModelSkeleton, 
 
 int CModelButeMgr::GetNScriptNumPts(ModelNScript eModelNScript)
 {
-	_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
+	GAME_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
 
 	return m_aNScripts[eModelNScript].m_cNScriptPts;
 }
 
 const char* CModelButeMgr::GetNScriptNodeName(ModelNScript eModelNScript)
 {
-	_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
+	GAME_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
 
 	return m_aNScripts[eModelNScript].m_szName;
 }
 
 uint8 CModelButeMgr::GetNScriptFlags(ModelNScript eModelNScript)
 {
-	_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
+	GAME_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
 
 	return m_aNScripts[eModelNScript].m_bFlags;
 }
 
 LTFLOAT CModelButeMgr::GetNScriptPtTime(ModelNScript eModelNScript, int nPt)
 {
-	_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
-	_ASSERT(nPt >= 0 && nPt < m_aNScripts[eModelNScript].m_cNScriptPts);
+	GAME_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
+	GAME_ASSERT(nPt >= 0 && nPt < m_aNScripts[eModelNScript].m_cNScriptPts);
 
 	return m_aNScripts[eModelNScript].m_aNScriptPts[nPt].m_fTime;
 }
 
 const LTVector& CModelButeMgr::GetNScriptPtPosOffset(ModelNScript eModelNScript, int nPt)
 {
-	_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
-	_ASSERT(nPt >= 0 && nPt < m_aNScripts[eModelNScript].m_cNScriptPts);
+	GAME_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
+	GAME_ASSERT(nPt >= 0 && nPt < m_aNScripts[eModelNScript].m_cNScriptPts);
 
 	return m_aNScripts[eModelNScript].m_aNScriptPts[nPt].m_vPosOffset;
 }
 
 const LTVector& CModelButeMgr::GetNScriptPtRotOffset(ModelNScript eModelNScript, int nPt)
 {
-	_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
-	_ASSERT(nPt >= 0 && nPt < m_aNScripts[eModelNScript].m_cNScriptPts);
+	GAME_ASSERT(eModelNScript >= 0 && eModelNScript < m_cNScripts);
+	GAME_ASSERT(nPt >= 0 && nPt < m_aNScripts[eModelNScript].m_cNScriptPts);
 
 	return m_aNScripts[eModelNScript].m_aNScriptPts[nPt].m_vRotOffset;
 }
@@ -858,8 +861,8 @@ const LTVector& CModelButeMgr::GetNScriptPtRotOffset(ModelNScript eModelNScript,
 
 const char* CModelButeMgr::GetModelFilename(ModelId eModelId, ModelStyle eModelStyle, const char* szCinematicExtension /* = LTNULL */)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
-	_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
 
 	sprintf(s_szBuffer, "chars\\models\\%s_%s%s.abc", GetModelName(eModelId), GetStyleName(eModelStyle), szCinematicExtension ? szCinematicExtension : "");
 	return s_szBuffer;
@@ -867,8 +870,8 @@ const char* CModelButeMgr::GetModelFilename(ModelId eModelId, ModelStyle eModelS
 
 const char* CModelButeMgr::GetBodySkinFilename(ModelId eModelId, ModelStyle eModelStyle, const char* szBodySkinExtension /* = LTNULL */)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
-	_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
 
 	sprintf(s_szBuffer, "chars\\skins\\%s_%s%s.dtx", GetModelName(eModelId), GetStyleName(eModelStyle), szBodySkinExtension ? szBodySkinExtension : "");
 	return s_szBuffer;
@@ -876,8 +879,8 @@ const char* CModelButeMgr::GetBodySkinFilename(ModelId eModelId, ModelStyle eMod
 
 const char* CModelButeMgr::GetHeadSkinFilename(ModelId eModelId, ModelStyle eModelStyle, const char* szHeadOverride /* = LTNULL */)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
-	_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
 
 	sprintf(s_szBuffer, "chars\\skins\\%s_%s%s.dtx", GetModelName(eModelId), GetStyleName(eModelStyle), szHeadOverride ? szHeadOverride : "_head");
 	return s_szBuffer;
@@ -885,7 +888,7 @@ const char* CModelButeMgr::GetHeadSkinFilename(ModelId eModelId, ModelStyle eMod
 
 const char*	CModelButeMgr::GetHandsSkinFilename(ModelStyle eModelStyle)
 {
-	_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
+	GAME_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
 
 	sprintf(s_szBuffer, "guns\\skins_pv\\%sHands_pv.dtx", GetStyleName(eModelStyle));
 	return s_szBuffer;
@@ -894,8 +897,8 @@ const char*	CModelButeMgr::GetHandsSkinFilename(ModelStyle eModelStyle)
 
 const char* CModelButeMgr::GetMultiModelFilename(ModelId eModelId, ModelStyle eModelStyle)
 {
-	_ASSERT(eModelId >= 0 && eModelId < m_cModels);
-	_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
+	GAME_ASSERT(eModelId >= 0 && eModelId < m_cModels);
+	GAME_ASSERT(eModelStyle >= 0 && eModelStyle < m_cStyles);
 
 	sprintf(s_szBuffer, "chars\\models\\multi\\%s_%s_multi.abc", GetModelName(eModelId), GetStyleName(eModelStyle));
 	return s_szBuffer;
@@ -956,7 +959,7 @@ void CModelButeMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcString
 
 	int nNumStyles = sm_ButeMgr.GetNumStyles();
 
-	_ASSERT(cMaxStrings > (*pcStrings) + nNumStyles);
+	GAME_ASSERT(cMaxStrings > (*pcStrings) + nNumStyles);
 
 	for (int i=0; i < sm_ButeMgr.GetNumStyles(); i++)
 	{
@@ -964,7 +967,7 @@ void CModelButeMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcString
 
 		if (pStyleName && pStyleName[0])
 		{
-			_ASSERT(cMaxStringLength > strlen(pStyleName));
+			GAME_ASSERT(cMaxStringLength > strlen(pStyleName));
 
 			if ((cMaxStrings > (*pcStrings) + 1) &&
 				(cMaxStringLength > strlen(pStyleName)))

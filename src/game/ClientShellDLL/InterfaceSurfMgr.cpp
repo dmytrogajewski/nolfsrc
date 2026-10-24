@@ -1,12 +1,16 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // InterfaceSurfMgr.cpp: implementation of the CInterfaceSurfMgr class.
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "ltbasedefs.h"
 #include "iclientshell.h"
 #include "InterfaceSurfMgr.h"
-#include <mbstring.h>
+#include <cstring>
 
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
@@ -86,9 +90,9 @@ HSURFACE CInterfaceSurfMgr::GetSurface(char *lpszSurface)
 	CSharedSurface *pSharedSurface=debug_new(CSharedSurface);
 
 	// Copy the filename
-    int nBufferSize=_mbstrlen(lpszSurface)+1;
+    int nBufferSize=std::strlen(lpszSurface)+1;
 	pSharedSurface->m_lpszPathName=debug_newa(char, nBufferSize);
-    _mbsncpy((unsigned char*)pSharedSurface->m_lpszPathName, (const unsigned char*)lpszSurface, nBufferSize);
+    std::memcpy(pSharedSurface->m_lpszPathName, lpszSurface, nBufferSize);
 
 	pSharedSurface->m_hSurface=hSurface;		// Copy the surface handle
 	m_sharedSurfaceArray.Add(pSharedSurface);	// Add the class to the array
@@ -143,7 +147,7 @@ int CInterfaceSurfMgr::FindSurfaceIndex(char *lpszSurface)
 	unsigned int i;
 	for (i=0; i < m_sharedSurfaceArray.GetSize(); i++)
 	{
-        if (_mbsicmp((const unsigned char*)m_sharedSurfaceArray[i]->m_lpszPathName, (const unsigned char*)lpszSurface) == 0)
+        if (nolf::ascii_compare(m_sharedSurfaceArray[i]->m_lpszPathName, lpszSurface) == 0)
         {
 			return i;
 		}

@@ -1,3 +1,4 @@
+#include "engine/portable/string.h"
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
 #ifndef __ANIMATIONSTD_H__
@@ -61,26 +62,26 @@ namespace Animation
 
 			// Case sensitive compare
 
-			operator==(const CStr& sStr) const
+			LTBOOL operator==(const CStr& sStr) const
 			{
 				return !strcmp(m_szString, sStr.m_szString);
 			}
 
-			operator==(const char* szStr) const
+			LTBOOL operator==(const char* szStr) const
 			{
 				return !strcmp(m_szString, szStr);
 			}
 
 			// Case insensitive compare
 
-			operator^=(const CStr& sStr) const
+			LTBOOL operator^=(const CStr& sStr) const
 			{
-				return !stricmp(m_szString, sStr.m_szString);
+				return !nolf::ascii_compare(m_szString, sStr.m_szString);
 			}
 
-			operator^=(const char* szStr) const
+			LTBOOL operator^=(const char* szStr) const
 			{
-				return !stricmp(m_szString, szStr);
+				return !nolf::ascii_compare(m_szString, szStr);
 			}
 
 		private :
@@ -335,7 +336,7 @@ namespace Animation
 			{
 				LTBOOL Compare(CStr const& sString1, CStr const& sString2) const
 				{
-					return !t_bCaseInsensitive ? !strcmp(sString1, sString2) : !stricmp(sString1, sString2);
+					return !t_bCaseInsensitive ? !strcmp(sString1, sString2) : !nolf::ascii_compare(sString1, sString2);
 				}
 			};
 
@@ -376,7 +377,7 @@ namespace Animation
 			{
 				LTBOOL Compare(CStr const& sString1, CStr const& sString2) const
 				{
-					return !t_bCaseInsensitive ? !strcmp(sString1, sString2) : !stricmp(sString1, sString2);
+					return !t_bCaseInsensitive ? !strcmp(sString1, sString2) : !nolf::ascii_compare(sString1, sString2);
 				}
 			};
 

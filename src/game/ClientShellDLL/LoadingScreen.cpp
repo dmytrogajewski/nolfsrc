@@ -2,7 +2,7 @@
 //
 // MODULE  : LoadingScreen.cpp
 //
-// PURPOSE : Background-thread loading screen encapsulation class
+// PURPOSE : Loading screen presentation on the client frame thread
 //
 // CREATED : 2000
 //
@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "LoadingScreen.h"
 #include "InterfaceMgr.h"
 #include "GameClientShell.h"
@@ -37,9 +37,6 @@ CLoadingScreen::CLoadingScreen() :
 	m_PhotoPos(0,0)
 
 {
-	// Create the event handles
-	m_hEventEnd = CreateEvent(NULL, TRUE, FALSE, NULL);
-	m_hEventThreadRunning = CreateEvent(NULL, TRUE, FALSE, NULL);
 
 	m_nOldFarZ = 10000;
 	m_bOldFogEnable = LTFALSE;
@@ -50,8 +47,6 @@ CLoadingScreen::~CLoadingScreen()
 	// Terminate the object, just in case...
 	Term();
 
-	DeleteObject(m_hEventEnd);
-	DeleteObject(m_hEventThreadRunning);
 }
 
 void CLoadingScreen::CreateScaleFX(char *szFXName)
@@ -397,45 +392,6 @@ LTBOOL CLoadingScreen::Term()
 	return LTTRUE;
 }
 
-DWORD WINAPI CLoadingScreen::ThreadBootstrap(void *pData)
-{
-	return ((CLoadingScreen*)pData)->RunThread();
-}
-
-int CLoadingScreen::RunThread()
-{
-	// Change state
-	m_eCurState = STATE_ACTIVE;
-
-	// Tell the main thread we're now in our main loop
-	SetEvent(m_hEventThreadRunning);
-
-#ifdef NOLFSRC_MODERN
-	// M-P1-01: no frame limiter while loading
-	P1Timing_SuspendFrameLimit(true);
-#endif
-	// The main rendering loop...  (i.e. keep drawing until someone tells us to stop)
-	while (WaitForSingleObject(m_hEventEnd, 0) == WAIT_TIMEOUT)
-	{
-		// Draw the frame..
-		Update();
-		
-#ifdef NOLFSRC_MODERN
-		// M-P1-11: faster loading -- 100 ms between frames slowed the load
-		// itself down
-		Sleep(10);
-#else
-		// Make sure we're not running faster than 10fps so stuff can still happen in the background
-		Sleep(100);
-#endif
-	}
-#ifdef NOLFSRC_MODERN
-	// M-P1-01: no frame limiter while loading
-	P1Timing_SuspendFrameLimit(false);
-#endif
-	return 0;
-}
-
 LTBOOL CLoadingScreen::Update()
 {
 	// Make sure we're in a valid state...
@@ -591,43 +547,15 @@ LTBOOL CLoadingScreen::Show(LTBOOL bRun)
 
 LTBOOL CLoadingScreen::Pause()
 {
-	// Make sure we're in the right state
-	if (m_eCurState != STATE_ACTIVE)
-		return LTFALSE;
-
-	// Shut down the loading screen thread
-	SetEvent(m_hEventEnd);
-	WaitForSingleObject(m_hThreadHandle, INFINITE);
-
-	// Ok, it's just visible now..
-	m_eCurState = STATE_SHOW;
-
-	return LTTRUE;
+    if (m_eCurState != STATE_ACTIVE) return LTFALSE;
+    m_eCurState = STATE_SHOW;
+    return LTTRUE;
 }
-
 LTBOOL CLoadingScreen::Resume()
 {
-	// Ensure our state
-	if (m_eCurState != STATE_SHOW)
-		return LTFALSE;
-
-	// Reset the events
-	ResetEvent(m_hEventEnd);
-	ResetEvent(m_hEventThreadRunning);
-
-	// Start up the loading screen thread
-	uint32 uThreadID;
-	m_hThreadHandle = CreateThread(NULL, 0, ThreadBootstrap, (void *)this, 0, &uThreadID);
-
-	// Handle what shouldn't be possible..
-	if (!m_hThreadHandle)
-		return LTFALSE;
-
-	// Wait for the loading thread to stop touching stuff..
-	WaitForSingleObject(m_hEventThreadRunning, INFINITE);
-
-	// Now we're actually active.  (Thank you Mr. Thread..)
-	return LTTRUE;
+    if (m_eCurState != STATE_SHOW) return LTFALSE;
+    m_eCurState = STATE_ACTIVE;
+    return LTTRUE;
 }
 
 LTBOOL CLoadingScreen::Hide()

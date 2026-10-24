@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AI.h"
 #include "AIState.h"
 #include "AINodeMgr.h"
@@ -202,34 +205,34 @@ void CAIState::Save(HMESSAGEREAD hWrite)
 
 void CAIState::HandleNameValuePair(char *szName, char *szValue)
 {
-	_ASSERT(szName && szValue);
+	GAME_ASSERT(szName && szValue);
 	if ( !szName || !szValue ) return;
 
-	if ( !_stricmp(szName, "RETURN") )
+	if ( !nolf::ascii_compare(szName, "RETURN") )
 	{
 		FREE_HSTRING(m_hstrReturn);
         m_hstrReturn = g_pLTServer->CreateString(szValue);
 	}
-	else if ( !_stricmp(szName, "NEXT") )
+	else if ( !nolf::ascii_compare(szName, "NEXT") )
 	{
 		if ( m_cNexts >= kMaxNexts )
 		{
-			_ASSERT(!"NEXT= buffer overflow");
+			GAME_ASSERT(!"NEXT= buffer overflow");
 			return;
 		}
 
         m_ahstrNexts[m_cNexts++] = g_pLTServer->CreateString(szValue);
 	}
-	else if ( !_stricmp(szName, "FIRST") )
+	else if ( !nolf::ascii_compare(szName, "FIRST") )
 	{
         FREE_HSTRING(m_hstrFirst);
         m_hstrFirst = g_pLTServer->CreateString(szValue);
 	}
-	else if ( !_stricmp(szName, "FIRSTSOUND") )
+	else if ( !nolf::ascii_compare(szName, "FIRSTSOUND") )
 	{
 		m_bPlayFirstSound = IsTrueChar(*szValue);
 	}
-	else if ( !_stricmp(szName, "NOCINEMATICS") )
+	else if ( !nolf::ascii_compare(szName, "NOCINEMATICS") )
 	{
 		m_bNoCinematics = IsTrueChar(*szValue);
 	}

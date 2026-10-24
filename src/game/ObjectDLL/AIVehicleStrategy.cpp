@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIVehicleStrategy.h"
 #include "CharacterMgr.h"
 #include "AIVehicle.h"
@@ -165,7 +167,7 @@ LTBOOL CAIHelicopterStrategyFollowPath::Update()
         return LTFALSE;
 	}
 
-	_ASSERT(m_eState == eStateSet);
+	GAME_ASSERT(m_eState == eStateSet);
 
 	if ( m_pPath->HasRemainingWaypoints() )
 	{
@@ -182,7 +184,7 @@ LTBOOL CAIHelicopterStrategyFollowPath::Update()
 			default:
 			{
                 g_pLTServer->CPrint("CAIHelicopterStrategyFollowPath::Update - unrecognized waypoint instruction");
-				_ASSERT(!"CAIHelicopterStrategyFollowPath::Update - unrecognized waypoint instruction");
+				GAME_ASSERT(!"CAIHelicopterStrategyFollowPath::Update - unrecognized waypoint instruction");
                 return LTFALSE;
 			}
 			break;

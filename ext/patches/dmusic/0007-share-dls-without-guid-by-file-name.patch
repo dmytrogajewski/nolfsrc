@@ -1,0 +1,98 @@
+diff --git a/src/Dls.c b/src/Dls.c
+index 05a19f8..01c60ab 100644
+--- a/src/Dls.c
++++ b/src/Dls.c
+@@ -39,6 +39,7 @@ size_t DmDls_release(DmDls* slf) {
+ 		DmDlsInstrument_free(&slf->instruments[i]);
+ 	}
+ 
++	Dm_free(slf->file_name);
+ 	Dm_free(slf->instruments);
+ 	Dm_free(slf->pool_table);
+ 	Dm_free(slf->wave_table);
+diff --git a/src/Loader.c b/src/Loader.c
+index bc60625..20dc42d 100644
+--- a/src/Loader.c
++++ b/src/Loader.c
+@@ -1,6 +1,8 @@
+ // Copyright © 2024. GothicKit Contributors
+ // SPDX-License-Identifier: MIT-Modern-Variant
+ #include "_Internal.h"
++#include <ctype.h>
++#include <string.h>
+ 
+ static void* DmLoader_resolveName(DmLoader* slf, char const* name, size_t* length);
+ 
+@@ -134,6 +136,36 @@ DmResult DmLoader_getSegment(DmLoader* slf, char const* name, DmSegment** segmen
+ 	return DmResult_SUCCESS;
+ }
+ 
++// Collections without a GUID (DLS files lacking a 'dlid' chunk) are shared by
++// file name instead; an all-zero GUID must not match every other one.
++static bool DmLoader_isNullGuid(DmGuid const* guid) {
++	for (size_t i = 0; i < sizeof guid->data; ++i) {
++		if (guid->data[i] != 0) {
++			return false;
++		}
++	}
++	return true;
++}
++
++static bool DmLoader_isSameFile(char const* a, char const* b) {
++	if (a == NULL || b == NULL) {
++		return false;
++	}
++	for (; *a != '\0' && *b != '\0'; ++a, ++b) {
++		if (tolower((unsigned char) *a) != tolower((unsigned char) *b)) {
++			return false;
++		}
++	}
++	return *a == *b;
++}
++
++static bool DmLoader_isCachedDls(DmDls const* dls, DmReference const* ref) {
++	if (!DmLoader_isNullGuid(&dls->guid)) {
++		return DmGuid_equals(&ref->guid, &dls->guid);
++	}
++	return DmLoader_isSameFile(dls->file_name, ref->file);
++}
++
+ DmResult DmLoader_getDownloadableSound(DmLoader* slf, DmReference const* ref, DmDls** snd) {
+ 	if (slf == NULL || ref == NULL || snd == NULL) {
+ 		return DmResult_INVALID_ARGUMENT;
+@@ -150,7 +182,7 @@ DmResult DmLoader_getDownloadableSound(DmLoader* slf, DmReference const* ref, Dm
+ 	}
+ 
+ 	for (size_t i = 0; i < slf->dls_cache.length; ++i) {
+-		if (!DmGuid_equals(&ref->guid, &slf->dls_cache.data[i]->guid)) {
++		if (!DmLoader_isCachedDls(slf->dls_cache.data[i], ref)) {
+ 			continue;
+ 		}
+ 
+@@ -184,6 +216,14 @@ DmResult DmLoader_getDownloadableSound(DmLoader* slf, DmReference const* ref, Dm
+ 		return rv;
+ 	}
+ 
++	size_t name_length = strlen(ref->file) + 1;
++	(*snd)->file_name = Dm_alloc(name_length);
++	if ((*snd)->file_name == NULL) {
++		DmDls_release(*snd);
++		return DmResult_MEMORY_EXHAUSTED;
++	}
++	memcpy((*snd)->file_name, ref->file, name_length);
++
+ 	// Add the new item to the cache
+ 	if (mtx_lock(&slf->lock) != thrd_success) {
+ 		return DmResult_MUTEX_ERROR;
+diff --git a/src/_Dls.h b/src/_Dls.h
+index ae01950..cb6d4c1 100644
+--- a/src/_Dls.h
++++ b/src/_Dls.h
+@@ -187,6 +187,7 @@ typedef struct DmDls {
+ 	DmGuid guid;
+ 	DmVersion version;
+ 	DmInfo info;
++	char* file_name; // The name it was loaded by, for collections without a GUID.
+ 
+ 	uint32_t instrument_count;
+ 	DmDlsInstrument* instruments;

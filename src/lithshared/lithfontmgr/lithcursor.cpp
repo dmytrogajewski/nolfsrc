@@ -1,3 +1,4 @@
+#include "engine/portable/string.h"
 //*********************************************************************************
 //*********************************************************************************
 // Project:		Lith Tech Font Manager
@@ -13,6 +14,7 @@
 
 LithCursor::LithCursor()
 {
+	m_pClient = LTNULL;
 	memset(m_szRefName, 0, LTF_REF_NAME_SIZE);
 	m_pFont = LTNULL;
 	m_pDest = LTNULL;
@@ -31,7 +33,7 @@ LithCursor::~LithCursor()
 
 LTBOOL LithCursor::Init(ILTClient *pClient, LITHCURSORCREATESTRUCT *lcCS)
 {
-	if (!pClient)
+	if (!pClient || !lcCS || (lcCS->szRefName && std::strlen(lcCS->szRefName) >= sizeof(m_szRefName)))
 		return LTFALSE;
 
 	m_pClient = pClient;
@@ -40,7 +42,7 @@ LTBOOL LithCursor::Init(ILTClient *pClient, LITHCURSORCREATESTRUCT *lcCS)
 	if (lcCS->szRefName)
 	{
 		strcpy(m_szRefName, lcCS->szRefName);
-		strupr(m_szRefName);
+		nolf::ascii_uppercase(m_szRefName);
 	}
 
 	m_pFont = lcCS->pFont;

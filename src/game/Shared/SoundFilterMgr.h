@@ -14,6 +14,7 @@
 #define __SOUND_FILTER_MGR_H__
 
 #include "GameButeMgr.h"
+#include "engine/portable/string.h"
 #include "TemplateList.h"
 
 class CSoundFilterMgr;
@@ -62,13 +63,13 @@ class CSoundFilterMgr : public CGameButeMgr
 
 		inline LTBOOL	IsDynamic(SOUNDFILTER* pFilter)
 		{
-			return (pFilter && (strcmpi(pFilter->szName, "Dynamic") == 0));
+			return (pFilter && (nolf::ascii_compare(pFilter->szName, "Dynamic") == 0));
 		}
 
 		inline LTBOOL	IsUnFiltered(SOUNDFILTER* pFilter)
 		{
 			// First record is the dynamic filter definition...
-			return (pFilter && (strcmpi(pFilter->szName, "UnFiltered") == 0));
+			return (pFilter && (nolf::ascii_compare(pFilter->szName, "UnFiltered") == 0));
 		}
 
 	private :

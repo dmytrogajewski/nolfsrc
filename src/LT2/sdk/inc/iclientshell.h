@@ -126,9 +126,9 @@
 		void *g_hLTDLLInstance=0;\
 		ILTClient *g_pLTClient=0;\
 		BEGIN_EXTERNC() \
-			__declspec(dllexport) void GetClientShellFunctions(CreateClientShellFn *pCreate, DeleteClientShellFn *pDelete);\
-			__declspec(dllexport) int GetClientShellVersion();\
-			__declspec(dllexport) void SetInstanceHandle(void *handle);\
+			NOLF_EXPORT void GetClientShellFunctions(CreateClientShellFn *pCreate, DeleteClientShellFn *pDelete);\
+			NOLF_EXPORT int GetClientShellVersion();\
+			NOLF_EXPORT void SetInstanceHandle(void *handle);\
 		END_EXTERNC()\
 		void GetClientShellFunctions(CreateClientShellFn *pCreate, DeleteClientShellFn *pDelete)\
 		{\

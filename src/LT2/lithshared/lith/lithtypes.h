@@ -13,10 +13,7 @@
 #ifndef LITHTYPES_H
 #define LITHTYPES_H
 
-// get sometypes from windows if we are a windows app
-#ifdef _WINDOWS
-//#include "windows.h"
-#endif
+#include <stdint.h>
 
 // 8 bit
 #ifndef BYTE
@@ -43,7 +40,7 @@ typedef signed short int 	INT16;
 
 // 32 bit
 #ifndef DWORD
-typedef unsigned long int	DWORD;
+typedef uint32_t	DWORD;
 #endif
 
 #ifndef UINT32

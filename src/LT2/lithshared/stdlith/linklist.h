@@ -148,7 +148,7 @@
 			#endif
 		}
 
-		virtual BOOL		GenIsValid(const GenListPos &pos) const
+		virtual LTBOOL		GenIsValid(const GenListPos &pos) const
 		{
 			return !!pos.m_Pos;
 		}
@@ -167,7 +167,7 @@
 			return GetAt(*((LPOS*)&pos.m_Pos));
 		}
 
-		virtual BOOL		GenAppend(T &toAppend)
+		virtual LTBOOL		GenAppend(T &toAppend)
 		{
 			Append(toAppend);
 			return TRUE;
@@ -188,13 +188,13 @@
 			return GetSize();
 		}
 
-		virtual BOOL		GenCopyList(const GenList<T> &other)
+		virtual LTBOOL		GenCopyList(const GenList<T> &other)
 		{
 			RemoveAll();
 			return GenAppendList(other);
 		}
 
-		virtual BOOL		GenAppendList(const GenList<T> &other)
+		virtual LTBOOL		GenAppendList(const GenList<T> &other)
 		{
 			GenListPos pos;
 			
@@ -207,14 +207,19 @@
 		}
 
 
-		virtual BOOL		GenFindElement(const T &toFind, GenListPos &thePos) const
+		virtual LTBOOL		GenFindElement(const T &toFind, GenListPos &thePos) const
 		{
-			thePos.m_Pos = LinkList_FindElementMemcmp(
-				m_pHead,
-				&toFind,
-				sizeof(T));
-
-			return !!thePos.m_Pos;
+            thePos.m_Pos = nullptr;
+            auto* node = m_pHead;
+            if (!node) return FALSE;
+            do {
+                if (memcmp(&node->m_pData, &toFind, sizeof(T)) == 0) {
+                    thePos.m_Pos = node;
+                    return TRUE;
+                }
+                node = node->m_pNext;
+            } while (node != m_pHead);
+            return FALSE;
 		}
 
 
@@ -437,7 +442,7 @@
 		do
 		{
 		
-			if( --index == 0 )
+			if( index-- == 0 )
 				return pCur;
 
 			pCur = pCur->m_pNext;

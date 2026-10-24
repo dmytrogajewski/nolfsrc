@@ -5,12 +5,9 @@
 #ifndef _BITMAPCTRL_H_
 #define _BITMAPCTRL_H_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
-#include "LTGUIMgr.h"
-#include "stdlith.h"
+#include "ltguimgr.h"
+#include "dynarray.h"
 
 class CBitmapCtrl : public CLTGUICtrl
 {

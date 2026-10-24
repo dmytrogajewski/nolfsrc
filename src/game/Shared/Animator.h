@@ -8,13 +8,14 @@
 
 // Enums
 
-enum AniTracker
+// Generated indices use the full signed range; these enumerators are sentinels.
+enum AniTracker : int32
 {
 	eAniTrackerInvalid	= -1,
 	eAniTrackerMain		= 0,
 };
 
-enum Ani
+enum Ani : int32
 {
 	eAniInvalid			= -1,
 };

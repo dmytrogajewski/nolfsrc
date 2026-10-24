@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "DisplayTimer.h"
 #include "ServerUtilities.h"
 #include "ObjectMsgs.h"
@@ -121,7 +123,8 @@ uint32 DisplayTimer::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGE
 	{
 		case MID_TRIGGER :
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -224,35 +227,35 @@ void DisplayTimer::TriggerMsg(HOBJECT hSender, const char *szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if ((_stricmp(parse.m_Args[0], "START") == 0) ||
-				(_stricmp(parse.m_Args[0], "ON") == 0))
+			if ((nolf::ascii_compare(parse.m_Args[0], "START") == 0) ||
+				(nolf::ascii_compare(parse.m_Args[0], "ON") == 0))
 			{
 				if (parse.m_nArgs > 1)
 				{
                     HandleStart((LTFLOAT)atof(parse.m_Args[1]));
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "ADD") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "ADD") == 0)
 			{
 				if (parse.m_nArgs > 1)
 				{
                     HandleAdd((LTFLOAT)atof(parse.m_Args[1]));
 				}
 			}
-			else if ((_stricmp(parse.m_Args[0], "END") == 0) ||
-					 (_stricmp(parse.m_Args[0], "OFF") == 0))
+			else if ((nolf::ascii_compare(parse.m_Args[0], "END") == 0) ||
+					 (nolf::ascii_compare(parse.m_Args[0], "OFF") == 0))
 			{
 				HandleEnd();
 			}
-			else if (_stricmp(parse.m_Args[0], "KILL") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "KILL") == 0)
 			{
 				HandleAbort();
 			}
-			else if (_stricmp(parse.m_Args[0], "PAUSE") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "PAUSE") == 0)
 			{
 				HandlePause();
 			}
-			else if (_stricmp(parse.m_Args[0], "RESUME") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "RESUME") == 0)
 			{
 				HandleResume();
 			}

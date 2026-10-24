@@ -2,7 +2,9 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "BaseSelectionFolder.h"
 #include "ClientRes.h"
 #include "InterfaceMgr.h"
@@ -460,7 +462,7 @@ void CBaseSelectionFolder::ClearSlots()
 
 eFolderID GetNextSelectionFolder(eFolderID eCurrent,int *pnHelpID)
 {
-	_ASSERT(pnHelpID);
+	GAME_ASSERT(pnHelpID);
 
 	eFolderID folder[]	=
 	{

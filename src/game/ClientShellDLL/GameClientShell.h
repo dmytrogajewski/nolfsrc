@@ -35,6 +35,7 @@
 #include "CameraOffsetMgr.h"
 #include "HeadBobMgr.h"
 #include "NetDefs.h"
+#include "platform/window.h"
 
 #define DEG2RAD(x)		(((x)*MATH_PI)/180.0f)
 #define RAD2DEG(x)		(((x)*180.0f)/MATH_PI)
@@ -213,15 +214,15 @@ class CGameClientShell : public IClientShell
 
 		void		UpdatePlayerFlags();
 
-		// Mouse Messages
-        static void OnChar(HWND hWnd, char c, int rep);
-		static void OnLButtonUp(HWND hwnd, int x, int y, UINT keyFlags);
-		static void OnLButtonDown(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
-		static void OnLButtonDblClick(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
-		static void OnRButtonUp(HWND hwnd, int x, int y, UINT keyFlags);
-		static void OnRButtonDown(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
-		static void OnRButtonDblClick(HWND hwnd, BOOL fDoubleClick, int x, int y, UINT keyFlags);
-		static void OnMouseMove(HWND hwnd, int x, int y, UINT keyFlags);
+		void HandleWindowInput(const nolf::platform::InputEvent&);
+		static void OnChar(char character);
+		static void OnLButtonUp(int x, int y);
+		static void OnLButtonDown(int x, int y);
+		static void OnLButtonDblClick(int x, int y);
+		static void OnRButtonUp(int x, int y);
+		static void OnRButtonDown(int x, int y);
+		static void OnRButtonDblClick(int x, int y);
+		static void OnMouseMove(int x, int y);
 
         LTFLOAT     GetPitch()  const { return m_fPitch; }
         LTFLOAT     GetYaw()    const { return m_fYaw; }
@@ -490,6 +491,10 @@ class CGameClientShell : public IClientShell
 
 		// Connection handling
 		LTBOOL			m_bForceDisconnect;	// Set this flag to disconnect on the next update
+		bool m_WindowReady = false;
+#ifdef NOLFSRC_NATIVE
+		uint32 m_HandshakeNonce = 0;
+#endif
 
 		// Debugging variables...
 

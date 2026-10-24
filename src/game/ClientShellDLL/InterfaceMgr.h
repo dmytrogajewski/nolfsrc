@@ -24,7 +24,7 @@
 #include "FolderMgr.h"
 #include "LayoutMgr.h"
 #include "ServerOptionMgr.h"
-#include "LTWnd.h"
+#include "LtWnd.h"
 #include "LTDialogueWnd.h"
 #include "LTMenuWnd.h"
 #include "MissionData.h"

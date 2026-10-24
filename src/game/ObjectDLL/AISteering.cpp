@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AISteering.h"
 
 CSteerable::CSteerable()
@@ -96,7 +98,7 @@ void CSteeringMgr::Term()
 
 LTBOOL CSteeringMgr::Init(CSteerable* pSteerable)
 {
-	_ASSERT(pSteerable);
+	GAME_ASSERT(pSteerable);
     if ( !pSteerable ) return LTFALSE;
 
 	m_pSteerable = pSteerable;
@@ -140,7 +142,7 @@ void CSteeringMgr::EnableSteering(CSteering::SteeringType eSteering)
 	{
 		case CSteering::eSteeringSeek:					m_SteeringSeek.Enable();				break;
 		case CSteering::eSteeringArrival:				m_SteeringArrival.Enable();				break;
-		default : _ASSERT(FALSE); break;
+		default : GAME_ASSERT(FALSE); break;
 	}
 }
 
@@ -150,7 +152,7 @@ void CSteeringMgr::DisableSteering(CSteering::SteeringType eSteering)
 	{
 		case CSteering::eSteeringSeek:					m_SteeringSeek.Disable();				break;
 		case CSteering::eSteeringArrival:				m_SteeringArrival.Disable();			break;
-		default : _ASSERT(FALSE); break;
+		default : GAME_ASSERT(FALSE); break;
 	}
 }
 
@@ -160,7 +162,7 @@ CSteering* CSteeringMgr::GetSteering(CSteering::SteeringType eSteering)
 	{
 		case CSteering::eSteeringSeek:					return &m_SteeringSeek;					break;
 		case CSteering::eSteeringArrival:				return &m_SteeringArrival;				break;
-        default : _ASSERT(FALSE);                       return LTNULL;                           break;
+        default : GAME_ASSERT(FALSE);                       return LTNULL;                           break;
 	}
 }
 
@@ -208,7 +210,7 @@ CSteering::CSteering()
 
 LTBOOL CSteering::Init(CSteerable *pSteerable)
 {
-	_ASSERT(pSteerable);
+	GAME_ASSERT(pSteerable);
     if ( !pSteerable ) return LTFALSE;
 
 	m_pSteerable = pSteerable;

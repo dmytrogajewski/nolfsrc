@@ -1,7 +1,7 @@
 // FolderAdvDisplay.cpp: implementation of the CFolderAdvDisplay class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderAdvDisplay.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

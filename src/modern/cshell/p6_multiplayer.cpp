@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : p6_multiplayer.cpp
@@ -7,7 +11,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "cshell/p6_multiplayer.h"
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"
@@ -91,7 +95,7 @@ LTBOOL P6_RejoinAfterTimeout(const char* sAddress, int nPort)
 
 	s_nRejoinsLeft--;
 
-	_snprintf(s_sRejoinAddress, sizeof(s_sRejoinAddress) - 1, "%s:%d", sAddress, nPort);
+	std::snprintf(s_sRejoinAddress, sizeof(s_sRejoinAddress) - 1, "%s:%d", sAddress, nPort);
 	s_sRejoinAddress[sizeof(s_sRejoinAddress) - 1] = '\0';
 
 	g_pGameClientShell->ClearDisconnectCode();

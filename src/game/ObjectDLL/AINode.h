@@ -4,6 +4,8 @@
 #define _AI_NODE_H_
 
 #include "ltengineobjects.h"
+#include "AssertMgr.h"
+#include <cassert>
 
 class AINode : public BaseClass
 {
@@ -159,7 +161,7 @@ class CAINode
 		// Search
 
 		void	Search();
-		void	SearchReset() { _ASSERT(IsSearchable()); m_bSearched = LTFALSE; }
+		void	SearchReset() { GAME_ASSERT(IsSearchable()); m_bSearched = LTFALSE; }
 
 		uint32	GetSearchFlags() const { return m_dwSearchFlags; }
 		LTBOOL	IsSearchable() const { return m_dwSearchFlags & kSearchFlagAny ? LTTRUE : LTFALSE; }

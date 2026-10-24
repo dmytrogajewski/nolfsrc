@@ -10,10 +10,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "VersionMgr.h"
 
-#include "regmgr.h"
+#include "platform/settings.h"
+#include "platform/system.h"
 
 #ifdef _DEMO
 static const char* s_szVersion		= "";
@@ -46,22 +48,12 @@ CVersionMgr::CVersionMgr()
 	m_szLanguage[0]	= '\0';
 	m_bLowViolence	= false;
 
-	// Get the language registry key...
-	CRegMgr	regMgr;
+    std::string language = "English";
+    try { language = nolf::platform::Settings().get("language", "English"); }
+    catch (const std::exception& error) { nolf::platform::log("preferences", error.what()); }
+    std::snprintf(m_szLanguage, sizeof(m_szLanguage), "%s", language.c_str());
+    m_bLowViolence = nolf::ascii_compare(m_szLanguage, "German") == 0;
 
-	if (regMgr.Init("Monolith Productions", "No One Lives Forever", "1.0"))
-	{
-		unsigned int nBufSize = sizeof(m_szLanguage);
-		regMgr.Get("Language", m_szLanguage, nBufSize, "English");
-
-		if (m_szLanguage[0])
-		{
-			if (_stricmp(m_szLanguage, "German") == 0)
-			{
-				m_bLowViolence = true;
-			}
-		}
-	}
 }
 
 // ----------------------------------------------------------------------- //

@@ -15,6 +15,12 @@
 
 #define __SERVERAPI_EXPORT__
 #include "servermgr.h"
+#include "engine/portable/engine_resources.h"
+#include <new>
+#include <memory>
+#include "platform/sync.h"
+#include "platform/system.h"
+#include "server_access.h"
 
 
 // g_ServerInterface (0x10058bb0) is defined in servermgr.cpp: its initializer
@@ -24,49 +30,67 @@
 // server.dll only. lithtech.exe has no export directory, so neither export
 // is in it, and the interface they hand out (servermgr.cpp) is not either.
 #ifdef LT_SERVER_BUILD
+namespace {
+nolf::platform::RecursiveMutex lifecycle_mutex;
+bool lifecycle_transition = false;
+struct Transition {
+    Transition() { lifecycle_transition = true; }
+    ~Transition() { lifecycle_transition = false; }
+};
+}
+ServerInterfaceCall::ServerInterfaceCall()
+    : lock_(lifecycle_mutex), manager_(g_ServerInterface.m_pServerMgr),
+      activity_(manager_ ? manager_->m_Lifetime : nullptr) {}
 SERVERAPI SI_CREATESTATUS CreateServer(int version, LTGUID &appGuid, ServerInterface **ppServer)
 {
+	if (!ppServer) return SI_ERRORINITTING;
 	*ppServer = LTNULL;
+	std::lock_guard lock(lifecycle_mutex);
 
-	if (g_ServerInterface.m_pServerMgr)
+	if (g_ServerInterface.m_pServerMgr || lifecycle_transition)
 		return SI_ALREADYINSTANCED;
 
 	if (version != SI_VERSION)
 		return SI_INVALIDVERSION;
 
-	int status = dsi_Init();
-	if (status != 0)
-		return (status == 1) ? SI_CANTLOADRESOURCEMODULE : SI_ERRORINITTING;
+	if (!nolf::engine_resources_ready()) return SI_CANTLOADRESOURCEMODULE;
 
-	g_ServerInterface.m_pServerMgr = new CServerMgr;
-	if (g_ServerInterface.m_pServerMgr)
-	{
-		if (g_ServerInterface.m_pServerMgr->Init())
-		{
-			g_ServerInterface.m_pServerMgr->m_NetMgr.m_Guid = appGuid;
-			*ppServer = &g_ServerInterface;
-			return SI_OK;
-		}
+    Transition transition;
+    try {
+        auto manager = std::make_unique<CServerMgr>();
+        if (!manager->Init()) return SI_ERRORINITTING;
+        manager->m_NetMgr.m_Guid = appGuid;
+        g_ServerInterface.m_pServerMgr = manager.release();
+        *ppServer = &g_ServerInterface; return SI_OK;
+    } catch (const std::exception& error) { nolf::platform::log("server creation",error.what()); }
 
-		delete g_ServerInterface.m_pServerMgr;
-		g_ServerInterface.m_pServerMgr = LTNULL;
-	}
-
-	dsi_Term();
 	return SI_ERRORINITTING;
 }
 
 
 SERVERAPI void DeleteServer()
 {
-	if (g_ServerInterface.m_pServerMgr)
+    std::lock_guard lock(lifecycle_mutex);
+    if (lifecycle_transition) return;
+	if (auto* manager = g_ServerInterface.m_pServerMgr)
 	{
-		g_ServerInterface.m_pServerMgr->Term();
-
-		delete g_ServerInterface.m_pServerMgr;
+		lifecycle_transition = true;
 		g_ServerInterface.m_pServerMgr = LTNULL;
-
-		dsi_Term();
+        const auto life = manager->m_Lifetime;
+        life->retiring = true;
+        ++life->epoch;
+        life->when_idle = [manager] {
+            std::lock_guard lock(lifecycle_mutex);
+            auto* classes = &manager->m_ClassMgr;
+            delete manager;
+            if (g_pServerMgr == manager) g_pServerMgr = nullptr;
+            if (g_pClassMgr == classes) g_pClassMgr = nullptr;
+            lifecycle_transition = false;
+        };
+        if (!life->active_calls) {
+            auto cleanup = std::exchange(life->when_idle, {});
+            cleanup();
+        }
 	}
 }
 #endif

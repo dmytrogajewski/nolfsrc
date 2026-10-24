@@ -16,7 +16,7 @@
 //*********************************************************************************
 
 #include <stdio.h>
-#include <mbstring.h>
+#include <cstring>
 
 #ifdef _LITHTECH2
 	#include "lithfontdefs.h"
@@ -34,7 +34,7 @@ class LithFont
 	public:
 		// Constructors and destructors
 		LithFont();
-		~LithFont();
+		virtual ~LithFont();
 
 		// Memory allocation and deallocation
 		virtual LTBOOL	Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS);
@@ -55,7 +55,10 @@ class LithFont
 		virtual uint8	GetState(LITHFONTSAVEDATA *lfSD = LTNULL) = 0;
 
 		// Get font information
-		void		SetRefName(char *szName)	{ strcpy(m_szRefName, szName); }
+		LTBOOL SetRefName(const char* name) {
+			if (!name || std::strlen(name) >= sizeof(m_szRefName)) return LTFALSE;
+			std::strcpy(m_szRefName,name); return LTTRUE;
+		}
 		char*		GetRefName()				{ return m_szRefName; }
 		int			Height()					{ return m_nHeight; }
 
@@ -69,11 +72,12 @@ class LithFont
 		// Font data variables
 		char		m_szRefName[LTF_REF_NAME_SIZE];		// Reference name for the font
 		int			m_nHeight;							// Height of the font characters...
+		std::string m_StringStorage;
+		uint64 m_FontGeneration;
 
 	protected:
-		// Function to extract the root filename from an entire path, filename, and extension
-		void	GetFilename(char *szFullPath, char *szName);
-
+		char* PrepareText(const char*, int index);
+		bool UpdateLayoutIdentity(LITHFONTSAVEDATA&, const LITHFONTDRAWDATA&, uint32 flags);
 		// Function to determine whether a line of text should be drawn or not within the given RECT
 		virtual LTBOOL	ClipFont(LTRect &rcFont) = 0;
 };

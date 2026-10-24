@@ -1,7 +1,7 @@
 // FolderGallery.cpp: implementation of the CFolderGallery class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderGallery.h"
 #include "FolderIntel.h"
 #include "FolderMgr.h"

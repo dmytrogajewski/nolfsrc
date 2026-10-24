@@ -37,6 +37,7 @@
 #include <string.h>
 #include "servermgr.h"
 #include "de_error.h"
+#include "server_access.h"
 
 
 // The whole TU is server.dll's (see above), so lithtech.exe's compile of
@@ -54,7 +55,10 @@ MyServerInterface g_ServerInterface;
 
 LTRESULT MyServerInterface::SetAppHandler(ServerAppHandler *pHandler)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
 	if (!pMgr)
 		RETURN_ERROR(1, "ServerInterface::SetAppHandler", LT_NOTINITIALIZED);
 
@@ -64,7 +68,10 @@ LTRESULT MyServerInterface::SetAppHandler(ServerAppHandler *pHandler)
 
 LTRESULT MyServerInterface::RunConsoleString(char *pStr)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
 	if (!pMgr)
 		RETURN_ERROR(1, "ServerInterface::RunConsoleString", LT_NOTINITIALIZED);
 
@@ -73,14 +80,14 @@ LTRESULT MyServerInterface::RunConsoleString(char *pStr)
 
 LTRESULT MyServerInterface::GetConsoleVar(char *pName, HCONSOLEVAR *hVar, char *pDefaultVal)
 {
-	char str[256];
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
 
-	if (!hVar)
+	if (!hVar || !pName || !*pName)
 		RETURN_ERROR(1, "ServerInterface::GetConsoleVar", LT_INVALIDPARAMS);
 
 	*hVar = LTNULL;
-
-	CServerMgr* pMgr = m_pServerMgr;
 	if (!pMgr)
 		RETURN_ERROR(1, "ServerInterface::GetConsoleVar", LT_NOTINITIALIZED);
 
@@ -99,12 +106,9 @@ LTRESULT MyServerInterface::GetConsoleVar(char *pName, HCONSOLEVAR *hVar, char *
 	}
 	else if (pDefaultVal)
 	{
-		// No variable by that name yet: create one by running the assignment
-		// as a console command, and look it up again.
-		sprintf(str, "%s \"%s\"", pName, pDefaultVal);
-		cc_RunCommand(&m_pServerMgr->m_ConsoleState, str, 2);
+		con_SetVar(&pMgr->m_ConsoleState, pName, pDefaultVal);
 
-		hVarFound = cc_FindConsoleVar(&m_pServerMgr->m_ConsoleState, pName);
+		hVarFound = cc_FindConsoleVar(&pMgr->m_ConsoleState, pName);
 		if (hVarFound)
 		{
 			*hVar = hVarFound;
@@ -123,7 +127,11 @@ LTRESULT MyServerInterface::GetConsoleVar(char *pName, HCONSOLEVAR *hVar, char *
 
 LTRESULT MyServerInterface::GetVarValueFloat(HCONSOLEVAR hVar, float *val)
 {
-	if (!hVar || !val)
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
+	if (!hVar || !val || !pMgr->m_ConsoleState.m_Variables.Contains(reinterpret_cast<LTCommandVar*>(hVar)))
 		RETURN_ERROR(1, "ServerInterface::GetVarValueFloat", LT_INVALIDPARAMS);
 
 	*val = ((LTCommandVar*)hVar)->m_FloatVal;
@@ -132,17 +140,25 @@ LTRESULT MyServerInterface::GetVarValueFloat(HCONSOLEVAR hVar, float *val)
 
 LTRESULT MyServerInterface::GetVarValueString(HCONSOLEVAR hVar, char *pStr, uint32 maxLen)
 {
-	if (!hVar || !pStr || !maxLen)
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
+	if (!hVar || !pStr || !maxLen || !pMgr->m_ConsoleState.m_Variables.Contains(reinterpret_cast<LTCommandVar*>(hVar)))
 		RETURN_ERROR(1, "ServerInterface::GetVarValueString", LT_INVALIDPARAMS);
 
-	strncpy(pStr, ((LTCommandVar*)hVar)->m_pStringVal, maxLen - 1);
+	const auto* value = ((LTCommandVar*)hVar)->m_pStringVal;
+    strncpy(pStr, value ? value : "", maxLen - 1);
 	pStr[maxLen - 1] = 0;
 	return LT_OK;
 }
 
 LTRESULT MyServerInterface::LoadConfigFile(char *pFilename)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
 	if (!pMgr)
 		RETURN_ERROR(1, "ServerInterface::LoadConfigFile", LT_NOTINITIALIZED);
 
@@ -151,7 +167,10 @@ LTRESULT MyServerInterface::LoadConfigFile(char *pFilename)
 
 LTRESULT MyServerInterface::SaveConfigFile(char *pFilename)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
 	if (!pMgr)
 		RETURN_ERROR(1, "ServerInterface::SaveConfigFile", LT_NOTINITIALIZED);
 
@@ -160,39 +179,54 @@ LTRESULT MyServerInterface::SaveConfigFile(char *pFilename)
 
 LTRESULT MyServerInterface::SendToServerShell(char *pInfo, int nLen)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
 	if (!pMgr)
 		RETURN_ERROR(1, "ServerInterface::SendToServerShell", LT_NOTINITIALIZED);
 
 	IServerShell* pShell = pMgr->m_ClassMgr.m_pServerShell;
 	if (pShell)
-		return pShell->ServerAppMessageFn(pInfo, nLen);
+		return pMgr->m_ClassMgr.shell([&](IServerShell& shell) { return shell.ServerAppMessageFn(pInfo,nLen); });
 
 	return LT_NOTFOUND;
 }
 
 LTBOOL MyServerInterface::AddResources(char **pResources, uint32 nResources)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	return m_pServerMgr->AddResources(pResources, nResources);
+	return pMgr->AddResources(pResources, nResources);
 }
 
 LTBOOL MyServerInterface::LoadBinaries()
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	return m_pServerMgr->LoadBinaries();
+	return pMgr->LoadBinaries();
 }
 
 FileEntry* MyServerInterface::GetFileList(char *pDirName)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return nullptr; }
+
 	if (!m_pServerMgr)
 		return LTNULL;
 
-	return fs_GetFileList(&m_pServerMgr->m_FileMgr, pDirName);
+	return fs_GetFileList(&pMgr->m_FileMgr, pDirName);
 }
 
 void MyServerInterface::FreeFileList(FileEntry *pList)
@@ -202,12 +236,16 @@ void MyServerInterface::FreeFileList(FileEntry *pList)
 
 LTRESULT MyServerInterface::OpenFile(char *pFilename, ILTStream **pStream)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { if (pStream) *pStream = nullptr; return LT_NOTINITIALIZED; }
+
 	static char* pFnName = "MyServerInterface::OpenFile";
 
 	if (!pFilename || !pStream)
 		RETURN_ERROR_SYM(2, pFnName, LT_INVALIDPARAMS);
 
-	*pStream = fs_OpenFile(&m_pServerMgr->m_FileMgr, pFilename);
+	*pStream = fs_OpenFile(&pMgr->m_FileMgr, pFilename);
 	if (*pStream)
 		return LT_OK;
 
@@ -216,129 +254,182 @@ LTRESULT MyServerInterface::OpenFile(char *pFilename, ILTStream **pStream)
 
 LTRESULT MyServerInterface::CopyFile(const char *pszSourceFile, const char *pszDestFile)
 {
-	return fs_CopyFile(&m_pServerMgr->m_FileMgr, pszSourceFile, pszDestFile);
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
+
+	return fs_CopyFile(&pMgr->m_FileMgr, pszSourceFile, pszDestFile);
 }
 
 LTBOOL MyServerInterface::SetGameInfo(void *pGameInfo, uint32 nGameInfoLen)
 {
-	m_pServerMgr->SetGameInfo(pGameInfo, nGameInfoLen);
-	return LTTRUE;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
+	return pMgr->SetGameInfo(pGameInfo, nGameInfoLen);
 }
 
 int MyServerInterface::GetNumClients()
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return 0; }
+
 	if (!m_pServerMgr)
 		return 0;
 
-	return m_pServerMgr->GetNumClients();
+	return pMgr->GetNumClients();
 }
 
 LTBOOL MyServerInterface::GetClientName(int index, char *pName, int maxChars)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	return m_pServerMgr->GetClientName(index, pName, maxChars);
+	return pMgr->GetClientName(index, pName, maxChars);
 }
 
 LTBOOL MyServerInterface::GetClientInfo(int index, ClientInfo* pInfo)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	return m_pServerMgr->GetClientInfo(index, pInfo);
+	return pMgr->GetClientInfo(index, pInfo);
 }
 
 LTBOOL MyServerInterface::BootClient(uint32 dwClientID)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	return m_pServerMgr->BootClient(dwClientID);
+	return pMgr->BootClient(dwClientID);
 }
 
-LTRESULT MyServerInterface::GetClientPing(uint32 nClientId, float &ping)
-{
-	Client* pClient = m_pServerMgr->FindClient(nClientId);
-	if (pClient)
-	{
-		NetConnection* pConn = pClient->m_pConnection;
-		if (pConn)
-		{
-			ping = pConn->m_Ping;
-			return LT_OK;
-		}
-	}
+LTRESULT MyServerInterface::GetClientPing(uint32 id, float& ping) {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { ping = 0; return LT_NOTINITIALIZED; }
 
-	RETURN_ERROR(2, "ILTPhysics::GetPing", LT_NOTINITIALIZED);
+    ping = 0;
+    if (!m_pServerMgr) return LT_NOTINITIALIZED;
+    auto* client = pMgr->FindClient(id);
+    if (!client || !client->m_pConnection || client->m_Removing) return LT_NOTINITIALIZED;
+    ping = client->m_pConnection->m_Ping;
+    return LT_OK;
 }
 
 int MyServerInterface::GetErrorCode()
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return -1; }
+
 	if (!m_pServerMgr)
 		return -1;
 
-	return m_pServerMgr->GetErrorCode();
+	return pMgr->GetErrorCode();
 }
 
 void MyServerInterface::GetErrorString(char *pString, int maxLen)
 {
+    if (!pString || maxLen <= 0) return;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { if (pString && maxLen > 0) pString[0] = 0; return; }
+
 	if (!m_pServerMgr)
 	{
 		pString[0] = 0;
 		return;
 	}
 
-	m_pServerMgr->GetErrorString(pString, maxLen);
+	pMgr->GetErrorString(pString, maxLen);
 }
 
 LTBOOL MyServerInterface::Update(long flags)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
 	// The engine can tell it is being reentered from its own update.
+	if (m_bInUpdate) return LTFALSE;
 	m_bInUpdate = LTTRUE;
-	LTBOOL bRet = m_pServerMgr->Update(flags, dsi_GetTime());
-	m_bInUpdate = LTFALSE;
-
-	return bRet;
+    struct Reset { LTBOOL& flag; ~Reset() { flag = LTFALSE; } } reset{m_bInUpdate};
+	return pMgr->Update(flags, dsi_GetTime());
 }
 
 LTBOOL MyServerInterface::InitNetworking(char *pDriver, uint32 dwFlags)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
 	// Both arguments are accepted and ignored; the manager's own network
 	// manager is simply started.
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	m_pServerMgr->m_NetMgr.Init();
-	return LTTRUE;
+	return pMgr->m_NetMgr.Init() == LT_OK;
 }
 
 LTBOOL MyServerInterface::GetServiceList(NetService *&pListHead)
 {
-	return !m_pServerMgr->m_NetMgr.GetServiceList(pListHead);
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { pListHead = nullptr; return LTFALSE; }
+
+	return !pMgr->m_NetMgr.GetServiceList(pListHead);
 }
 
 LTBOOL MyServerInterface::FreeServiceList(NetService *pListHead)
 {
-	return !m_pServerMgr->m_NetMgr.FreeServiceList(pListHead);
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
+	return !pMgr->m_NetMgr.FreeServiceList(pListHead);
 }
 
 LTBOOL MyServerInterface::SelectService(HNETSERVICE hNetService)
 {
-	return !m_pServerMgr->m_NetMgr.SelectService(hNetService);
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
+	return !pMgr->m_NetMgr.SelectService(hNetService);
 }
 
 LTBOOL MyServerInterface::UpdateSessionName(const char* sName)
 {
-	return !m_pServerMgr->m_NetMgr.UpdateSessionName(sName);
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
+
+	return !pMgr->m_NetMgr.UpdateSessionName(sName);
 }
 
 LTBOOL MyServerInterface::HostGame(NetHost &hostInfo)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LTFALSE; }
 
 	if (!pMgr)
 		return LTFALSE;
@@ -355,15 +446,21 @@ LTBOOL MyServerInterface::HostGame(NetHost &hostInfo)
 
 LTBOOL MyServerInterface::GetTcpIpAddress(char* sAddress, uint32 dwBufferSize, unsigned short &hostPort)
 {
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { hostPort = 0; if (sAddress && dwBufferSize) *sAddress = 0; return LTFALSE; }
+
 	if (!m_pServerMgr)
 		return LTFALSE;
 
-	return !m_pServerMgr->m_NetMgr.GetTcpIpAddress(sAddress, dwBufferSize, hostPort);
+	return !pMgr->m_NetMgr.GetTcpIpAddress(sAddress, dwBufferSize, hostPort);
 }
 
 LTRESULT MyServerInterface::SendTo(const void *pData, uint32 len, const char *sAddr, uint32 port)
 {
-	CServerMgr* pMgr = m_pServerMgr;
+    ServerInterfaceCall activity;
+    auto* pMgr = activity.manager();
+    if (!activity.available()) { return LT_NOTINITIALIZED; }
 
 	for (uint32 i = 0; i < pMgr->m_NetMgr.m_Drivers.m_nElements; i++)
 	{

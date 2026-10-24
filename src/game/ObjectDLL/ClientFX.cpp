@@ -10,9 +10,9 @@
 
 // Includes....
 
-#include "stdafx.h"
-#include "clientfx.h"
-#include "msgIds.h"
+#include "Stdafx.h"
+#include "ClientFX.h"
+#include "MsgIDs.h"
 
 BEGIN_CLASS(CClientFX)
 	ADD_STRINGPROP(FxName, "")

@@ -5,10 +5,15 @@
 // unchanged), container plumbing restored to the LT2 zSymTab/zTools
 // design and verified per-function against the shipped ButeMgr.obj.
 
-#include "stdafx.h"
 #include "butemgr.h"
 #include "stdio.h"
 #include "stdarg.h"
+#include "platform/filesystem.h"
+#include <sstream>
+#include <cstring>
+#include <locale>
+#include <span>
+#include <exception>
 
 const int EqualTok		= 5;
 const int PosIntegerTok = 6;
@@ -200,31 +205,12 @@ public:
 		int m_tokenMinor;
 	};
 
-	CReservedWords()
-		: m_reservedWords(Compare, 2, RwHashFunc, zPtrColl::active)
-	{
-		m_reservedWords.insert(new CReservedWord("FALSE", 18, 0));
-		m_reservedWords.insert(new CReservedWord("TRUE", 18, 1));
-	}
-
-	CReservedWord* Lookup(char const* pszName)
-	{
-		CReservedWord rw;
-		rw.m_name = pszName;
-		return m_reservedWords.lookup(&rw);
-	}
-
-	static int Compare(CReservedWord* a, CReservedWord* b)
-	{
-		return strcmp(a->m_name, b->m_name);
-	}
-
-	static unsigned RwHashFunc(CReservedWord* p, unsigned m)
-	{
-		return zHashTable::default_hash(p->m_name, m);
-	}
-
-	zGHashTable<CReservedWord> m_reservedWords;
+    CReservedWord* Lookup(const char* name) {
+        for (auto& word : words) if (std::strcmp(name, word.m_name) == 0) return &word;
+        return nullptr;
+    }
+private:
+    CReservedWord words[2]{{"FALSE", 18, 0}, {"TRUE", 18, 1}};
 
 } static s_reservedWords;
 
@@ -238,6 +224,8 @@ public:
 CButeMgr::CButeMgr()
 {
 	m_decryptCode = 0;
+    m_checksum = 0;
+    m_pCurrTabOfItems = nullptr;
 	m_pDisplayFunc = NULL;
 	m_lineNumber = 0;
 	m_bLineCounterFlag = true;
@@ -279,7 +267,8 @@ void CButeMgr::DisplayMessage(const char* szMsg, ...)
 	va_start(v, szMsg);
 	CString str;
 	str.FormatV(szMsg, v);
-	m_sErrorString.Format("ButeMgr (%s, %d):  %s", m_sAttributeFilename, m_lineNumber, str);
+	va_end(v);
+	m_sErrorString.Format("ButeMgr (%s, %d):  %s", static_cast<const char*>(m_sAttributeFilename), m_lineNumber, static_cast<const char*>(str));
 
 	TRACE("%s\n", m_sErrorString.GetBuffer(0));
 	if (m_pDisplayFunc)
@@ -310,7 +299,8 @@ short CButeMgr::CharClass(unsigned char currentChar)
 {
     //if (ClassMap[(unsigned int)currentChar] == 0)
 		//DisplayMessage("ButeMgr (%d):  Illegal character encountered in attribute file.", m_lineNumber);
-    return ClassMap[(unsigned int)currentChar] - 1;
+    const auto type = ClassMap[static_cast<unsigned int>(currentChar)];
+    return type > 0 ? type - 1 : 50;
 }
 
 
@@ -346,7 +336,7 @@ void CButeMgr::LookupCodes(short State, unsigned char currentChar)
 bool CButeMgr::ScanTok()
 {
 	short State = StartState;
-	static short Pos;
+	std::size_t Pos;
 
 	Pos = 0;
 	for (;;)
@@ -358,6 +348,7 @@ bool CButeMgr::ScanTok()
 				return false;
 			case MoveAppend:
 				State = NextState(State, m_currentChar);
+				if (Pos + 1 >= sizeof(m_szTokenString)) { DisplayMessage("Attribute token is too long"); return false; }
 				m_szTokenString[Pos++] = m_currentChar;
 				if (m_pSaveData && m_bPutChar && m_currentChar)
 					*m_pSaveData << m_currentChar;
@@ -371,12 +362,12 @@ bool CButeMgr::ScanTok()
 				break;
 			case HaltAppend:
 				LookupCodes(State, m_currentChar);
+				if (Pos + 1 >= sizeof(m_szTokenString)) { DisplayMessage("Attribute token is too long"); return false; }
 				m_szTokenString[Pos++] = m_currentChar;
 				if (m_pSaveData && m_bPutChar && m_currentChar)
 					*m_pSaveData << m_currentChar;
 				ConsumeChar();
-				if (m_token == 0)
-					ScanTok();
+				if (m_token == 0) { State = StartState; Pos = 0; continue; }
 				m_szTokenString[Pos] = '\0';
 				return true;
 			case HaltNoAppend:
@@ -384,15 +375,13 @@ bool CButeMgr::ScanTok()
 				if (m_pSaveData && m_bPutChar && m_currentChar)
 					*m_pSaveData << m_currentChar;
 				ConsumeChar();
-				if (m_token == 0)
-					ScanTok();
+				if (m_token == 0) { State = StartState; Pos = 0; continue; }
 				m_szTokenString[Pos] = '\0';
 				return true;
 			case HaltReuse:
 				m_szTokenString[Pos] = '\0';
 				LookupCodes(State, m_currentChar);
-				if (m_token == 0)
-					ScanTok();
+				if (m_token == 0) { State = StartState; Pos = 0; continue; }
 				return true;
 		}
 	}
@@ -551,7 +540,7 @@ bool CButeMgr::Statement()
 			}
 			break;
 		case RectTok:
-			sscanf(m_szTokenString, "(%d, %d, %d, %d)", &left, &top, &right, &bottom);
+			if (sscanf(m_szTokenString, "(%d, %d, %d, %d)", &left, &top, &right, &bottom) != 4) { DisplayMessage("Invalid compound attribute value"); return false; }
 			if (!m_pSaveData)
 			{
 				if (!bDuplicate)
@@ -564,7 +553,7 @@ bool CButeMgr::Statement()
 			}
 			break;
 		case PointTok:
-			sscanf(m_szTokenString, "(%d, %d)", &x, &y);
+			if (sscanf(m_szTokenString, "(%d, %d)", &x, &y) != 2) { DisplayMessage("Invalid compound attribute value"); return false; }
 			if (!m_pSaveData)
 			{
 				if (!bDuplicate)
@@ -577,7 +566,7 @@ bool CButeMgr::Statement()
 			}
 			break;
 		case VectorTok:
-			sscanf(m_szTokenString, "<%lf, %lf, %lf>", &i, &j, &k);
+			if (sscanf(m_szTokenString, "<%lf, %lf, %lf>", &i, &j, &k) != 3) { DisplayMessage("Invalid compound attribute value"); return false; }
 			if (!m_pSaveData)
 			{
 				if (!bDuplicate)
@@ -590,7 +579,7 @@ bool CButeMgr::Statement()
 			}
 			break;
 		case RangeTok:
-			sscanf(m_szTokenString, "[%lf, %lf]", &i, &j);
+			if (sscanf(m_szTokenString, "[%lf, %lf]", &i, &j) != 2) { DisplayMessage("Invalid compound attribute value"); return false; }
 			if (!m_pSaveData)
 			{
 				if (!bDuplicate)
@@ -672,7 +661,7 @@ bool CButeMgr::Tag()
 
 void CButeMgr::AuxTabItemsSave(const char* sz, CSymTabItem* pItem, void* p)
 {
-	ostream* pSaveData = (ostream*)p;
+	std::ostream* pSaveData = static_cast<std::ostream*>(p);
 
 	*pSaveData << "\r\n" << sz << " = ";
 
@@ -724,7 +713,7 @@ void CButeMgr::AuxTabItemsSave(const char* sz, CSymTabItem* pItem, void* p)
 
 void CButeMgr::NewTabsSave(const char* sz, TableOfItems* pTabOfItems, void* p)
 {
-	ostream* pSaveData = (ostream*)p;
+	std::ostream* pSaveData = static_cast<std::ostream*>(p);
 
 	*pSaveData << "\r\n\r\n" << "[" << sz << "]";
 
@@ -773,74 +762,39 @@ bool CButeMgr::TagList()
 }
 
 
-bool CButeMgr::Save(const char* szNewFileName)
+bool CButeMgr::Save(const char* filename)
 {
-	Reset();
-	if (m_sAttributeFilename.IsEmpty() && !szNewFileName)
-		return false;
-	m_bPutChar = true;
-	char buf[4096];
-	ifstream is(m_sAttributeFilename, ios::nocreate | ios::binary);
-	// No clamp of an empty file's length to 1: shipped passes the 0 straight
-	// to new char[] and the strstream.
-	long nFileLength = 0;
-	if (is.is_open())
-	{
-		is.seekg(0, ios::end);
-		nFileLength = is.tellg();
-	}
-	is.clear();
-	is.seekg(0);
-	strstream ss(new char[nFileLength], nFileLength, ios::in | ios::out);
-	if (m_bCrypt)
-	{
-		m_cryptMgr.Decrypt(is, ss);
-		m_pSaveData = new iostream(new strstreambuf(nFileLength));
-	}
-	else
-	{
-		if (is.is_open())
-		{
-			while (!is.eof())
-			{
-				is.read(buf, 4096);
-				ss.write(buf, is.gcount());
-			}
-		}
-		is.close();
-		if (szNewFileName)
-			m_pSaveData = new fstream(szNewFileName, ios::binary | ios::in | ios::out | ios::trunc);
-		else
-			m_pSaveData = new fstream(m_sAttributeFilename, ios::binary | ios::in | ios::out | ios::trunc);
-	}
-	if (m_pSaveData->fail())
-	{
-		delete m_pSaveData;
-		m_pSaveData = NULL;
-		delete ss.str();
-		m_bPutChar = false;
-		return false;
-	}
-	m_pSaveData->flags(m_pSaveData->flags() | ios::showpoint | ios::fixed);
-	ss.clear();
-	m_pData = &ss;
-	TagList();
-	m_newTagTab.traverse(NewTabsSave, m_pSaveData);
-	m_pSaveData->clear();
-	if (m_bCrypt)
-	{
-		if (szNewFileName)
-			m_cryptMgr.Encrypt(*m_pSaveData, ofstream(szNewFileName, ios::binary));
-		else
-			m_cryptMgr.Encrypt(*m_pSaveData, ofstream(m_sAttributeFilename, ios::binary));
-	}
-	delete ss.str();
-	if (m_bCrypt)
-		delete m_pSaveData->rdbuf();
-	delete m_pSaveData;
-	m_pSaveData = NULL;
-	m_bPutChar = false;
-	return true;
+    const char* destination = filename ? filename : static_cast<const char*>(m_sAttributeFilename);
+    if (!*destination) return false;
+    Reset();
+    std::istringstream input(m_sourceText);
+    std::ostringstream output;
+    input.imbue(std::locale::classic());
+    output.imbue(std::locale::classic());
+    output.setf(std::ios::showpoint | std::ios::fixed);
+    m_pData = &input;
+    m_pSaveData = &output;
+    m_bPutChar = true;
+    struct ResetStreams {
+        CButeMgr& owner;
+        ~ResetStreams() { owner.m_pData = nullptr; owner.m_pSaveData = nullptr; owner.m_bPutChar = false; }
+    } reset{*this};
+    try {
+        if (!TagList()) return false;
+        m_newTagTab.traverse(NewTabsSave, m_pSaveData);
+        auto text = output.str();
+        if (m_bCrypt) {
+            std::istringstream clear(text);
+            std::ostringstream encoded;
+            m_cryptMgr.Encrypt(clear, encoded);
+            text = encoded.str();
+        }
+        nolf::platform::atomic_write(destination, std::as_bytes(std::span(text.data(), text.size())));
+        return true;
+    } catch (const std::exception& error) {
+        DisplayMessage("%s", error.what());
+        return false;
+    }
 }
 
 
@@ -853,10 +807,11 @@ void CButeMgr::TagTraverseFunc(const char* szTag, TableOfItems* pData, void* pEx
 
 void CButeMgr::GetTags(void (*pCallback)(const char* szTag, void* pAux), void* pAux)
 {
-	TagExtraData ed(pCallback, pAux);
-	m_tagTab.traverse(TagTraverseFunc, &ed);
-	m_auxTagTab.traverse(TagTraverseFunc, &ed);
-	m_newTagTab.traverse(TagTraverseFunc, &ed);
+    std::vector<std::string> tags;
+    for (const auto* table : {&m_tagTab, &m_auxTagTab, &m_newTagTab})
+        for (const auto& [name, value] : table->snapshot()) tags.push_back(name);
+    // The callback may reset or destroy this parser.
+    for (const auto& tag : tags) pCallback(tag.c_str(), pAux);
 }
 
 
@@ -869,19 +824,14 @@ void CButeMgr::KeyTraverseFunc(const char* szKey, CSymTabItem* pData, void* pExt
 
 void CButeMgr::GetKeys(const char* szTag, void (*pCallback)(const char* szKey, CSymTabItem* pData, void* pAux), void* pAux)
 {
-	KeyExtraData ed(pCallback, pAux);
-
-	TableOfItems* pTab = m_tagTab.lookup(szTag);
-	if (pTab)
-		pTab->traverse(KeyTraverseFunc, &ed);
-
-	pTab = m_auxTagTab.lookup(szTag);
-	if (pTab)
-		pTab->traverse(KeyTraverseFunc, &ed);
-
-	pTab = m_newTagTab.lookup(szTag);
-	if (pTab)
-		pTab->traverse(KeyTraverseFunc, &ed);
+    TableOfItems::Snapshot entries;
+    for (const auto* tags : {&m_tagTab, &m_auxTagTab, &m_newTagTab}) {
+        if (const auto* table = tags->lookup(szTag)) {
+            auto more = table->snapshot();
+            entries.insert(entries.end(), more.begin(), more.end());
+        }
+    }
+    for (const auto& [name, value] : entries) pCallback(name.c_str(), value.get(), pAux);
 }
 
 

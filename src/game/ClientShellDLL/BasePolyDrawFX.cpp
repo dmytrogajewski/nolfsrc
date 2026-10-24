@@ -10,18 +10,24 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "BasePolyDrawFX.h"
 
 void BasePolyDrawFn(ILTCustomDraw *pDraw, HLOCALOBJ hObj, void *pUser)
 {
 	if (!hObj) return;
 
+#ifdef NOLFSRC_MODERN
+	// The canvas's user is the effect that created it, which may be gone
+	// while others still draw on the canvas.
+	if (pUser) CBasePolyDrawFX::DrawAll(pDraw);
+#else
 	CBasePolyDrawFX* pFX = (CBasePolyDrawFX*)pUser;
 	if (pFX )
 	{
 		pFX->DrawAll(pDraw);
 	}
+#endif
 }
 
 LTBOOL CBasePolyDrawFX::s_bListInited  = LTFALSE;

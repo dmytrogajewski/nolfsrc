@@ -128,7 +128,7 @@ fi
 # --- our OpenGL renderer -> out/ext/opengl.ren --------------------------------
 # The renderer core (src/modern/render/) over its OpenGL backend (gl/).
 R=src/modern/render
-GSRC=$(ls "$R"/*.cpp "$R"/*.h "$R"/gl/*.cpp "$R"/gl/*.def "$R"/gl/*.rc | sort)
+GSRC=$(ls "$R"/*.cpp "$R"/*.h "$R"/gl/*.cpp "$R"/gl/*.def "$R"/gl/*.rc src/platform/gl_context.h src/platform/opengl.h src/platform/windows/gl_context.cpp | sort)
 if fresh opengl build/ext.sh $GSRC; then
     echo "== opengl.ren: up to date ($OUT/opengl.ren)"
 else
@@ -138,7 +138,7 @@ else
     # libraries (opengl32 included, which Wine maps to the host's OpenGL).
     zig c++ -target $TARGET -O2 -s -shared -std=c++17 -fno-exceptions -fno-rtti -nostdlib++ \
         -Wall -Wno-unused-function -o "$OUT/opengl.ren" \
-        $(ls "$R"/*.cpp "$R"/gl/*.cpp | sort) "$R/gl/opengl.rc" "$R/gl/opengl.def" \
+        -Isrc src/platform/windows/gl_context.cpp $(ls "$R"/*.cpp "$R"/gl/*.cpp | sort) "$R/gl/opengl.rc" "$R/gl/opengl.def" \
         -lopengl32 -lgdi32 -luser32
     rm -f "$OUT/opengl.lib" "$OUT/opengl.pdb"
     stamp opengl build/ext.sh $GSRC

@@ -1,12 +1,15 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "ServerUtilities.h"
 #include "AINodeMgr.h"
 #include "VolumeBrushTypes.h"
 #include "SurfaceFunctions.h"
 #include "ctype.h"
-#include "SFXMsgIDs.h"
+#include "SFXMsgIds.h"
 #include "NodeLine.h"
 #include "AIUtils.h"
 
@@ -56,7 +59,7 @@ void CAINodeMgr::Term()
 	{
         for ( uint32 iNode = 0 ; iNode < m_cNodes ; iNode++ )
 		{
-			_ASSERT(m_apNode[iNode]);
+			GAME_ASSERT(m_apNode[iNode]);
 
 			s_bankCAINode.Delete(m_apNode[iNode]);
             m_apNode[iNode] = LTNULL;
@@ -235,7 +238,7 @@ void CAINodeMgr::Save(HMESSAGEWRITE hWrite)
 		{
 			// We should never have a null pointer in this list
 
-			_ASSERT(m_apNode[iNode]);
+			GAME_ASSERT(m_apNode[iNode]);
 
 			m_apNode[iNode]->Save(hWrite);
 		}
@@ -793,7 +796,7 @@ CAINode* CAINodeMgr::FindNearestTrainingFailure(const LTVector& vPos)
 void CAINodeMgr::UnlockNode(uint32 dwNode)
 {
 	if ( !IsInitialized() || (dwNode >= GetNumNodes()) || (dwNode < 0) ) return;
-	_ASSERT( m_apNode[dwNode]->IsLocked() );
+	GAME_ASSERT( m_apNode[dwNode]->IsLocked() );
 
 	m_apNode[dwNode]->Unlock();
 }
@@ -809,7 +812,7 @@ void CAINodeMgr::UnlockNode(uint32 dwNode)
 void CAINodeMgr::LockNode(uint32 dwNode)
 {
 	if ( !IsInitialized() || (dwNode >= GetNumNodes()) || (dwNode < 0) ) return;
-	_ASSERT( !m_apNode[dwNode]->IsLocked() );
+	GAME_ASSERT( !m_apNode[dwNode]->IsLocked() );
 
 	m_apNode[dwNode]->Lock();
 }
@@ -869,7 +872,7 @@ CAINode* CAINodeMgr::GetNode(const char *szName)
 	{
         const char* szNodeName = g_pLTServer->GetStringData(m_apNode[iNode]->GetName());
 
-		if ( !_stricmp(szNodeName, szName) )
+		if ( !nolf::ascii_compare(szNodeName, szName) )
 		{
 			return m_apNode[iNode];
 		}

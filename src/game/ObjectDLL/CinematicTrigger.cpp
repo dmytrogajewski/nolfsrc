@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include <stdio.h>
 #include "CinematicTrigger.h"
 #include "Camera.h"
@@ -22,17 +24,17 @@
 #include "ObjectMsgs.h"
 
 #define ADD_DIALOGUE_PROP(num, group) \
-	ADD_REALPROP_FLAG(Delay##num##, 0.0f, group)\
-	ADD_STRINGPROP_FLAG(Dialogue##num##, 0, group)\
-	ADD_STRINGPROP_FLAG(WhoPlaysDialogue##num##, "", group)\
-	ADD_STRINGPROP_FLAG(StartDialogueTriggerTarget##num##, "", group)\
-	ADD_STRINGPROP_FLAG(StartDialogueTriggerMsg##num##, "", group)\
-	ADD_STRINGPROP_FLAG(WhoPlaysDecisions##num##, "", group)\
-	ADD_STRINGPROP_FLAG(Decisions##num##, "", group)\
-	ADD_STRINGPROP_FLAG(Replies##num##, "", group)\
-	ADD_STRINGPROP_FLAG(RepliesTriggerTarget##num##, "", group)\
-	ADD_STRINGPROP_FLAG(RepliesTriggerMsg##num##, "", group)\
-    ADD_BOOLPROP_FLAG(Window##num##, LTFALSE, group)
+	ADD_REALPROP_FLAG(Delay##num, 0.0f, group)\
+	ADD_STRINGPROP_FLAG(Dialogue##num, 0, group)\
+	ADD_STRINGPROP_FLAG(WhoPlaysDialogue##num, "", group)\
+	ADD_STRINGPROP_FLAG(StartDialogueTriggerTarget##num, "", group)\
+	ADD_STRINGPROP_FLAG(StartDialogueTriggerMsg##num, "", group)\
+	ADD_STRINGPROP_FLAG(WhoPlaysDecisions##num, "", group)\
+	ADD_STRINGPROP_FLAG(Decisions##num, "", group)\
+	ADD_STRINGPROP_FLAG(Replies##num, "", group)\
+	ADD_STRINGPROP_FLAG(RepliesTriggerTarget##num, "", group)\
+	ADD_STRINGPROP_FLAG(RepliesTriggerMsg##num, "", group)\
+    ADD_BOOLPROP_FLAG(Window##num, LTFALSE, group)
 
 
 BEGIN_CLASS(CinematicTrigger)
@@ -183,6 +185,7 @@ CinematicTrigger::~CinematicTrigger()
 		{
             g_pLTServer->FreeString(m_hstrWhoPlaysDialogue[i]);
 		}
+		FREE_HSTRING(m_hstrDialogue[i]);
 
 		if (m_hstrTargetName[i])
 		{
@@ -715,7 +718,8 @@ uint32 CinematicTrigger::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMES
 	{
 		case MID_TRIGGER :
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -750,22 +754,22 @@ void CinematicTrigger::TriggerMsg(HOBJECT hSender, const char *pMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], "ON") == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], "ON") == 0)
 			{
 				HandleOn();
 			}
-			else if (_stricmp(parse.m_Args[0], "OFF") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "OFF") == 0)
 			{
 				HandleOff();
 			}
-			else if (_stricmp(parse.m_Args[0], "SKIP") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "SKIP") == 0)
 			{
 				if (m_bCanSkip)
 				{
 					HandleOff();
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "CAMERA") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "CAMERA") == 0)
 			{
 				if (m_hCamera && parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -783,7 +787,7 @@ void CinematicTrigger::TriggerMsg(HOBJECT hSender, const char *pMsg)
 					SendTriggerMsgToObject(this, m_hCamera, FALSE, g_tokenSpace);
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "KEYFRAMER") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "KEYFRAMER") == 0)
 			{
 				if (m_hKeyFramer && parse.m_nArgs > 1 && parse.m_Args[1])
 				{
@@ -1167,7 +1171,7 @@ LTBOOL CinematicTrigger::StartDialogue(int nDecision)
 			{
 				if (parse.m_nArgs < 2)
 				{
-					if (parse.m_nArgs < 1 || stricmp(parse.m_Args[0], "NONE") != 0)
+					if (parse.m_nArgs < 1 || nolf::ascii_compare(parse.m_Args[0], "NONE") != 0)
 					{
                         g_pLTServer->CPrint("Cinematic Trigger - ERROR - Not enough replies for the amount of decisions!");
 						TRACE("Cinematic Trigger - ERROR - Not enough replies for the amount of decisions!\n");
@@ -1290,7 +1294,7 @@ LTBOOL CinematicTrigger::StartDialogue(int nDecision)
 			//BOOL bWindow = m_bWindow[m_nCurMessage];
 
             BOOL bStayOpen = LTFALSE;
-			BOOL bWindow = (BOOL)szDecisions;
+			BOOL bWindow = szDecisions != nullptr;
 
 			pChar->PlayDialogue((char *)(LPCSTR)csDialogue,this,bWindow,bStayOpen,szCharOverride,szDecisions,byMood);
 

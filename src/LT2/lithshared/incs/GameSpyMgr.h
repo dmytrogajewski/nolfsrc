@@ -27,6 +27,7 @@
 // Includes...
 
 #include "mfcstub.h"
+#include <memory>
 
 
 // Classes...
@@ -51,6 +52,9 @@ public:
 	void					SetPort(DWORD dwPort) { m_dwPort = dwPort; }
 
 
+    struct State;
+    std::shared_ptr<State> state_;
+
 	// Member variables...
 
 private:
@@ -70,8 +74,10 @@ class CGameSpyMgr
 	// Member functions...
 
 public:
-	CGameSpyMgr() { Clear(); }
-	~CGameSpyMgr() { Term(); }
+	CGameSpyMgr();
+	virtual ~CGameSpyMgr();
+    CGameSpyMgr(const CGameSpyMgr&) = delete;
+    CGameSpyMgr& operator=(const CGameSpyMgr&) = delete;
 
 	virtual	BOOL			Init(const char* sGameName, const char* sGameVer, const char* sGameKey, int nGameLoc, int nGamePort, int nSpyPort, DWORD dwFlags = 0);
 	virtual	void			Term();
@@ -115,6 +121,9 @@ private:
 	BOOL					SendSocketString(const char* sAddr, DWORD dwPort, const char* sText, int nLength = -1);
 
 
+    struct State;
+    std::shared_ptr<State> state_;
+
 	// Member variables...
 
 protected:
@@ -154,31 +163,8 @@ inline BOOL CGameSpyQueryInfo::IsValid()
 	return(TRUE);
 }
 
-inline void CGameSpyMgr::Clear()
-{
-	m_sGameName.Empty();
-	m_sGameVer.Empty();
-	m_sGameKey.Empty();
-	m_sGameLoc.Empty();
-	m_sGameSpyAddr.Empty();
-	m_sResponseAddr.Empty();
-
-	m_sResponse[0] = '\0';
-
-	m_dwQueryID      = 1;
-	m_nPacket        = 0;
-	m_timerHeartbeat = 0;
-	m_dwGamePort     = 0;
-	m_dwSpyPort      = 0;
-	m_dwResponsePort = 0;
-	m_dwFlags        = 0;
-	m_pSender        = NULL;
-	m_bInit          = FALSE;
-}
-
-
 // EOF...
 
 #endif
 
-	
+

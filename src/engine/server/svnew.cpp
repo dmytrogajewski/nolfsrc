@@ -25,6 +25,7 @@
 // tcpdriver.cpp, objbank.cpp all do it) and it costs nothing in bytes — a
 // member's offset is all the codegen sees.
 #include "servermgr.h"
+#include "object_pool.h"
 
 
 // ======================================================================= //
@@ -162,7 +163,7 @@ uint32 CWorldPolyOwnerView::GetVertexCount()
 //      dtor  the destructor, fully expanded              35 bytes
 //
 //  Only the two middle rows are the work here; the thunks come with them.
-//  `__forceinline` on BOTH is what expands them: VC6
+//  `NOLF_FORCE_INLINE` on BOTH is what expands them: VC6
 //  at /O1 never expands a constructor into the generated initializer without
 //  it, and the destructors here are expanded in exactly the same way (the
 //  atexit-registered function IS the destructor body, with the global's
@@ -219,12 +220,12 @@ public:
 	// 0x1000d967 (30 bytes) — 0x18-byte elements, a cache of thirty-two and
 	// a grow of sixty-four. Four arguments, so sb_Init2 and one batched
 	// `add $0x10,%esp`.
-	__forceinline CHashElemBank() { sb_Init2(&m_Bank, 0x18, 0x20, 0x40); }
+	NOLF_FORCE_INLINE CHashElemBank() { sb_Init2(&m_Bank, 0x18, 0x20, 0x40); }
 	// 0x1000d991 (35 bytes) — the chunks go back and the two vptr stores
 	// bracket the call: this class's on the way in, the base's on the way
 	// out, with the two `pop ecx` of the cdecl cleanup split around the
 	// second one.
-	__forceinline ~CHashElemBank() { sb_FreeChunks(&m_Bank, 1); }
+	NOLF_FORCE_INLINE ~CHashElemBank() { sb_FreeChunks(&m_Bank, 1); }
 
 	StructBank m_Bank;                       // +0x04
 	uint32     m_Unknown20;                  // +0x20
@@ -241,9 +242,9 @@ class CThreadMsgBank : public CGlobalBankBase
 public:
 	// 0x10015512 (28 bytes) — 0x20-byte elements, cache of thirty-two, and
 	// the grow left at sb_Init's default: three arguments, `add $0xc,%esp`.
-	__forceinline CThreadMsgBank() { sb_Init(&m_Bank, 0x20, 0x20); }
+	NOLF_FORCE_INLINE CThreadMsgBank() { sb_Init(&m_Bank, 0x20, 0x20); }
 	// 0x1001553a (35 bytes).
-	__forceinline ~CThreadMsgBank() { sb_FreeChunks(&m_Bank, 1); }
+	NOLF_FORCE_INLINE ~CThreadMsgBank() { sb_FreeChunks(&m_Bank, 1); }
 
 	StructBank m_Bank;                       // +0x04
 	uint32     m_Unknown20;                  // +0x20
@@ -263,20 +264,7 @@ CThreadMsgBank g_ThreadMsgBank;
 // list 0x10058bdc is this object's +0x1c), so it carries that file's name.
 // smgr.cpp's CObjQueueBank / g_ObjQueueBank and smgrnew.cpp's are the same
 // object. Defined once, here, with its initialiser group.
-class CLinkNodeBank : public CGlobalBankBase
-{
-public:
-	// 0x10031daf (28 bytes).
-	__forceinline CLinkNodeBank() { sb_Init(&m_Bank, 0x0c, 0x20); }
-	// 0x10031dd7 (35 bytes).
-	__forceinline ~CLinkNodeBank() { sb_FreeChunks(&m_Bank, 1); }
 
-	StructBank m_Bank;                       // +0x04
-	uint32     m_Unknown20;                  // +0x20
-};
-
-// 0x10058bc0. Not static: packet.cpp reaches it by name.
-CLinkNodeBank g_LinkNodeBank;
 
 
 
@@ -289,140 +277,6 @@ CLinkNodeBank g_LinkNodeBank;
 //  constructor and destructor (servermgr.h). The stand-in CServerGlobalObj
 //  that stood here was a second definition of the same shipped global.
 // *********************************************************************** //
-
-
-
-// *********************************************************************** //
-//  MOVE-ME: servermessage.cpp, beside the rest of the xfer_* family.
-//
-//  Four functions of the client file-transfer state. servermessage.cpp
-//  already carries CClientFiles, CXferFile and CXferFileBank with every
-//  offset used below; the class views are repeated here rather than moved so
-//  that this file changes nothing.
-// *********************************************************************** //
-
-// servermgr.h's CUnknownA14 is the same 0x18-byte stdlith object: its
-// constructor is 0x1003d500 and its destructor 0x1003d580, both above the
-// app-region cut, so both are declared and neither is defined.
-class CXferBaseView
-{
-public:
-	CXferBaseView();                         // 0x1003d500
-	~CXferBaseView();                        // 0x1003d580
-
-	uint8 m_pad[0x18];
-};
-
-// The record bank at CClientFiles+0x18. objbank.cpp's sweep lists its vtable
-// (0x1004d648) as the 0x1c-byte instantiation, and 0x1c is sizeof(CXferFile)
-// rounded up — which is the independent check on this constructor.
-//
-// The constructor is defined in the class body so VC6 expands it into
-// CClientFiles' own: a vptr store plus one call is inside /Ob1's gate
-// (a constructor inlines at vptr + one store + call).
-class CXferFileBankView : public CGlobalBankBase
-{
-public:
-	CXferFileBankView() { sb_Init(&m_Bank, 0x1c, 0x20); }
-	~CXferFileBankView() { sb_FreeChunks(&m_Bank, 1); }
-
-	StructBank m_Bank;                       // +0x04
-	uint32     m_Unknown20;                  // +0x20
-};
-
-class CXferFileView
-{
-public:
-	LTLink m_Link;                           // 0x00
-	uint32 m_nFileID;                        // 0x0c
-};
-
-// Only the head of the class matters to the four functions here; the rest is
-// servermessage.cpp's.
-class CClientFilesView : public CXferBaseView
-{
-public:
-	CClientFilesView();                      // 0x1000e5a2
-	~CClientFilesView();                      // 0x1000e5ec
-
-	CXferFileBankView m_FileBank;            // 0x18
-	LTLink            m_ListHead;            // 0x3c
-};
-
-void xfer_FreeAllFiles(CClientFilesView* pState);      // 0x1000e857
-void xfer_FinishTransfer(CClientFilesView* pState);    // 0x1000e8ba
-
-// 0x1000e5a2 (35 bytes). The body is EMPTY: everything the shipped function
-// does is the base constructor's call and the bank member's expansion, in
-// declaration order, and `mov %esi,%eax` on the way out is the constructor's
-// own return of `this`. Note there is no vptr store for CClientFiles itself
-// — the class is not polymorphic, which is what the missing store says.
-CClientFilesView::CClientFilesView()
-{
-}
-
-// 0x1000e5ec (39 bytes). Equally empty, and the order is the destructor's:
-// the member first (its own vptr, sb_FreeChunks, the base bank vptr) and the
-// base class last, as a call because CXferBaseView's destructor is out of
-// line.
-CClientFilesView::~CClientFilesView()
-{
-}
-
-// 0x1000e5c5 (39 bytes) — tear the whole transfer state down and release it.
-//
-// The two `pop ecx` of the two fixed-prototype cdecl calls are batched and
-// the null test is scheduled between them, which is cl 8447 doing its
-// usual pre-8804 cleanup merging — not evidence about the
-// prototypes. The tail is `delete`, not a written-out free: the guarded pair
-// of destructor-then-release with the guard around BOTH is exactly what
-// `delete p` emits, and an explicit `if (p) { ... }` around the same two
-// statements is the same bytes only by accident of there being nothing else
-// in the block.
-void xfer_Term(CClientFilesView* pState)
-{
-	xfer_FreeAllFiles(pState);
-
-	xfer_FinishTransfer(pState);
-
-	delete pState;
-}
-
-// 0x1000e9c7 (39 bytes) — the record for one file id, or null.
-//
-// This is xfer_FindPendingFile (0x1000eaa2, already byte-identical in
-// servermessage.cpp) with the flag test replaced by an id compare, and the
-// two are worth reading side by side because the loop comes out DIFFERENTLY
-// and the source shape is the same. FindPendingFile's back edge is an
-// unconditional `jmp` to a shared head test; this one is rotated — the head
-// test is peeled to the top, the back edge is `jne`, and the preheader that
-// creates is where the `movzwl` of the parameter is hoisted to.
-//
-// The reason: widening a compare buys the rotation. The
-// parameter is a uint16 and the field is a dword, so the comparison is a
-// dword compare with a zero-extended operand — a loop invariant with
-// somewhere to live — where FindPendingFile's `m_Flags & 2` is recomputed
-// each trip and needs no preheader. Nothing about the loop was spelled
-// differently.
-//
-// Operand order: `cmp %edx,0xc(%eax)` puts the member first, so the source
-// is `pFile->m_nFileID == nFileID` and not the other way round.
-CXferFileView* xfer_FindFileByID(CClientFilesView* pState, uint16 nFileID)
-{
-	LTLink* pCur = pState->m_ListHead.m_pNext;
-
-	while (pCur != &pState->m_ListHead)
-	{
-		CXferFileView* pFile = (CXferFileView*)pCur->m_pData;
-
-		if (pFile->m_nFileID == nFileID)
-			return pFile;
-
-		pCur = pCur->m_pNext;
-	}
-
-	return LTNULL;
-}
 
 
 
@@ -635,61 +489,7 @@ void CListenerSlotOwner::ReleaseSlots()
 
 
 
-// *********************************************************************** //
-//  MOVE-ME: objbank.cpp — slot 2 of the bank vftable at 0x1004e2f0, which
-//  that file already identifies as the 0x54-byte (sizeof(ServerMessage))
-//  instantiation.
-//
-//  0x1002ccb5 (30 bytes) — and it CONTRADICTS the model objbank.cpp carries
-//  for that instantiation, which is worth stating plainly because it is the
-//  most useful thing in this block.
-//
-//  objbank.cpp declares `virtual ~CBankElem54();` and writes Free as
-//  `((T*)pObj)->~T(); sb_Free(...)`. A virtual destructor makes the call
-//  INDIRECT (`mov (%ecx),%eax; push $0; call *(%eax)`) and puts the deleting
-//  destructor in slot 0 of the element's vftable. The shipped Free calls
-//  0x1002ceac DIRECTLY, and a sweep of every four-byte value in every
-//  non-.text section finds 0x1002ceac in NO vftable at all. So the element's
-//  teardown is not virtual and 0x1002ceac is not a `??_G`: it is an ordinary
-//  member taking a flags word (`testb $1,0x4(%esp)`), releasing a
-//  sub-object at +0x2c through that object's own slot 2, freeing itself only
-//  when bit 0 is set, and returning `this`.
-//
-//  That is the same signature the bank hands it — zero, meaning "destruct,
-//  do not release" — so the record's own Release is what the source calls.
-// *********************************************************************** //
-
-class CBankElem54View
-{
-public:
-	// 0x1002ceac. Returns `this`, which nothing reads.
-	void* Release(uint32 nFlags);
-
-	uint8 m_pad[0x54];
-};
-
-class CMsgRecordBank : public CGlobalBankBase
-{
-public:
-	virtual void* Allocate() = 0;
-	virtual void  Free(void* pObj);          // 0x1002ccb5
-	virtual void  Init() = 0;
-
-	StructBank m_Bank;                       // +0x04
-	uint32     m_Unknown20;                  // +0x20
-};
-
-// sb_Free is servermgr.h's inline: the freed record's first dword becomes
-// the next-free link. m_Bank.m_pFreeList is at this+0x1c, which is what the
-// shipped `mov 0x1c(%esi),%eax` / `mov %edi,0x1c(%esi)` pair says.
-void CMsgRecordBank::Free(void* pObj)
-{
-	((CBankElem54View*)pObj)->Release(0);
-
-	sb_Free(&m_Bank, pObj);
-}
-
-
+// SObjData ownership lives in CMessageBank / RecordPool.
 
 // *********************************************************************** //
 //  MOVE-ME: tcpdriver.cpp.

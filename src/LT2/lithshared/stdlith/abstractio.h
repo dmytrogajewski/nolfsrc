@@ -83,7 +83,9 @@
 			CAbstractIO&	operator << ( SBYTE toWrite )	{ Write(&toWrite, sizeof(toWrite)); return *this; }
 			CAbstractIO&	operator << ( float toWrite )	{ Write(&toWrite, sizeof(toWrite)); return *this; }
 			CAbstractIO&	operator << ( double toWrite )	{ Write(&toWrite, sizeof(toWrite)); return *this; }
+#if !defined(NOLFSRC_NATIVE)
 			CAbstractIO&	operator << ( int toWrite )		{ Write(&toWrite, sizeof(toWrite)); return *this; }
+#endif
 
 			// Functions to read data
 			virtual BOOL			Read( void *pBlock, DWORD blockSize )=0;
@@ -95,7 +97,9 @@
 			CAbstractIO&	operator >> ( SBYTE &toRead )	{ Read(&toRead, sizeof(toRead)); return *this; }
 			CAbstractIO&	operator >> ( float &toRead )	{ Read(&toRead, sizeof(toRead)); return *this; }
 			CAbstractIO&	operator >> ( double &toRead )	{ Read(&toRead, sizeof(toRead)); return *this; }
+#if !defined(NOLFSRC_NATIVE)
 			CAbstractIO&	operator >> ( int &toRead )		{ Read(&toRead, sizeof(toRead)); return *this; }
+#endif
 
 			BOOL					WriteString( char *pStr );
 			BOOL					ReadString( char *pStr, DWORD maxLen );

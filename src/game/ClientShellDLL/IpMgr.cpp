@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 /****************************************************************************
 ;
 ;	 MODULE:		IPMGR (.CPP)
@@ -13,7 +17,7 @@
 
 // Includes...
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "iltclient.h"
 #include "IpMgr.h"
 
@@ -296,144 +300,6 @@ BOOL CIpMgr::GetAllIpString(char* sBuf, int nBufSize)
 
 // ----------------------------------------------------------------------- //
 //
-//	ROUTINE:	CIpMgr::FillListBox
-//
-//	PURPOSE:	Fills the given list box with all the ips
-//
-// ----------------------------------------------------------------------- //
-
-int CIpMgr::FillListBox(HWND hList)
-{
-	// Sanity checks...
-
-	if (!hList) return(0);
-
-
-	// Empty the list box...
-
-	SendMessage(hList, LB_RESETCONTENT, 0, 0);
-
-
-	// Add each ip...
-
-	SendMessage(hList, WM_SETREDRAW, 0, 0);
-
-	int cIps = 0;
-
-	for (int i = 0; i < m_cIps; i++)
-	{
-		CIp* pIp = GetIp(i);
-		if (pIp)
-		{
-			int nRet = SendMessage(hList, LB_ADDSTRING, 0, (LPARAM)pIp->GetAddress());
-			if (nRet != LB_ERR) cIps++;
-		}
-	}
-
-	SendMessage(hList, WM_SETREDRAW, 1, 0);
-	InvalidateRect(hList, NULL, FALSE);
-	UpdateWindow(hList);
-
-
-	// All done...
-
-	return(cIps);
-}
-
-
-// ----------------------------------------------------------------------- //
-//
-//	ROUTINE:	CIpMgr::AddIpFromEditControl
-//
-//	PURPOSE:	Adds a new ip from the given edit control
-//
-//	COMMENT:	This function will update a list box if one is given
-//
-// ----------------------------------------------------------------------- //
-
-BOOL CIpMgr::AddIpFromEditControl(HWND hEdit, HWND hList)
-{
-	// Sanity checks...
-
-	if (!hEdit) return(FALSE);
-
-
-	// Get the text from the edit control...
-
-	char sIp[IPM_MAX_ADDRESS + 2];
-
-	int nLen = GetWindowText(hEdit, sIp, IPM_MAX_ADDRESS);
-	if (nLen <= 0) return(FALSE);
-
-
-	// Add the ip...
-
-	if (!AddIp(sIp))
-	{
-		return(FALSE);
-	}
-
-
-	// Empty the edit control...
-
-	SetWindowText(hEdit, "");
-
-
-	// Fill the list box if one was specified...
-
-	FillListBox(hList);
-
-
-	// All done...
-
-	return(TRUE);
-}
-
-
-// ----------------------------------------------------------------------- //
-//
-//	ROUTINE:	CIpMgr::RemoveSelectedIpFromListBox
-//
-//	PURPOSE:	Removes the currently selected ip from the given list box
-//
-// ----------------------------------------------------------------------- //
-
-BOOL CIpMgr::RemoveSelectedIpFromListBox(HWND hList)
-{
-	// Sanity checks...
-
-	if (!hList) return(FALSE);
-
-
-	// Get the currently selected ip text from the list box...
-
-	int iSel = SendMessage(hList, LB_GETCURSEL, 0, 0);
-	if (iSel == LB_ERR) return(FALSE);
-
-	char sIp[IPM_MAX_ADDRESS + 2];
-
-	int nRet = SendMessage(hList, LB_GETTEXT, iSel, (LPARAM)sIp);
-	if (nRet == LB_ERR) return(FALSE);
-
-
-	// Remove the ip from our array...
-
-	RemoveIp(sIp);
-
-
-	// Remove the ip from the list box...
-
-	SendMessage(hList, LB_DELETESTRING, iSel, 0);
-
-
-	// All done...
-
-	return(TRUE);
-}
-
-
-// ----------------------------------------------------------------------- //
-//
 //	ROUTINE:	CIpMgr::RemoveAll
 //
 //	PURPOSE:	Removes all of the ips
@@ -484,8 +350,8 @@ int CIpMgr::WriteIps()
 
 		if (pIp)
 		{
-			wsprintf(sKey, "Ip%i", i);
-			wsprintf(sTemp, "+%s %s", sKey, pIp->GetAddress());
+			std::snprintf(sKey,sizeof(sKey), "Ip%i", i);
+			std::snprintf(sTemp,sizeof(sTemp), "+%s %s", sKey, pIp->GetAddress());
 			m_pClientDE->RunConsoleString(sTemp);
 			cIps++;
 		}
@@ -494,7 +360,7 @@ int CIpMgr::WriteIps()
 
 	// Write out the count...
 
-	wsprintf(sTemp, "+IpCount %i", cIps);
+	std::snprintf(sTemp,sizeof(sTemp), "+IpCount %i", cIps);
 	m_pClientDE->RunConsoleString(sTemp);
 
 
@@ -539,7 +405,7 @@ int CIpMgr::ReadIps()
 
 	for (int i = 0; i < cIps; i++)
 	{
-		wsprintf(sKey, "Ip%i", i);
+		std::snprintf(sKey,sizeof(sKey), "Ip%i", i);
 
 		HCONSOLEVAR hVar = m_pClientDE->GetConsoleVar(sKey);
 		if (hVar)

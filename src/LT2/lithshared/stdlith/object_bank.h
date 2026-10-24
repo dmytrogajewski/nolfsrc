@@ -23,11 +23,9 @@
 		return ptr;
 	}
 
-	#if _MSC_VER != 1100
 		inline void operator delete(void *pDataPtr, DummyThingForConstructor *pThing, void *ptr)
 		{
 		}
-	#endif
 
 
 	class NullCS

@@ -14,7 +14,8 @@
 #ifndef __PLAYER_SHARED_H__
 #define __PLAYER_SHARED_H__
 
-#include "LTVector.h"
+#include "ltvector.h"
+#include "engine/portable/string.h"
 #include "ModelButeMgr.h"
 
 // Shared player stuff...
@@ -30,7 +31,7 @@ inline LTVector GetPlayerHeadOffset(CModelButeMgr* pMBMgr, ModelStyle eStyle)
 	{
 		if (pMBMgr)
 		{
-			if (_stricmp(pMBMgr->GetStyleName(eStyle), "Scuba") == 0)
+			if (nolf::ascii_compare(pMBMgr->GetStyleName(eStyle), "Scuba") == 0)
 			{
 				return g_kvPlayerScubaCameraOffset;
 			}

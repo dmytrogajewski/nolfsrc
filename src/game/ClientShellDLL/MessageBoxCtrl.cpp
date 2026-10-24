@@ -2,9 +2,10 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
 #include "MessageBoxCtrl.h"
-#include "vkdefs.h"
+#include "VKDefs.h"
 
 #define MB_EDGESPACE	20	// The space between the side edges of the message box and the text
 #define MB_NOSELECT	-1
@@ -290,7 +291,7 @@ void CMessageBoxCtrl::SetText(HSTRING hText)
 {
 	if (!m_pClientDE)
 	{
-        assert(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 	m_fScale = 1.0f;

@@ -8,7 +8,9 @@
 //
 //----------------------------------------------------------
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Editable.h"
 #include "iltserver.h"
 #include "ObjectMsgs.h"
@@ -54,7 +56,8 @@ uint32 CEditable::ObjectMessageFn(LPBASECLASS pObject, HOBJECT hSender, uint32 m
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(pObject, hSender, szMsg);
 		}
 		break;
@@ -188,11 +191,11 @@ void CEditable::TriggerMsg(LPBASECLASS pObject, HOBJECT hSender, const char* szM
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], "DISPLAYPROPERTIES") == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], "DISPLAYPROPERTIES") == 0)
 			{
 				ListProperties(pObject);
 			}
-			else if (_stricmp(parse.m_Args[0], "EDIT") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "EDIT") == 0)
 			{
 				if (parse.m_nArgs > 2)
 				{
@@ -227,7 +230,7 @@ void CEditable::EditProperty(LPBASECLASS pObject, char* pPropName, char* pPropVa
 		if (pPropDef)
 		{
 			char* pName = pPropDef->GetPropName();
-			if (pName && _strnicmp(pName, pPropName, strlen(pName)) == 0)
+			if (pName && nolf::ascii_compare_n(pName, pPropName, strlen(pName)) == 0)
 			{
 				if (pPropDef->SetValue(pPropName, pPropValue))
 				{

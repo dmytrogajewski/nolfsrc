@@ -5,12 +5,9 @@
 #if !defined(AFX_LTGUILISTCTRL_H__F502A543_575A_11D2_BDA0_0060971BDC6D__INCLUDED_)
 #define AFX_LTGUILISTCTRL_H__F502A543_575A_11D2_BDA0_0060971BDC6D__INCLUDED_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
 #include "ltguictrl.h"
-#include "stdlith.h"
+#include "dynarray.h"
 
 class CLTGUIListCtrl : public CLTGUICtrl
 {

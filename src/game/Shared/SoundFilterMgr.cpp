@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "SoundFilterMgr.h"
 #include "CommonUtilities.h"
 
@@ -152,7 +155,7 @@ SOUNDFILTER* CSoundFilterMgr::GetFilter(char* pName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pName) == 0))
 		{
 			return *pCur;
 		}
@@ -266,7 +269,7 @@ LTBOOL SOUNDFILTER::Init(CButeMgr & buteMgr, char* aTagName)
 
 	if (nNumVars != nNumValues)
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		return LTFALSE;
 	}
 
@@ -326,19 +329,19 @@ LTRESULT CSoundFilterMgrPlugin::PreHook_EditStringList(
 LTBOOL CSoundFilterMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings,
     const uint32 cMaxStrings, const uint32 cMaxStringLength)
 {
-	_ASSERT(aszStrings && pcStrings && g_pSoundFilterMgr);
+	GAME_ASSERT(aszStrings && pcStrings && g_pSoundFilterMgr);
     if (!aszStrings || !pcStrings || !g_pSoundFilterMgr) return LTFALSE;
 
 	// Add an entry for each SOUNDFILTER type
 
 	int nNumFilters = g_pSoundFilterMgr->GetNumFilters();
-	_ASSERT(nNumFilters > 0);
+	GAME_ASSERT(nNumFilters > 0);
 
     SOUNDFILTER* pSF = LTNULL;
 
 	for (int i=0; i < nNumFilters; i++)
 	{
-		_ASSERT(cMaxStrings > (*pcStrings) + 1);
+		GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 		pSF = g_pSoundFilterMgr->GetFilter(i);
 		if (pSF && pSF->szName[0])

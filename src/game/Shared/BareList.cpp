@@ -10,7 +10,7 @@
 ;
 ****************************************************************************/
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "BareList.h"
 
 void CBareList::InsertFirst(CBareListItem* pItem) {

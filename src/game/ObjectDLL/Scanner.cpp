@@ -10,11 +10,13 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "Scanner.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
-#include "gameservershell.h"
+#include "GameServerShell.h"
 #include "SoundMgr.h"
 #include "PlayerObj.h"
 #include "CharacterMgr.h"
@@ -375,7 +377,7 @@ void CScanner::SetDestroyedModel()
     char* szDestroyedSkin     = g_pLTServer->GetStringData(m_hstrDestroyedSkin);
 
     LTRESULT hResult = g_pLTServer->SetObjectFilenames(m_hObject, szDestroyedFilename, szDestroyedSkin);
-    _ASSERT(hResult == LT_OK);
+    GAME_ASSERT(hResult == LT_OK);
 }
 
 // ----------------------------------------------------------------------- //
@@ -411,7 +413,7 @@ void CScanner::SetLastDetectedEnemy(HOBJECT hObj)
 
 LTBOOL CScanner::CanSeeObject(ObjectFilterFn ofn, HOBJECT hObject)
 {
-	_ASSERT(hObject);
+	GAME_ASSERT(hObject);
     if (!hObject) return LTFALSE;
 
 	if (g_pGameServerShell->GetGameType() == COOPERATIVE_ASSAULT && m_nPlayerTeamFilter && IsPlayer(hObject))

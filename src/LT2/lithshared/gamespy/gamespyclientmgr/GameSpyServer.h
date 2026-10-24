@@ -11,17 +11,15 @@
 ****************************************************************************/
 
 #pragma once
+#include "ltbasetypes.h"
+#include <cstdint>
 
 
 // Includes...
 
-#ifdef GSCM_LOCAL_BUILD
-	#include "..\cengine\goaceng.h"
-	#include "gamespyplayer.h"
-#else
-	#include "..\gamespy\cengine\goaceng.h"
-	#include "..\gamespy\gamespyclientmgr\gamespyplayer.h"
-#endif
+#include "../cengine/goaceng.h"
+#include "GameSpyPlayer.h"
+
 
 
 // Defines...
@@ -43,10 +41,10 @@ public:
 	CGameSpyServer() { Clear(); }
 	~CGameSpyServer() { Term(); }
 
-	BOOL				Init(GServer pServer);
+	LTBOOL				Init(GServer pServer);
 	void				Term();
 
-	BOOL				IsInitialized() { return(m_bInit); }
+	LTBOOL				IsInitialized() { return(m_bInit); }
 
 	char*				GetName();
 	char*				GetGameType();
@@ -67,20 +65,20 @@ public:
 	CGameSpyPlayer*		GetFirstPlayer();
 	CGameSpyPlayer*		GetNextPlayer();
 
-	void				SortPlayersByName(BOOL bAscending = TRUE) { SortPlayers(bAscending, GSS_SORT_NAME); }
-	void				SortPlayersByPing(BOOL bAscending = TRUE) { SortPlayers(bAscending, GSS_SORT_PING); }
-	void				SortPlayersByFrags(BOOL bAscending = FALSE) { SortPlayers(bAscending, GSS_SORT_FRAGS); }
+	void				SortPlayersByName(LTBOOL bAscending = LTTRUE) { SortPlayers(bAscending, GSS_SORT_NAME); }
+	void				SortPlayersByPing(LTBOOL bAscending = LTTRUE) { SortPlayers(bAscending, GSS_SORT_PING); }
+	void				SortPlayersByFrags(LTBOOL bAscending = LTFALSE) { SortPlayers(bAscending, GSS_SORT_FRAGS); }
 
 protected:
 	void				Clear();
-	void				SortPlayers(BOOL bAscending, int nKey);
+	void				SortPlayers(LTBOOL bAscending, int nKey);
 
 
 	// Member variables...
 
 private:
 	GServer				m_pGServer;
-	BOOL				m_bInit;
+	LTBOOL				m_bInit;
 	CGameSpyPlayer		m_aPlayers[GSS_MAX_PLAYERS];
 	int					m_nNumPlayers;
 	int					m_nPlayerIndex;

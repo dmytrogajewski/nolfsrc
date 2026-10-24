@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FireFX.h"
 #include "RandomSparksFX.h"
 #include "GameClientShell.h"

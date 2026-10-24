@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "CharacterMgr.h"
 #include "AI.h"
 #include "Scanner.h"
@@ -21,8 +23,6 @@
 #include "DeathScene.h"
 
 // Statics
-
-static CAIPathMgr s_AIPathMgr;
 
 const int CCharacterMgr::s_kCharacterLists = 4;
 const enum CharacterClass CCharacterMgr::s_aCharacterClasses[s_kCharacterLists] = { GOOD, GOOD,	BAD, NEUTRAL };
@@ -44,7 +44,7 @@ CCharacterMgr* g_pCharacterMgr = LTNULL;
 //
 // ----------------------------------------------------------------------- //
 
-CCharacterMgr::CCharacterMgr()
+CCharacterMgr::CCharacterMgr() : m_AIPathMgr(std::make_unique<CAIPathMgr>())
 {
 	g_pCharacterMgr = this;
 
@@ -57,6 +57,11 @@ CCharacterMgr::CCharacterMgr()
 	s_aDeathLists[0] = &m_goodDeathList;
 	s_aDeathLists[1] = &m_badDeathList;
 	s_aDeathLists[2] = &m_neutralDeathList;
+}
+
+CCharacterMgr::~CCharacterMgr()
+{
+	if (g_pCharacterMgr == this) g_pCharacterMgr = LTNULL;
 }
 
 // ----------------------------------------------------------------------- //
@@ -138,7 +143,7 @@ void CCharacterMgr::PostStartWorld(uint8 nLoadGameFlags)
 	{
 		// Build the list of AI paths for this world...
 
-		s_AIPathMgr.Init();
+		m_AIPathMgr->Init();
 	}
 
 	{ // BL 09/26/00
@@ -175,7 +180,7 @@ void CCharacterMgr::PreStartWorld()
 {
 	// Clear all our lists...
 
-	s_AIPathMgr.Term();
+	m_AIPathMgr->Term();
 	g_pMusicMgr->Term();
 
 	for ( int iCharacterList = 0 ; iCharacterList < s_kCharacterLists ; iCharacterList++ )
@@ -199,10 +204,10 @@ void CCharacterMgr::PreStartWorld()
 
 void CCharacterMgr::Load(HMESSAGEREAD hRead)
 {
-	_ASSERT(hRead);
+	GAME_ASSERT(hRead);
 	if (!hRead) return;
 
-	s_AIPathMgr.Load(hRead);
+	m_AIPathMgr->Load(hRead);
 	g_pMusicMgr->Load(hRead);
 }
 
@@ -216,10 +221,10 @@ void CCharacterMgr::Load(HMESSAGEREAD hRead)
 
 void CCharacterMgr::Save(HMESSAGEWRITE hWrite)
 {
-	_ASSERT(hWrite);
+	GAME_ASSERT(hWrite);
 	if (!hWrite) return;
 
-	s_AIPathMgr.Save(hWrite);
+	m_AIPathMgr->Save(hWrite);
 	g_pMusicMgr->Save(hWrite);
 }
 
@@ -573,7 +578,7 @@ CDeathScene* CCharacterMgr::CanSeeDeathSceneInList(CScanner* pScanner, CTList<CD
 
 void CCharacterMgr::AddDeathScene(CDeathScene *pDeathScene)
 {
-	_ASSERT(pDeathScene);
+	GAME_ASSERT(pDeathScene);
 	if ( !pDeathScene ) return;
 
 	// Find the character class death list we belong in and stick us in there
@@ -588,7 +593,7 @@ void CCharacterMgr::AddDeathScene(CDeathScene *pDeathScene)
 		}
 	}
 
-    _ASSERT(LTFALSE);
+    GAME_ASSERT(LTFALSE);
 }
 
 // ----------------------------------------------------------------------- //
@@ -601,7 +606,7 @@ void CCharacterMgr::AddDeathScene(CDeathScene *pDeathScene)
 
 void CCharacterMgr::RemoveDeathScene(CDeathScene *pDeathScene)
 {
-	_ASSERT(pDeathScene);
+	GAME_ASSERT(pDeathScene);
 	if ( !pDeathScene ) return;
 
 	// Remove us from our death scene list
@@ -639,7 +644,7 @@ void CCharacterMgr::RemoveDeathScene(CDeathScene *pDeathScene)
 
 CDeathScene* CCharacterMgr::GetDeathScene(HOBJECT hBodyObject)
 {
-	_ASSERT(hBodyObject);
+	GAME_ASSERT(hBodyObject);
     if ( !hBodyObject ) return LTNULL;
 
 	// Find the death scene in the list

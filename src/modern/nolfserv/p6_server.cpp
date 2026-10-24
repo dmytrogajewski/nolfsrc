@@ -23,7 +23,7 @@
 
 void P6_InitServerLog()
 {
-	SetEnvironmentVariable(MODERN_LOG_FILE_VAR, P6_SERVER_LOG_FILE);
+	nolf::platform::set_log_file(P6_SERVER_LOG_FILE);
 }
 
 

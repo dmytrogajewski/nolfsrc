@@ -8,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include <stdio.h>
 #include "GameClientShell.h"
 #include "InterfaceMgr.h"

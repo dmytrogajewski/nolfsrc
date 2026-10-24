@@ -71,7 +71,7 @@
 	// Used in the counter functions.
 	struct LTCounter
 	{
-		unsigned long	m_Data[4];
+		uint32 m_Data[4];
 	};
 
 
@@ -81,7 +81,7 @@
 	
 
 	#define DEFINE_HANDLE_TYPE(name) \
-		typedef struct {int __nothing;} ##name##_t, *name;
+		typedef struct name##_t {int __nothing;} name##_t, *name;
 
 
 	#define MAX_CS_FILENAME_LEN	127
@@ -148,8 +148,8 @@
 	DEFINE_HANDLE_TYPE(HNETSERVICE);
 	DEFINE_HANDLE_TYPE(HCONSOLEVAR);
 
-	typedef unsigned long HPRELIGHTANIM;
-	typedef unsigned long HPREOBJECT;
+	typedef uint32 HPRELIGHTANIM;
+	typedef uint32 HPREOBJECT;
 
 
 
@@ -385,6 +385,7 @@
 		uint32			m_ControlType;			// type of control that changed (CONTROLTYPE_ defines above)
 		char			m_ControlName[64];		// name of control that changed
 		uint32			m_InputValue;			// input value for the control
+		uint32          m_KeyCode = 0;          // logical SDK key, zero for non-key controls
 	};
 
 	// Device Object for listing objects on a particular device
@@ -400,6 +401,8 @@
 		float		m_RangeHigh;			// high end of range for this object
 
 		DeviceObject *m_pNext;
+		char        m_DisplayName[128]{};    // provider's UTF-8 label; binding name remains stable
+		uint32      m_KeyCode = 0;
 	};
 	
 	// Device Binding info for GetDeviceBindings()
@@ -549,7 +552,7 @@
 	struct Sound3DProvider
 	{
 		uint32				m_dwProviderID;
-		char				m_szProvider[_MAX_PATH+1];
+		char				m_szProvider[LT_MAX_PATH+1];
 		uint32				m_dwCaps;
 		Sound3DProvider *	m_pNextProvider;
 	};
@@ -672,7 +675,7 @@
 		uint32		m_dwFlags;
 	
 		// File name of sound
-		char 		m_szSoundName[_MAX_PATH+1];
+		char 		m_szSoundName[LT_MAX_PATH+1];
 
 		// SERVER ONLY: Object sound is attached to.
 		// Only needed if PLAYSOUND_ATTACHED or PLAYSOUND_CLIENTLOCAL set
@@ -806,11 +809,15 @@
 	{
 	public:
 	
-				ConParse()				{m_pCommandPos = LTNULL;}
-				ConParse(char *pBuffer)	{m_pCommandPos = pBuffer;}
+				ConParse() { Init(LTNULL); }
+				ConParse(char *pBuffer) { Init(pBuffer); }
 
 		// Sets it up to parse the specified buffer.
-		void	Init(char *pBuffer)		{m_pCommandPos = pBuffer;}
+		void Init(char *pBuffer) {
+            m_pCommandPos = pBuffer; m_nArgs = 0;
+            for (auto& argument : m_Args) argument = LTNULL;
+        }
+        char*& CommandPosition() { return m_pCommandPos; }
 
 		// The parsed arguments.
 		char	*m_Args[PARSE_MAXTOKENS];
@@ -826,7 +833,7 @@
 		// skipCount says how many to skip.
 		// You can use this just like Parse like this:
 		// while(ParseFind("AmbientLight", LTFALSE)) { ... }
-		LTBOOL	ParseFind(char *pLookFor, LTBOOL bCaseSensitive, uint32 minTokens=1);
+		LTBOOL	ParseFind(const char *pLookFor, LTBOOL bCaseSensitive, uint32 minTokens=1);
 
 	private:
 		
@@ -890,8 +897,8 @@
 	public:
 			ObjArray()
 			{
-				m_pArray = m_Array;
-				m_MaxListSize = size;
+				this->m_pArray = m_Array;
+				this->m_MaxListSize = size;
 			}
 
 	private:

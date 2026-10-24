@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "PropTypeMgr.h"
 #include "CommonUtilities.h"
 #include "DebrisMgr.h"
@@ -167,7 +170,7 @@ PROPTYPE* CPropTypeMgr::GetPropType(char* pType)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szType[0] && (_stricmp((*pCur)->szType, pType) == 0))
+		if (*pCur && (*pCur)->szType[0] && (nolf::ascii_compare((*pCur)->szType, pType) == 0))
 		{
 			return *pCur;
 		}
@@ -435,18 +438,18 @@ LTBOOL CPropTypeMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrin
     const uint32 cMaxStrings, const uint32 cMaxStringLength)
 {
     if (!aszStrings || !pcStrings) return LTFALSE;
-	_ASSERT(aszStrings && pcStrings);
+	GAME_ASSERT(aszStrings && pcStrings);
 
 	// Add an entry for each PropType type
 
 	int nNumPropType = g_pPropTypeMgr->GetNumPropTypes();
-	_ASSERT(nNumPropType > 0);
+	GAME_ASSERT(nNumPropType > 0);
 
     PROPTYPE* pPropType = LTNULL;
 
 	for (int i=0; i < nNumPropType; i++)
 	{
-		_ASSERT(cMaxStrings > (*pcStrings) + 1);
+		GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 		pPropType = g_pPropTypeMgr->GetPropType(i);
 		if (pPropType && pPropType->szType[0])

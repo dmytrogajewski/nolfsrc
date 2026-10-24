@@ -2,7 +2,8 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "PopupText.h"
 #include "InterfaceMgr.h"
 #include "GameClientShell.h"
@@ -257,7 +258,7 @@ void CPopupText::CreateScaleFX(char *szFXName)
 		m_SFXArray.Add(pSFX);
 #ifdef NOLFSRC_MODERN
 		// M-P3-15: the background comes close enough to fill the screen
-		if (stricmp(szFXName, "PopupBackground") == 0 && pSFX->GetObject())
+		if (nolf::ascii_compare(szFXName, "PopupBackground") == 0 && pSFX->GetObject())
 		{
 			LTVector vNewPos;
 			g_pLTClient->GetObjectPos(pSFX->GetObject(), &vNewPos);

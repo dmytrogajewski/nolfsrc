@@ -6,11 +6,9 @@
 #ifndef __STDAFX_H__
 #define __STDAFX_H__
 
-#define WIN32_LEAN_AND_MEAN
-
 #include <stdio.h>
-#include <windows.h>
 #include <limits.h>
+#include "AssertMgr.h"
 
 #include "mfcstub.h"
 
@@ -19,7 +17,7 @@
 #include "iltclient.h"
 #include "iltserver.h"
 #include "iltmessage.h"
-#include "globals.h"
+#include "Globals.h"
 
 #include "iltmodel.h"
 #include "ilttransform.h"
@@ -29,5 +27,8 @@
 #include "Factory.h"
 
 #include "CommonUtilities.h"
+#ifdef _CLIENTBUILD
+#include "../ClientShellDLL/VKDefs.h"
+#endif
 
 #endif // __STDAFX_H__

@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderSummary.h"
 #include "FolderCommands.h"
 #include "FolderMgr.h"
@@ -11,7 +11,7 @@
 #include "MissionMgr.h"
 #include "ClientRes.h"
 #include "GameClientShell.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 
 extern CGameClientShell* g_pGameClientShell;
 

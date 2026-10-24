@@ -33,7 +33,8 @@
 							{ 
 								m_pFirstAggregate = NULL;
 								m_hObject = NULL; 
-								m_nType = nType; 
+								m_nType = nType;
+                                m_pServerDE = g_pLTServer;
 							}
 			
 		virtual				~BaseClass() {}
@@ -70,6 +71,7 @@
 
 		// C++ only data...
 		uint8			m_nType;	// Type of object (see ltbasedefs.h)
+        ILTServer* m_pServerDE; // Interface captured by the module constructor.
 	};
 
 
@@ -245,5 +247,7 @@
 	public:
 	};
 
+
+#include "ltbaseclass.inl"
 
 #endif  // __LTENGINEOBJECTS_H__

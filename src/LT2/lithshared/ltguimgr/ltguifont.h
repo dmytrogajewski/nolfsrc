@@ -5,9 +5,6 @@
 #if !defined(AFX_LTGUIFONT_H__30D313E1_736B_11D2_BDBE_0060971BDC6D__INCLUDED_)
 #define AFX_LTGUIFONT_H__30D313E1_736B_11D2_BDBE_0060971BDC6D__INCLUDED_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
 #include "lithfontdefs.h"
 

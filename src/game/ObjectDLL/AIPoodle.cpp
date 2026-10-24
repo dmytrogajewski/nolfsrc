@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIPoodle.h"
 
 BEGIN_CLASS(AI_Poodle)
@@ -171,7 +174,7 @@ LTBOOL AI_Poodle::HandleCommand(char** pTokens, int nArgs)
 
 	for ( int iState = 0 ; iState < s_cStateMaps ; iState++ )
 	{
-		if ( !_stricmp(pTokens[0], s_aStateMaps[iState].szState) )
+		if ( !nolf::ascii_compare(pTokens[0], s_aStateMaps[iState].szState) )
 		{
 			// Change states
 
@@ -230,7 +233,7 @@ void AI_Poodle::SetState(CAIPoodleState::AIPoodleStateType eState)
 
 	if ( !m_pPoodleState )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -238,7 +241,7 @@ void AI_Poodle::SetState(CAIPoodleState::AIPoodleStateType eState)
 
 	if ( !m_pPoodleState->Init(this) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		FACTORY_DELETE(m_pPoodleState);
         m_pPoodleState = LTNULL;
 	}

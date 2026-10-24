@@ -1,7 +1,7 @@
 // FolderKeyboard.cpp: implementation of the CFolderKeyboard class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderKeyboard.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

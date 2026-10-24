@@ -42,6 +42,7 @@
 #include <windows.h>
 #include <winsock.h>
 #include <stdlib.h>
+#include "gs_protocol.h"
 #include <string.h>
 
 #pragma comment(lib, "wsock32.lib")
@@ -60,57 +61,7 @@ void GameSpyClient_SetMasterServer(const char* sAddr);
 
 // GSM_Validate: the response to a master's challenge. sOut needs
 // (strlen(sChallenge)+2)/3*4+1 bytes; challenges are at most 64 characters.
-static void GSM_Validate(const char* sChallenge, const char* sKey, char* sOut)
-{
-	static const char s_aDigits[] =
-		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-	unsigned char aState[256];
-	unsigned char aMixed[66];
-	int nKeyLen = (int)strlen(sKey);
-	int i, n;
-
-	// key schedule
-	for (i = 0; i < 256; i++) aState[i] = (unsigned char)i;
-	if (nKeyLen > 0)
-	{
-		unsigned char j = 0;
-		for (i = 0; i < 256; i++)
-		{
-			j = (unsigned char)(j + aState[i] + (unsigned char)sKey[i % nKeyLen]);
-			unsigned char t = aState[i]; aState[i] = aState[j]; aState[j] = t;
-		}
-	}
-
-	// one keystream byte per challenge character; the walk is driven by
-	// the challenge itself
-	unsigned char a = 0, b = 0;
-	for (n = 0; sChallenge[n] && n < 64; n++)
-	{
-		unsigned char c = (unsigned char)sChallenge[n];
-		a = (unsigned char)(a + c + 1);
-		unsigned char x = aState[a];
-		b = (unsigned char)(b + x);
-		unsigned char y = aState[b];
-		aState[b] = x;
-		aState[a] = y;
-		aMixed[n] = (unsigned char)(c ^ aState[(unsigned char)(x + y)]);
-	}
-	while (n % 3) aMixed[n++] = 0;
-
-	// base64, without padding characters
-	char* p = sOut;
-	for (i = 0; i < n; i += 3)
-	{
-		unsigned char x = aMixed[i], y = aMixed[i+1], z = aMixed[i+2];
-		*p++ = s_aDigits[x >> 2];
-		*p++ = s_aDigits[((x & 3) << 4) | (y >> 4)];
-		*p++ = s_aDigits[((y & 15) << 2) | (z >> 6)];
-		*p++ = s_aDigits[z & 63];
-	}
-	*p = '\0';
-}
-
+static void GSM_Validate(const char* challenge, const char* key, char* output) { nolf::gamespy::validate(challenge, key, output); }
 
 // GSM_Resolve: "host" or "host:port" -> address in network order and port.
 // Blocks while the name is looked up. FALSE if it cannot be resolved or is
@@ -149,36 +100,7 @@ static BOOL GSM_Resolve(const char* sAddr, int nDefaultPort, unsigned long* pIP,
 
 // GSM_FindKey: the value of \key\ in a backslash-separated string, copied
 // into sOut. FALSE if the key is not there.
-static BOOL GSM_FindKey(const char* sData, const char* sKey, char* sOut, int nOutSize)
-{
-	const char* p = sData;
-	int nKeyLen = (int)strlen(sKey);
-
-	sOut[0] = '\0';
-	while (p && *p)
-	{
-		if (*p != '\\') { p = strchr(p, '\\'); continue; }
-		p++;
-		const char* pEnd = strchr(p, '\\');
-		if (!pEnd) return(FALSE);
-
-		BOOL bMatch = ((int)(pEnd - p) == nKeyLen && strnicmp(p, sKey, nKeyLen) == 0);
-		p = pEnd + 1;
-		const char* pValEnd = strchr(p, '\\');
-		int nLen = pValEnd ? (int)(pValEnd - p) : (int)strlen(p);
-
-		if (bMatch)
-		{
-			if (nLen > nOutSize - 1) nLen = nOutSize - 1;
-			memcpy(sOut, p, nLen);
-			sOut[nLen] = '\0';
-			return(TRUE);
-		}
-		p = pValEnd;
-	}
-
-	return(FALSE);
-}
+static BOOL GSM_FindKey(const char* data, const char* key, char* output, int size) { return nolf::gamespy::find_key(data, key, output, size); }
 
 #endif // NOLFSRC_MODERN
 

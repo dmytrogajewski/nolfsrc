@@ -5,9 +5,6 @@
 #if !defined(AFX_MESSAGEBOX_H__CF0C2621_AE46_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_MESSAGEBOX_H__CF0C2621_AE46_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
 #include "ltguimgr.h"
 #include "MessageBoxCtrl.h"

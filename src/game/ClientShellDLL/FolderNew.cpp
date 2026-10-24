@@ -1,7 +1,7 @@
 // FolderNew.cpp: implementation of the CFolderNew class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMgr.h"
 #include "FolderBriefing.h"
 #include "FolderCommands.h"

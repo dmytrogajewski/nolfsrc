@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : ClientUtilities.cpp
@@ -10,13 +14,33 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include <stdlib.h>
 #include "ClientUtilities.h"
 #include "GameClientShell.h"
 #include "ClientRes.h"
 #include "VarTrack.h"
-#include "VKdefs.h"
+#include "VKDefs.h"
+#include "engine/client/client_window.h"
+#include <array>
+
+namespace {
+std::array<bool,256> client_keys{};
+}
+void ClientKeyEvent(int key,bool pressed) {
+    if (key >= 0 && key < int(client_keys.size())) client_keys[std::size_t(key)]=pressed;
+}
+void ClearClientKeys() { client_keys.fill(false); }
+bool IsKeyDown(int key) {
+    if (key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU) {
+        const auto modifier=key == VK_SHIFT ? nolf::platform::KeyModifier::Shift : key == VK_CONTROL ?
+            nolf::platform::KeyModifier::Control : nolf::platform::KeyModifier::Alt;
+        try { return nolf::platform::has_modifier(nolf::client_window(*g_pLTClient).key_modifiers(),modifier); }
+        catch (const std::exception&) {}
+    }
+    return key >= 0 && key < int(client_keys.size()) && client_keys[std::size_t(key)];
+}
 #ifdef NOLFSRC_MODERN
 // M-P2-03: the console key's strings
 #include "cres/p2.h"
@@ -265,7 +289,7 @@ void WriteConsoleString(char* sKey, char* sValue)
     if (g_pLTClient)
 	{
 		char sTemp[256];
-        wsprintf(sTemp, "+%s \"%s\"", sKey, sValue);
+        std::snprintf(sTemp,sizeof(sTemp), "+%s \"%s\"", sKey, sValue);
         g_pLTClient->RunConsoleString(sTemp);
 	}
 }
@@ -275,7 +299,7 @@ void WriteConsoleInt(char* sKey, int nValue)
     if (g_pLTClient)
 	{
 		char sTemp[256];
-		wsprintf(sTemp, "+%s %i", sKey, nValue);
+		std::snprintf(sTemp,sizeof(sTemp), "+%s %i", sKey, nValue);
         g_pLTClient->RunConsoleString(sTemp);
 	}
 }
@@ -511,7 +535,7 @@ int GetCommandKey(int nActionCode)
 			if (pAction->nActionCode == nActionCode)
 			{
 				int k = 0;
-				while (s_KeyDefs[k].m_VKCode >= 0 && stricmp(s_KeyDefs[k].m_pName,ptr->strTriggerName) != 0)
+				while (s_KeyDefs[k].m_VKCode >= 0 && nolf::ascii_compare(s_KeyDefs[k].m_pName,ptr->strTriggerName) != 0)
 				{
 					k++;
 				}
@@ -551,7 +575,7 @@ void GetCommandKeyStr(int nActionCode, char *pBuf, int nBufLen)
 			if (pAction->nActionCode == nActionCode)
 			{
 				int k = 0;
-				while (s_KeyDefs[k].m_VKCode >= 0 && stricmp(s_KeyDefs[k].m_pName,ptr->strTriggerName) != 0)
+				while (s_KeyDefs[k].m_VKCode >= 0 && nolf::ascii_compare(s_KeyDefs[k].m_pName,ptr->strTriggerName) != 0)
 				{
 					k++;
 				}

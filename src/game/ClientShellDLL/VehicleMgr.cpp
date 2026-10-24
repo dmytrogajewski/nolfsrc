@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "VehicleMgr.h"
 #include "VarTrack.h"
 #include "MsgIDs.h"
@@ -133,7 +136,7 @@ VarTrack	g_vtVehicleCollisionInfo;
 void ModelNodeControlFn(HOBJECT hObj, HMODELNODE hNode, LTMatrix *pGlobalMat, void *pUserData)
 {
 	CVehicleMgr* pMgr = (CVehicleMgr*)pUserData;
-	_ASSERT(pMgr);
+	GAME_ASSERT(pMgr);
 	if (!pMgr) return;
 
 	pMgr->HandleNodeControl(hObj, hNode, pGlobalMat);
@@ -1613,15 +1616,15 @@ void CVehicleMgr::CreateVehicleModel()
 			*szName = 0;
 			g_pLTClient->GetModelNodeName(m_hVehicleModel, hCurNode, szName, sizeof(szName));
 
-			if (stricmp(szName, "Dail") == 0)
+			if (nolf::ascii_compare(szName, "Dail") == 0)
 			{
 				m_VehicleNode1.hNode = hCurNode;
 			}
-			else if (stricmp(szName, "Dail2") == 0)
+			else if (nolf::ascii_compare(szName, "Dail2") == 0)
 			{
 				m_VehicleNode2.hNode = hCurNode;
 			}
-			else if (stricmp(szName, "brace") == 0)
+			else if (nolf::ascii_compare(szName, "brace") == 0)
 			{
 				m_VehicleNode3.hNode = hCurNode;
 			}
@@ -1637,7 +1640,7 @@ void CVehicleMgr::CreateVehicleModel()
 			*szName = 0;
 			g_pLTClient->GetModelNodeName(m_hVehicleModel, hCurNode, szName, sizeof(szName));
 
-			if (stricmp(szName, "Post") == 0)
+			if (nolf::ascii_compare(szName, "Post") == 0)
 			{
 				m_VehicleNode1.hNode = hCurNode;
 			}

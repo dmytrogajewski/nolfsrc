@@ -5,9 +5,6 @@
 #if !defined(AFX_LTGUICTRL_H__04CA2480_5726_11D2_BD9D_0060971BDC6D__INCLUDED_)
 #define AFX_LTGUICTRL_H__04CA2480_5726_11D2_BD9D_0060971BDC6D__INCLUDED_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
 #ifdef _LITHTECH2
 	#include "ltbasedefs.h"
@@ -98,6 +95,9 @@ public:
     virtual uint32  GetID() { return(0); }
 	virtual	int		GetState();
 
+    // Owned by the caller; GUI command parameters remain fixed-width numbers.
+    void SetUserData(void* value) { m_pUserData=value; }
+    void* GetUserData() const { return m_pUserData; }
     void            SetParam1(uint32 dw) { m_dwParam1 = dw; }
     void            SetParam2(uint32 dw) { m_dwParam2 = dw; }
 
@@ -125,6 +125,7 @@ protected:
 protected:
     ILTClient       *m_pClientDE;
     uint32          m_dwCommandID;          // The command which is sent when "enter" is pressed
+    void* m_pUserData = nullptr;
     uint32          m_dwParam1;             // Extra params
     uint32          m_dwParam2;             // Extra params
     LTBOOL           m_bCreated;

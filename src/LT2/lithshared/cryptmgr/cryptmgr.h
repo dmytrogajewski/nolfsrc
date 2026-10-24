@@ -1,44 +1,17 @@
-#if !defined(_CRYPTMGR_H_)
-#define _CRYPTMGR_H_
+#pragma once
+#include <array>
+#include <cstdint>
+#include <iosfwd>
 
-#include "iostream.h"
-
-
-#ifndef NO_PRAGMA_LIBS
-	#if defined(_DEBUG) && defined(_AFXDLL)
-		#pragma comment (lib, "\\Proj\\Libs\\Debug\\CryptMgrMfcDll.lib")
-	#elif defined(_DEBUG) && !defined(_AFXDLL)
-		#pragma comment (lib, "\\Proj\\Libs\\Debug\\CryptMgr.lib")
-	#elif !defined(_DEBUG) && defined(_AFXDLL)
-		#pragma comment (lib, "\\Proj\\Libs\\Release\\CryptMgrMfcDll.lib")
-	#elif !defined(_DEBUG) && !defined(_AFXDLL)
-		#pragma comment (lib, "\\Proj\\Libs\\Release\\CryptMgr.lib")
-	#endif
-#endif
-
-
-
-class CCryptMgr
-{
+class CCryptMgr {
 public:
-
-	CCryptMgr();
-	CCryptMgr(char* key);
-	~CCryptMgr();
-
-	void SetKey(const char* key);  // Max of 56 characters
-
-	// if using fstreams be sure to open them in binary mode
-	void Encrypt(istream& is, ostream& os);
-
-	// if using fstreams be sure to open them in binary mode
-	void Decrypt(istream& is, ostream& os);
-
+    CCryptMgr() = default;
+    explicit CCryptMgr(const char* key) { SetKey(key); }
+    void SetKey(const char* key);
+    void Encrypt(std::istream& input, std::ostream& output);
+    void Decrypt(std::istream& input, std::ostream& output);
+private:
+    // Retail passed sizeof(char*) on Win32. Preserve those four key bytes
+    // explicitly, independently of the host pointer size.
+    std::array<std::uint8_t, 4> key_{};
 };
-
-
-
-
-
-
-#endif

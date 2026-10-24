@@ -1,10 +1,16 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // InterfaceResMgr.cpp: implementation of the CInterfaceResMgr class.
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "ClientRes.h"
-#include "gameclientshell.h"
+#include "GameClientShell.h"
 #include "InterfaceResMgr.h"
 #include "ClientButeMgr.h"
 #ifdef NOLFSRC_MODERN
@@ -81,7 +87,7 @@ LTBOOL CInterfaceResMgr::Init(ILTClient* pClientDE, CGameClientShell* pClientShe
 
 	// Set the English flag
     hString = g_pLTClient->FormatString(IDS_GAME_LANGUAGE);
-    if (hString && _mbsicmp((const unsigned char*)"english", (const unsigned char*)g_pLTClient->GetStringData(hString)) != 0)
+    if (hString && nolf::ascii_compare("english", g_pLTClient->GetStringData(hString)) != 0)
     {
         m_bEnglish=LTFALSE;
 	}
@@ -249,7 +255,7 @@ void CInterfaceResMgr::Clean()
 //////////////////////////////////////////////////////////////////////
 void CInterfaceResMgr::DrawFolder()
 {
-    _ASSERT(g_pLTClient);
+    GAME_ASSERT(g_pLTClient);
     if (!g_pLTClient) return;
 
 #ifdef NOLFSRC_MODERN
@@ -272,7 +278,7 @@ void CInterfaceResMgr::DrawFolder()
 
 void CInterfaceResMgr::DrawLoadScreen()
 {
-    _ASSERT(g_pLTClient);
+    GAME_ASSERT(g_pLTClient);
     if (!g_pLTClient) return;
 
 	// The screen surface
@@ -283,7 +289,7 @@ void CInterfaceResMgr::DrawLoadScreen()
     uint32 dwLoadWidth=0;
     uint32 dwLoadHeight=0;
 
-	_ASSERT(hLoad && hScreen);
+	GAME_ASSERT(hLoad && hScreen);
 	if (!hLoad || !hScreen) return;
 
 	// Get the dims of the screen and the working surface
@@ -301,7 +307,7 @@ void CInterfaceResMgr::DrawLoadScreen()
 
 void CInterfaceResMgr::DrawMessage(CLTGUIFont* pFont, int nMessageId)
 {
-    _ASSERT(g_pLTClient && pFont);
+    GAME_ASSERT(g_pLTClient && pFont);
     if (!g_pLTClient || !pFont) return;
 
 	// The screen surface
@@ -312,13 +318,13 @@ void CInterfaceResMgr::DrawMessage(CLTGUIFont* pFont, int nMessageId)
     uint32 dwWidth=0;
     uint32 dwHeight=0;
 
-	_ASSERT(hBlank);
+	GAME_ASSERT(hBlank);
 	if (!hBlank) return;
 
 	// Get the string...
     HSTRING hStr = g_pLTClient->FormatString(nMessageId);
 
-	_ASSERT(hStr);
+	GAME_ASSERT(hStr);
 	if (!hStr)
 	{
         g_pLTClient->DeleteSurface(hBlank);
@@ -490,7 +496,7 @@ LTBOOL CInterfaceResMgr::InitFonts()
     // TODO: reimplement this stuff
 	// Set the wrapping method
 //  HSTRING hString=g_pLTClient->FormatString(IDS_FONT_WRAP_USE_SPACES);
-//  if (_mbsicmp((const unsigned char*)g_pLTClient->GetStringData(hString), (const unsigned char*)"1") == 0)
+//  if (nolf::ascii_compare(g_pLTClient->GetStringData(hString), "1") == 0)
 //	{
         CLTGUIFont::SetWrapMethod(LTTRUE);
 //	}
@@ -618,7 +624,7 @@ HSURFACE CInterfaceResMgr::GetSurfaceLoading()
 	// The loading image
 	if (!m_hSurfLoading)
         m_hSurfLoading = g_pLTClient->CreateSurfaceFromBitmap("menu\\art\\loading.pcx");
-	_ASSERT(m_hSurfLoading);
+	GAME_ASSERT(m_hSurfLoading);
 	return m_hSurfLoading;
 };
 
@@ -632,7 +638,7 @@ HSURFACE CInterfaceResMgr::GetSurfaceCursor()
 {
 	if (!m_hSurfCursor)
         m_hSurfCursor = g_pLTClient->CreateSurfaceFromBitmap("interface\\cursor0.pcx");
-	_ASSERT(m_hSurfCursor);
+	GAME_ASSERT(m_hSurfCursor);
 	return m_hSurfCursor;
 };
 
@@ -643,7 +649,7 @@ const char *CInterfaceResMgr::GetSoundSelect()
 	{
 		m_csSoundSelect = g_pClientButeMgr->GetInterfaceAttributeString("SelectSound");
 	}
-	_ASSERT(!m_csSoundSelect.IsEmpty());
+	GAME_ASSERT(!m_csSoundSelect.IsEmpty());
 	return m_csSoundSelect;
 };
 
@@ -653,7 +659,7 @@ const char *CInterfaceResMgr::GetSoundUnselectable()
 	{
 		m_csSoundUnselectable = g_pClientButeMgr->GetInterfaceAttributeString("UnselectableSound");
 	}
-	_ASSERT(!m_csSoundUnselectable.IsEmpty());
+	GAME_ASSERT(!m_csSoundUnselectable.IsEmpty());
 	return m_csSoundUnselectable;
 };
 
@@ -663,7 +669,7 @@ const char *CInterfaceResMgr::GetSoundChange()
 	{
 		m_csSoundChange = g_pClientButeMgr->GetInterfaceAttributeString("SelectChangeSound");
 	}
-	_ASSERT(!m_csSoundChange.IsEmpty());
+	GAME_ASSERT(!m_csSoundChange.IsEmpty());
 	return m_csSoundChange;
 };
 
@@ -673,7 +679,7 @@ const char *CInterfaceResMgr::GetSoundPageChange()
 	{
 		m_csSoundPageChange = g_pClientButeMgr->GetInterfaceAttributeString("PageChangeSound");
 	}
-	_ASSERT(!m_csSoundPageChange.IsEmpty());
+	GAME_ASSERT(!m_csSoundPageChange.IsEmpty());
 	return m_csSoundPageChange;
 };
 
@@ -683,7 +689,7 @@ const char *CInterfaceResMgr::GetSoundArrowUp()
 	{
 		m_csSoundArrowUp = g_pClientButeMgr->GetInterfaceAttributeString("ArrowUpSound");
 	}
-	_ASSERT(!m_csSoundArrowUp.IsEmpty());
+	GAME_ASSERT(!m_csSoundArrowUp.IsEmpty());
 	return m_csSoundArrowUp;
 };
 
@@ -693,7 +699,7 @@ const char *CInterfaceResMgr::GetSoundArrowDown()
 	{
 		m_csSoundArrowDown = g_pClientButeMgr->GetInterfaceAttributeString("ArrowDownSound");
 	}
-	_ASSERT(!m_csSoundArrowDown.IsEmpty());
+	GAME_ASSERT(!m_csSoundArrowDown.IsEmpty());
 	return m_csSoundArrowDown;
 };
 
@@ -703,7 +709,7 @@ const char *CInterfaceResMgr::GetSoundArrowLeft()
 	{
 		m_csSoundArrowLeft = g_pClientButeMgr->GetInterfaceAttributeString("ArrowLeftSound");
 	}
-	_ASSERT(!m_csSoundArrowLeft.IsEmpty());
+	GAME_ASSERT(!m_csSoundArrowLeft.IsEmpty());
 	return m_csSoundArrowLeft;
 };
 
@@ -713,7 +719,7 @@ const char *CInterfaceResMgr::GetSoundArrowRight()
 	{
 		m_csSoundArrowRight = g_pClientButeMgr->GetInterfaceAttributeString("ArrowRightSound");
 	}
-	_ASSERT(!m_csSoundArrowRight.IsEmpty());
+	GAME_ASSERT(!m_csSoundArrowRight.IsEmpty());
 	return m_csSoundArrowRight;
 };
 
@@ -725,7 +731,7 @@ const char *CInterfaceResMgr::GetObjectiveAddedSound()
 	{
 		m_csSoundObjAdd = g_pClientButeMgr->GetInterfaceAttributeString("ObjAddSound");
 	}
-	_ASSERT(!m_csSoundObjAdd.IsEmpty());
+	GAME_ASSERT(!m_csSoundObjAdd.IsEmpty());
 	return m_csSoundObjAdd;
 };
 
@@ -735,7 +741,7 @@ const char *CInterfaceResMgr::GetObjectiveRemovedSound()
 	{
 		m_csSoundObjRemove = g_pClientButeMgr->GetInterfaceAttributeString("ObjRemoveSound");
 	}
-	_ASSERT(!m_csSoundObjRemove.IsEmpty());
+	GAME_ASSERT(!m_csSoundObjRemove.IsEmpty());
 	return m_csSoundObjRemove;
 };
 
@@ -745,7 +751,7 @@ const char *CInterfaceResMgr::GetObjectiveCompletedSound()
 	{
 		m_csSoundObjComplete = g_pClientButeMgr->GetInterfaceAttributeString("ObjCompleteSound");
 	}
-	_ASSERT(!m_csSoundObjComplete.IsEmpty());
+	GAME_ASSERT(!m_csSoundObjComplete.IsEmpty());
 	return m_csSoundObjComplete;
 };
 

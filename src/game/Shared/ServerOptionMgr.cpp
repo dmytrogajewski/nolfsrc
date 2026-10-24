@@ -2,7 +2,8 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "ServerOptionMgr.h"
 #include "CommonUtilities.h"
 
@@ -213,12 +214,12 @@ OPTION* CServerOptionMgr::GetOption(char* pVariableName)
 	while (pCur)
 	{
 #ifdef _CLIENTBUILD
-		if (*pCur && (*pCur)->szVariable[0] && (_stricmp((*pCur)->szVariable, pVariableName) == 0))
+		if (*pCur && (*pCur)->szVariable[0] && (nolf::ascii_compare((*pCur)->szVariable, pVariableName) == 0))
 		{
 			return *pCur;
 		}
 #else
-		if (*pCur && (*pCur)->szServVariable[0] && (_stricmp((*pCur)->szServVariable, pVariableName) == 0))
+		if (*pCur && (*pCur)->szServVariable[0] && (nolf::ascii_compare((*pCur)->szServVariable, pVariableName) == 0))
 		{
 			return *pCur;
 		}

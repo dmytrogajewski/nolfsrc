@@ -7,21 +7,21 @@
 // This define will keep anything from being defined or linked in if MFC isn't used
 #if !defined(__AFX_H__)
 
-// stdlith dependency
-#include "..\stdlith\stdlith.h"
+// Only the collection types used by this library are needed here.
+#include "../stdlith/stdlithdefs.h"
 
 // Some headers that MFC automatically includes for you
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
-#include <crtdbg.h>
+#include <assert.h>
 
-#include "..\mfcstub\mfcs_types.h"
-#include "..\mfcstub\mfcs_point.h"
-#include "..\mfcstub\mfcs_rect.h"
-#include "..\mfcstub\mfcs_string.h"
-#include "..\mfcstub\mfcs_misc.h"
+#include "../mfcstub/mfcs_types.h"
+#include "../mfcstub/mfcs_point.h"
+#include "../mfcstub/mfcs_rect.h"
+#include "../mfcstub/mfcs_string.h"
+#include "../mfcstub/mfcs_misc.h"
 
 #ifndef NO_PRAGMA_LIBS
 	#if defined(_DEBUG)

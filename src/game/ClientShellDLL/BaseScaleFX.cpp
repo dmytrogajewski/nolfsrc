@@ -10,12 +10,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "BaseScaleFX.h"
 #include "iltclient.h"
 #include "GameClientShell.h"
 #include "VarTrack.h"
-#include "winutil.h"
+#include "WinUtil.h"
 
 extern CGameClientShell* g_pGameClientShell;
 

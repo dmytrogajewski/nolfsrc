@@ -29,6 +29,7 @@
 //
 // *********************************************************************** //
 
+#include "servermath.h"
 #include "iltcsbase.h"
 #include "iltmessage.h"
 #include "de_error.h"
@@ -145,8 +146,9 @@ LTRESULT ILTCSBase::WriteToMessageFormattedHString(HMESSAGEWRITE hMessage, int m
 		RETURN_ERROR(2, "ILTCSBase::WriteToMessageFormattedHString", LT_INVALIDPARAMS);
 
 	va_start(marker, messageCode);
-	hMessage->WriteHStringArgList(messageCode, &marker);
-	return LT_OK;
+	const LTRESULT result = hMessage->WriteHStringArgList(messageCode, &marker);
+	va_end(marker);
+	return result;
 }
 
 LTRESULT ILTCSBase::WriteToMessageObject(HMESSAGEWRITE hMessage, HOBJECT hObj)
@@ -155,6 +157,11 @@ LTRESULT ILTCSBase::WriteToMessageObject(HMESSAGEWRITE hMessage, HOBJECT hObj)
 		RETURN_ERROR(2, "ILTCSBase::WriteToMessageObject", LT_INVALIDPARAMS);
 
 	return hMessage->WriteObject(hObj);
+}
+
+LTRESULT ILTCSBase::WriteToLoadSaveMessageObject(HMESSAGEWRITE message, HOBJECT object)
+{
+    return WriteToMessageObject(message, object);
 }
 
 
@@ -369,7 +376,7 @@ void ILTCSBase::AlignRotation(LTRotation* pRotation, LTVector* pVector, LTVector
 	if (!pRotation || !pVector)
 		RETURN_ERROR_MSG_VOID(2, "ILTCSBase::AlignRotation", LT_INVALIDPARAMS);
 
-	GetMathLT()->AlignRotation(*pRotation, *pVector, *pUp);
+	rot_Align(pRotation, pVector, pUp);
 }
 
 LTRESULT ILTCSBase::SetupEuler(LTRotation* pRotation, float pitch, float yaw, float roll)

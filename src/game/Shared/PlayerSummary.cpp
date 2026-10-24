@@ -10,12 +10,13 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "PlayerSummary.h"
 #include "GameButeMgr.h"
 #include "ClientServerShared.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "CommonUtilities.h"
+#include "platform/user_files.h"
 
 #if defined(_CLIENTBUILD)
 // **************** Client only includes
@@ -103,11 +104,6 @@ LTBOOL CPlayerSummaryMgr::Init(ILTCSBase *pInterface, const char* szAttributeFil
     if (!szAttributeFile) return LTFALSE;
     if (!g_pMissionMgr) return LTFALSE;
 
-#if defined(_CLIENTBUILD)
-	//hack to create a summary.sav
-	if (!CWinUtil::FileExist(PLAYERSUMMARY_FILENAME))
-		CWinUtil::WinWritePrivateProfileString (GAME_NAME, "temp", "555", PLAYERSUMMARY_FILENAME);
-#endif
 
     LTBOOL bSave = LTFALSE;
     if (!Parse(pInterface, szAttributeFile))
@@ -216,7 +212,7 @@ LTBOOL CPlayerSummaryMgr::Save(ILTCSBase *pInterface, HMESSAGEWRITE hWrite)
 	// Save the attributes as if it were an attribute file.  If the file doesn't
 	// exist it will be created here.
 
-	LTBOOL bRet = m_buteMgr.Save(s_aAttributeFile);
+	LTBOOL bRet = m_buteMgr.Save(m_strAttributeFile);
 
 
 	// For things to save correctly we need all the bute mgr data
@@ -1237,14 +1233,8 @@ LTBOOL CPlayerSummaryMgr::Parse(ILTCSBase *pInterface, const char* sButeFile)
 	// Append the NOLF directory onto the filename if this file is normally
 	// stored in the .rez file...
 
-	if (m_bInRezFile)
-	{
-		m_strAttributeFile.Format("NOLF\\%s", sButeFile);
-	}
-	else
-	{
-		m_strAttributeFile.Format("%s", sButeFile);
-	}
+    try { m_strAttributeFile=nolf::platform::UserFiles{}.path(sButeFile).string().c_str(); }
+    catch (const std::exception& error) { GBM_DisplayError(error.what()); return LTFALSE; }
 
 
 	if (m_pCryptKey)

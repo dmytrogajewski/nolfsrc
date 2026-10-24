@@ -5,12 +5,9 @@
 #if !defined(AFX_LTGUIMESSAGEBOX_H__AF849261_6786_11D2_BDAD_0060971BDC6D__INCLUDED_)
 #define AFX_LTGUIMESSAGEBOX_H__AF849261_6786_11D2_BDAD_0060971BDC6D__INCLUDED_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
 #include "ltguicommandhandler.h"
-#include "stdlith.h"
+#include "dynarray.h"
 
 #define LTGUI_MB_CENTER		-1
 

@@ -6,7 +6,8 @@
 
 
 	#include "ltbasedefs.h"
-	#include "iservershell.h"
+	#include <cstddef>
+	class ILTServer;
 
 
 	// Maximum lines that will be drawn for one PF_OBJECTLINK property.
@@ -178,7 +179,7 @@
 	{
 
 				PropDef(char *pName, short type, LTVector valVec,
-					float valFloat, char *valString, unsigned long propFlags)
+					float valFloat, char *valString, uint32 propFlags)
 				{
 					m_PropName = pName;
 					m_PropType = type;
@@ -201,7 +202,7 @@
 		float	m_DefaultValueFloat;
 		char	*m_DefaultValueString;
 
-		unsigned long m_PropFlags;
+		uint32 m_PropFlags;
 
 		// Don't touch!
 		DEditInternal*	m_pDEditInternal;
@@ -240,10 +241,13 @@
 		PropDef		*m_Props;
 
 		// How big an object of this class is (set automatically).
-		long		m_ClassObjectSize;
+		uint32		m_ClassObjectSize;
 
 		// Don't touch!
 		void		*m_pInternal[2];
+
+        // Native allocation must respect the actual C++ class alignment.
+        uint32 m_ClassObjectAlignment = alignof(void*);
 	
 	};
 
@@ -284,7 +288,7 @@
 		static int __GlobalClassDefListSize__ = sizeof(__GlobalClassDefList__) / sizeof(__GlobalClassDefList__[0]); \
 		ServerDE *g_pLTServer=(ILTServer*)0;\
 		BEGIN_EXTERNC() \
-			__declspec(dllexport) ClassDef** ObjectDLLSetup(int *nDefs, ILTServer *pServer, int *version); \
+			NOLF_EXPORT ClassDef** ObjectDLLSetup(int *nDefs, ILTServer *pServer, int *version); \
 		END_EXTERNC() \
 		ClassDef** ObjectDLLSetup(int *nDefs, ILTServer *pServer, int *version) \
 		{\
@@ -330,10 +334,11 @@
 
 		#define DEFINE_CLASSES() \
 			ClassDef **__g_cpp_classlist=0;\
+			int __g_cpp_classcount=0;\
 			__cpp_classlist_auto_free __free_the_g_cpp_classlist;\
 			ILTServer *g_pLTServer=(ILTServer*)0;\
 			BEGIN_EXTERNC() \
-				__declspec(dllexport) ClassDef** ObjectDLLSetup(int *nDefs, ILTServer *pServer, int *version); \
+				NOLF_EXPORT ClassDef** ObjectDLLSetup(int *nDefs, ILTServer *pServer, int *version); \
 			END_EXTERNC() \
 			__ClassDefiner *__g_ClassDefinerHead=0;\
 			ClassDef** ObjectDLLSetup(int *nDefs, ILTServer *pServer, int *version) \
@@ -342,6 +347,7 @@
 				__ClassDefiner *pCurDefiner;\
 				*version = SERVEROBJ_VERSION;\
 				g_pLTServer = pServer;\
+				if (__g_cpp_classlist) { *nDefs = __g_cpp_classcount; return __g_cpp_classlist; }\
 				nClasses=0;\
 				pCurDefiner = __g_ClassDefinerHead;\
 				while(pCurDefiner)\
@@ -350,6 +356,7 @@
 					++nClasses;\
 				}\
 				__g_cpp_classlist = (ClassDef**)malloc(sizeof(ClassDef*) * nClasses);\
+				if (!__g_cpp_classlist) { *nDefs = 0; return 0; }\
 				nClasses=0;\
 				pCurDefiner = __g_ClassDefinerHead;\
 				while(pCurDefiner)\
@@ -359,6 +366,7 @@
 					++nClasses;\
 				}\
 				*nDefs = nClasses; \
+				__g_cpp_classcount = nClasses; \
 				return __g_cpp_classlist; \
 			}
 
@@ -386,11 +394,9 @@
 			return ptr;
 		}
 		
-		#if _MSC_VER != 1100
 			inline void operator delete(void *pDataPtr, void *ptr, int asdf, char a)
 			{
 			}
-		#endif
 	#endif  // !COMPILE_WITH_C
 
 
@@ -535,7 +541,7 @@
 			(sizeof(_##name##_Props__) / sizeof(PropDef)) - 1,\
 			&_##name##_Props__[1], \
 			sizeof(name),\
-			(void*)0, (void*)0 }; \
+			(void*)0, (void*)0, alignof(name) }; \
 			DO_AUTO_CLASSLIST(name)
 
 	// End class macros with a plugin interface.

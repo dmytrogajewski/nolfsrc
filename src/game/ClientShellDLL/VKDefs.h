@@ -5,7 +5,7 @@
 //
 // MODULE  : VKDefs.h
 //
-// PURPOSE : Keyboard definitions and utilities (Windows-specific)
+// PURPOSE : Logical SDK key identifiers; host input adapters supply these values.
 //
 // CREATED : 6/27/97 7:26:40 PM
 //
@@ -13,7 +13,7 @@
 
 char VKToASCII (int nKey);
 
-#ifdef DEFINE_WINDOWS_VIRTUAL_KEYS
+#if defined(DEFINE_WINDOWS_VIRTUAL_KEYS) || defined(NOLFSRC_NATIVE)
 
 #define VK_LBUTTON		1
 #define VK_RBUTTON		2

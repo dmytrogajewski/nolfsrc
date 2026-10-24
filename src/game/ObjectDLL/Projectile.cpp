@@ -10,11 +10,13 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "Projectile.h"
 #include "ltengineobjects.h"
 #include "iltserver.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "ServerUtilities.h"
 #include "Explosion.h"
 #include "Character.h"
@@ -1165,7 +1167,7 @@ void CProjectile::DoVector()
 
 			if ( iInfo.m_hObject == hLastHitbox )
 			{
-				_ASSERT(LTFALSE);
+				GAME_ASSERT(LTFALSE);
 				g_pLTServer->CPrint("ERROR: vector intersected character hitbox twice");
 				bDone = LTTRUE;
 				continue;

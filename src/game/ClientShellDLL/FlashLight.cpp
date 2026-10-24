@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FlashLight.h"
 #include "GameClientShell.h"
 #include "ClientUtilities.h"

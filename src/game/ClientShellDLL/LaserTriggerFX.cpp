@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "LaserTriggerFX.h"
 #include "WeaponModel.h"
 #include "VarTrack.h"

@@ -83,12 +83,12 @@ uint8 CompressRotationByte(ILTCommon *pCommon, LTRotation *pRotation);
 void UncompressRotationByte(ILTCommon *pCommon, uint8 rot, LTRotation *pRotation);
 
 #ifdef _CLIENTBUILD
-#include "..\ClientShellDLL\ClientUtilities.h"
-#include "..\ClientShellDLL\GameClientShell.h"
+#include "../ClientShellDLL/ClientUtilities.h"
+#include "../ClientShellDLL/GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
 #else
-#include "..\ObjectDLL\ServerUtilities.h"
-#include "..\ObjectDLL\GameServerShell.h"
+#include "../ObjectDLL/ServerUtilities.h"
+#include "../ObjectDLL/GameServerShell.h"
 extern CGameServerShell* g_pGameServerShell;
 #endif
 

@@ -16,14 +16,6 @@
 
 #include "cres/p1.h"
 
-// winuser.h for Windows 98/2000 and later; VC6's predates them.
-#ifndef SM_XVIRTUALSCREEN
-#define SM_XVIRTUALSCREEN		76
-#define SM_YVIRTUALSCREEN		77
-#define SM_CXVIRTUALSCREEN		78
-#define SM_CYVIRTUALSCREEN		79
-#endif
-
 // The config version this build upgrades autoexec.cfg to (ModPatchNum,
 // M-P1-12).  Raise it, and add a step to P1Config_AfterInit, for every new
 // one-time change.
@@ -52,7 +44,6 @@ void	P1Timing_SendDontLockServer(bool bHosting);	// M-P1-02, on joining a game
 
 void	P1Input_UseCursor(bool bUseCursor);			// from CInterfaceMgr::UseCursor
 void	P1Input_GetAxisOffsets(float* pOffsets);	// yaw, pitch, (unused) for the camera
-void	P1Input_OnWindowMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void	P1Input_OnWindowUnhooked();
 void	P1Input_OnFocus(bool bFocus);
 

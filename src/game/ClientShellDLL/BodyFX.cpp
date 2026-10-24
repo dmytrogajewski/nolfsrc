@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "BodyFX.h"
 #include "GameClientShell.h"
 #include "SFXMsgIds.h"
@@ -222,8 +225,8 @@ void CBodyFX::OnModelKey(HLOCALOBJ hObj, ArgList *pArgs)
 	char* pKey = pArgs->argv[0];
 	if (!pKey) return;
 
-	LTBOOL bSlump = !_stricmp(pKey, "NOISE");
-	LTBOOL bLand = !_stricmp(pKey, "LAND");
+	LTBOOL bSlump = !nolf::ascii_compare(pKey, "NOISE");
+	LTBOOL bLand = !nolf::ascii_compare(pKey, "LAND");
 
 	if ( bSlump || bLand )
 	{
@@ -263,7 +266,7 @@ void CBodyFX::OnModelKey(HLOCALOBJ hObj, ArgList *pArgs)
 		// Play the noise
 
 		SURFACE* pSurf = g_pSurfaceMgr->GetSurface(eSurface);
-		_ASSERT(pSurf);
+		GAME_ASSERT(pSurf);
 		if (!pSurf) return;
 
 		if (bSlump && pSurf->szBodyFallSnd[0])

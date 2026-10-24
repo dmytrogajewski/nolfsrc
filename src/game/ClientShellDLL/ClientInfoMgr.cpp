@@ -1,8 +1,8 @@
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "ClientInfoMgr.h"
 #include "iltclient.h"
 #include "GameClientShell.h"
-#include "clientres.h"
+#include "ClientRes.h"
 #include <stdio.h>
 
 #define VERT_SPACING 3

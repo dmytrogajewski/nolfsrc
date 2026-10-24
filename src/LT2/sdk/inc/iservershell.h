@@ -99,9 +99,9 @@
 	#define SETUP_SERVERSHELL()\
 		void *g_hLTDLLInstance=0;\
 		BEGIN_EXTERNC() \
-			__declspec(dllexport) void GetServerShellFunctions(CreateServerShellFn *pCreate, DeleteServerShellFn *pDelete);\
-			__declspec(dllexport) int GetServerShellVersion();\
-			__declspec(dllexport) void SetInstanceHandle(void *handle);\
+			NOLF_EXPORT void GetServerShellFunctions(CreateServerShellFn *pCreate, DeleteServerShellFn *pDelete);\
+			NOLF_EXPORT int GetServerShellVersion();\
+			NOLF_EXPORT void SetInstanceHandle(void *handle);\
 		END_EXTERNC()\
 		void GetServerShellFunctions(CreateServerShellFn *pCreate, DeleteServerShellFn *pDelete)\
 		{\

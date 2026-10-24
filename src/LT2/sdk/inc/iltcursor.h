@@ -41,6 +41,8 @@
 
 		// Set the current hardware cursor bitmap.  The bitmap comes from cshell.dll.
 		virtual LTRESULT	LoadCursorBitmapResource(const char *pName, HLTCURSOR &hCursor) = 0;
+		// Numeric resource IDs are values, never tagged host pointers.
+		virtual LTRESULT LoadCursorBitmapResource(uint32 id, HLTCURSOR &hCursor) = 0;
 
 		// Free a cursor.
 		virtual LTRESULT	FreeCursor(const HLTCURSOR hCursor) = 0;

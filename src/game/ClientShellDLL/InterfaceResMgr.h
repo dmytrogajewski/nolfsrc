@@ -5,11 +5,8 @@
 #if !defined(AFX_INTERFACERESMGR_H__44498A80_ECE2_11D2_B2DB_006097097C7B__INCLUDED_)
 #define AFX_INTERFACERESMGR_H__44498A80_ECE2_11D2_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
-#include "LTGUIMgr.h"
+#include "ltguimgr.h"
 #include "InterfaceSurfMgr.h"
 
 class CGameClientShell;

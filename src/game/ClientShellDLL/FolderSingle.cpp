@@ -1,7 +1,7 @@
 // FolderSingle.cpp: implementation of the CFolderSingle class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderSingle.h"
 #include "FolderCustomLevel.h"
 #include "FolderMgr.h"

@@ -8,14 +8,16 @@
 //
 //----------------------------------------------------------
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "iltclient.h"
+#include "ClientUtilities.h"
+#include "engine/client/client_window.h"
 
 char VKToASCII (int nKey)
 {
-    LTBOOL bShiftDown = !!(GetKeyState (VK_SHIFT) & 0x8000);
-    LTBOOL bCapsLockOn = !!(GetKeyState (VK_CAPITAL) & 0x01);
-    LTBOOL bNumLockOn = !!(GetKeyState (VK_NUMLOCK) & 0x01);
+    LTBOOL bShiftDown = IsKeyDown(VK_SHIFT);
+    LTBOOL bCapsLockOn = nolf::platform::has_modifier(nolf::client_window(*g_pLTClient).key_modifiers(),nolf::platform::KeyModifier::CapsLock);
+    LTBOOL bNumLockOn = nolf::platform::has_modifier(nolf::client_window(*g_pLTClient).key_modifiers(),nolf::platform::KeyModifier::NumLock);
     LTBOOL bUpperCase = (bCapsLockOn && !bShiftDown) || (!bCapsLockOn && bShiftDown);
 
 	if (nKey >= 'A' && nKey <= 'Z' && !bUpperCase)

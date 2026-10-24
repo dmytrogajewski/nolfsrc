@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "DamageTypes.h"
 
 DTINFO DTInfoArray[] =
@@ -103,7 +104,7 @@ DamageType StringToDamageType(const char* pDTName)
 {
 	for (int i=0; DTInfoArray[i].eType != DT_INVALID; i++)
 	{
-		if (_stricmp(DTInfoArray[i].pName, pDTName) == 0)
+		if (nolf::ascii_compare(DTInfoArray[i].pName, pDTName) == 0)
 		{
 			return DTInfoArray[i].eType;
 		}

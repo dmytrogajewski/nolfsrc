@@ -15,10 +15,10 @@
 
 //*********************************************************************************
 
-#include "..\lithfontmgr\lithfontdefs.h"
-#include "..\lithfontmgr\lithbitmapfont.h"
-#include "..\lithfontmgr\lithsystemfont.h"
-#include "..\lithfontmgr\lithcursor.h"
+#include "../lithfontmgr/lithfontdefs.h"
+#include "../lithfontmgr/lithbitmapfont.h"
+#include "../lithfontmgr/lithsystemfont.h"
+#include "../lithfontmgr/lithcursor.h"
 
 
 #ifndef NO_PRAGMA_LIBS

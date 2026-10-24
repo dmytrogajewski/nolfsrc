@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "SecurityCamera.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -236,7 +238,9 @@ uint32 SecurityCamera::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSA
             ILTCommon* pCommon = g_pLTServer->Common();
 			if (!pCommon) return 0;
 
-			const char *szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+
+			const char* szMsg = szMsgStorage.c_str();
 
 			// ConParse does not destroy szMsg, so this is safe
 			ConParse parse;
@@ -246,19 +250,19 @@ uint32 SecurityCamera::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSA
 			{
 				if (parse.m_nArgs > 0 && parse.m_Args[0])
 				{
-					if (_stricmp(parse.m_Args[0], s_szOff) == 0)
+					if (nolf::ascii_compare(parse.m_Args[0], s_szOff) == 0)
 					{
 						SetState(eStateOff);
 					}
-					else if (_stricmp(parse.m_Args[0], s_szReset) == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], s_szReset) == 0)
 					{
 						SetState(eStateReset);
 					}
-					else if (_stricmp(parse.m_Args[0], s_szGadget) == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], s_szGadget) == 0)
 					{
 						HandleGadgetMsg(parse);
 					}
-					else if (_stricmp(parse.m_Args[0], s_szTripped) == 0)
+					else if (nolf::ascii_compare(parse.m_Args[0], s_szTripped) == 0)
 					{
 						m_bTripped = LTTRUE;
 

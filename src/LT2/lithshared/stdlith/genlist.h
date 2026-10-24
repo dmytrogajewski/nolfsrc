@@ -18,6 +18,13 @@ for(pos=pList->GenBegin(); pList->GenIsValid(pos); )
 #ifndef __GENLIST_H__
 #define __GENLIST_H__
 
+#if defined(NOLFSRC_NATIVE)
+// Share the native allocator, iterator and array definitions with the engine.
+#include "stdlithdefs.h"
+#include "engine/server/collection.h"
+#else
+
+
 
 	class GenListPos;
 
@@ -138,6 +145,8 @@ for(pos=pList->GenBegin(); pList->GenIsValid(pos); )
 	}
 
 	
+#endif // NOLFSRC_NATIVE
+
 #endif
 
 

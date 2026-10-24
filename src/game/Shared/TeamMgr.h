@@ -17,7 +17,7 @@
 
 // Includes...
 
-#include "barelist.h"
+#include "BareList.h"
 #include "ltbasedefs.h"
 #include "DebugNew.h"
 

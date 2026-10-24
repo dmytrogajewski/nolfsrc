@@ -1,5 +1,12 @@
 # No One Lives Forever, built from source
 
+**Native Linux port in progress:** [native build and current status](docs/NATIVE.md).
+The native CMake build includes the server engine, original gameplay module,
+platform adapters, renderer device, the complete original client game module,
+and a headless `nolf-server` executable.
+Separate native peers now complete the engine and original game handshakes.
+The playable native client and full multiplayer support are still being integrated.
+
 Source code and a build for **The Operative: No One Lives Forever** (Game of
 the Year Edition, PC, 2000/2001): every executable and DLL of the game --
 the LithTech engine (`lithtech.exe`, `server.dll`, the Direct3D renderer

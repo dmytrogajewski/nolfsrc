@@ -1,7 +1,8 @@
+#include "platform/system.h"
 // FolderJoinLAN.cpp: implementation of the CFolderJoinLAN class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderJoinLAN.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -500,7 +501,7 @@ LTBOOL CFolderJoinLAN::DoJoinGame(CString sAddress)
 		}
 
 		// Wait a sec and try again.
-		Sleep(1000);
+		nolf::platform::sleep_for(std::chrono::seconds(1));
 		nRetries--;
 	}
 

@@ -57,6 +57,9 @@
 #include <string.h>
 
 #include "collection.h"      // LAlloc, GenList, CMoArray, MoArray_FindElementMemcmp
+#include "engine/portable/allocation.h"
+#include <cstddef>
+#include <limits>
 
 // collection.h reaches ltbasetypes.h only, so LTTRUE/LTFALSE are in scope and
 // LTNULL is not -- exactly the position src/engine/server/collection.cpp
@@ -71,8 +74,6 @@
 // `DefStdlithFree(ptr)`, and in this build those two names resolve to
 // exactly these, because 0x491790's call goes straight to 0x4290b0 with no
 // intervening hop.
-void* dalloc(unsigned long size);        // 0x004290b0
-void  dfree(void* ptr);                  // 0x004290c0
 
 // StdLith's own code in this image -- struct_bank.obj, linked from
 // StdLith.lib -- calls l_allocator.h's DefStdlithAlloc/DefStdlithFree, and
@@ -81,7 +82,7 @@ void  dfree(void* ptr);                  // 0x004290c0
 // (dalloc.cpp); /OPT:ICF folds each onto its twin, and nothing pulls
 // StdLith.lib's l_allocator.obj (the malloc versions, and a second LAlloc)
 // into the exe.
-void* DefStdlithAlloc(unsigned long size)
+void* DefStdlithAlloc(uint32 size)
 {
 	return dalloc(size);
 }
@@ -285,10 +286,12 @@ void* LAllocSimpleBlock::Alloc(uint32 size)
 	if (size == 0)
 		return 0;
 
-	// DWord align by default.
-	size = ((size + 3) & ~3);
+	// A native record can contain pointers, doubles and vector fields.
+	const uint32 alignment = alignof(std::max_align_t);
+	if (size > std::numeric_limits<uint32>::max() - (alignment - 1)) return 0;
+	size = (size + alignment - 1) & ~(alignment - 1);
 
-	if ((m_CurBlockPos + size) > m_BlockSize)
+	if (m_CurBlockPos > m_BlockSize || size > m_BlockSize - m_CurBlockPos)
 		return 0;
 
 	pRet = &m_pBlock[m_CurBlockPos];
@@ -335,14 +338,14 @@ void LAllocSimpleBlock::Clear()
 // compares the walking pointer against pToFind as well -- so the shipped
 // loop reloads argument 1 as its fixed operand and NEVER READS argument 2
 // at all ([esp+8] is not touched anywhere in the function). Every call
-// therefore reports index 0. Do not "fix" it.
+// therefore reported index 0. Native collections search the actual array.
 uint32 MoArray_FindElementMemcmp(
 	const void* pToFind,
 	const void* pArray,
 	uint32 nElements,
 	uint32 elementSize)
 {
-	const char* pCur = (const char*)pToFind;
+	const char* pCur = (const char*)pArray;
 	uint32 i;
 
 	for (i = 0; i < nElements; i++)

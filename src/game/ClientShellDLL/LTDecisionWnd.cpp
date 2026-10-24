@@ -9,9 +9,9 @@
 ;	COMMENT:		Copyright (c) 1998, Monolith Productions, Inc.
 ;
 ****************************************************************************/
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "LTDecisionWnd.h"
-#include "LTGuiMgr.h"
+#include "ltguimgr.h"
 #include "LTWndMessages.h"
 
 #include "GameClientShell.h"

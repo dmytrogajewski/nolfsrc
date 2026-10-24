@@ -12,6 +12,11 @@
 	class CVarTrack
 	{
 	public:
+#ifdef NOLFSRC_NATIVE
+		// Module statics can survive multiple engine instances. A new shell
+		// retires every cached interface and console handle before using them.
+		static void BeginSession() { ++s_Session; }
+#endif
 
 					CVarTrack()
 					{
@@ -23,6 +28,9 @@
         LTBOOL       Init(ILTServer *pServerDE, char *pVarName, char *pStartVal, float fStartVal)
 		{
 			char tempStr[128];
+			m_pServerDE = LTNULL;
+			m_hVar = LTNULL;
+			if (!pServerDE || !pVarName || !*pVarName) return LTFALSE;
 
 			m_pVarName = pVarName;
 			if(!pStartVal)
@@ -43,17 +51,24 @@
 			}
 
 			m_pServerDE = pServerDE;
+#ifdef NOLFSRC_NATIVE
+			m_Session = s_Session;
+#endif
             return LTTRUE;
 		}
 
         LTBOOL       IsInitted()
 		{
-			return !!m_pServerDE;
+			return m_pServerDE && m_hVar
+#ifdef NOLFSRC_NATIVE
+				&& m_Session == s_Session
+#endif
+				;
 		}
 
 		float		GetFloat(float defVal=0.0f)
 		{
-			if(m_pServerDE && m_hVar)
+			if(IsInitted())
 				return m_pServerDE->GetVarValueFloat(m_hVar);
 			else
 				return defVal;
@@ -63,7 +78,7 @@
 		{
 			char *pRet;
 
-			if(m_pServerDE && m_hVar)
+			if(IsInitted())
 			{
 				if(pRet = m_pServerDE->GetVarValueString(m_hVar))
 					return pRet;
@@ -75,7 +90,7 @@
 		{
 			char str[128];
 
-			if(!m_pServerDE || !m_pVarName)
+			if(!IsInitted() || !m_pVarName)
 				return;
 
 			sprintf(str, "%f", val);
@@ -84,13 +99,17 @@
 
 		void		SetStr(char *pStr)
 		{
-			if(!m_pServerDE || !m_pVarName)
+			if(!IsInitted() || !m_pVarName)
 				return;
 
 			m_pServerDE->SetGameConVar(m_pVarName, pStr);
 		}
 
 	protected:
+#ifdef NOLFSRC_NATIVE
+		inline static uint64 s_Session = 1;
+		uint64 m_Session = 0;
+#endif
 
 		HCONVAR		m_hVar;
         ILTServer   *m_pServerDE;

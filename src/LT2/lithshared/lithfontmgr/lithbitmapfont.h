@@ -16,6 +16,7 @@
 //*********************************************************************************
 
 #include "lithfont.h"
+#include "font_offset_cache.h"
 
 //*********************************************************************************
 
@@ -83,6 +84,7 @@ class LithBitmapFont : public LithFont
 		uint32				m_nWaitLines;
 
 	private:
+		std::optional<nolf::FontOffsetKey> m_OffsetCacheKey;
 		// Functions to handle the offset data of the font
 		LTBOOL	LoadOffsets();
 		LTBOOL	CalcOffsets(uint8 nPitch = 0);

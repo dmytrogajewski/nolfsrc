@@ -10,9 +10,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "engine/portable/string.h"
+#include <cassert>
 #include "ModItem.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "iltserver.h"
 #include "PlayerObj.h"
 #include "ObjectMsgs.h"
@@ -263,11 +266,11 @@ LTRESULT CModPlugin::PreHook_EditStringList(const char* szRezPath, const char* s
 
 	// See if we can handle the property...
 
-	if (_strcmpi("ModType", szPropName) == 0)
+	if (nolf::ascii_compare("ModType", szPropName) == 0)
 	{
         uint32 dwModTypes = sm_ButeMgr.GetNumModTypes();
 
-		_ASSERT(cMaxStrings >= dwModTypes);
+		GAME_ASSERT(cMaxStrings >= dwModTypes);
 
         MOD* pMod = LTNULL;
 

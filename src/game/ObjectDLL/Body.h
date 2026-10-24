@@ -19,7 +19,7 @@ class CBodyState;
 #include "Character.h"
 #include "Prop.h"
 #include "ModelButeMgr.h"
-#include "SFXMsgIDs.h"
+#include "SFXMsgIds.h"
 #include "Animator.h"
 #include "DeathScene.h"
 

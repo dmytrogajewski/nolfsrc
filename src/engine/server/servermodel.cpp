@@ -1,9 +1,11 @@
+#include "model_callback.h"
+#include "object_lifetime.h"
 // server.dll — the server's ILTModel setter overrides (reconstruction). Build /O1.
 #include "servermodel.h"
 #include "servermgr.h"
 #include "de_error.h"
 #ifdef NOLFSRC_MODERN
-#include "..\..\modern\engine\p1_frametime.h"   // M-P1-23
+#include "modern/engine/p1_frametime.h"   // M-P1-23
 #endif
 
 // sm_SetObjectChangeFlag now lives in servermodel.h.  It is not just this
@@ -18,7 +20,7 @@ LTRESULT ServerModelLT::SetLooping(LTAnimTracker* pTracker, LTBOOL bLooping)
 {
 	// The instance is read before the checks, not after: the shipped code
 	// loads it into a callee-saved register in the prologue.
-	LTObject* pObj = (LTObject*)pTracker->GetModelInstance();
+	LTObject* pObj = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pObj)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::SetLooping", LT_INVALIDPARAMS);
 
@@ -31,7 +33,7 @@ LTRESULT ServerModelLT::SetLooping(LTAnimTracker* pTracker, LTBOOL bLooping)
 
 LTRESULT ServerModelLT::SetPlaying(LTAnimTracker* pTracker, LTBOOL bPlaying)
 {
-	LTObject* pObj = (LTObject*)pTracker->GetModelInstance();
+	LTObject* pObj = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pObj)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::SetPlaying", LT_INVALIDPARAMS);
 
@@ -44,14 +46,16 @@ LTRESULT ServerModelLT::SetPlaying(LTAnimTracker* pTracker, LTBOOL bPlaying)
 
 LTRESULT ServerModelLT::SetCurAnimTime(LTAnimTracker* pTracker, uint32 curTime)
 {
-	LTObject* pObj = (LTObject*)pTracker->GetModelInstance();
+	LTObject* pObj = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pObj)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::SetCurAnimTime", LT_INVALIDPARAMS);
 
 	LTRESULT dResult = CommonModelLT::SetCurAnimTime(pTracker, curTime);
 	if (dResult == LT_OK)
 	{
+        ModelCallbackGuard guard(*pTracker);
 		at_UpdateStringKeys(pTracker, pTracker->m_TimeRef.m_Cur.m_Time);
+        if (!guard.unchanged()) return dResult;
 		sm_SetObjectChangeFlag(m_pServerMgr, pObj, CF_MODELINFO);
 	}
 
@@ -60,7 +64,7 @@ LTRESULT ServerModelLT::SetCurAnimTime(LTAnimTracker* pTracker, uint32 curTime)
 
 LTRESULT ServerModelLT::SetCurAnim(LTAnimTracker* pTracker, HMODELANIM hAnim)
 {
-	LTObject* pObj = (LTObject*)pTracker->GetModelInstance();
+	LTObject* pObj = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pObj)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::SetCurAnim", LT_INVALIDPARAMS);
 
@@ -73,7 +77,7 @@ LTRESULT ServerModelLT::SetCurAnim(LTAnimTracker* pTracker, HMODELANIM hAnim)
 
 LTRESULT ServerModelLT::ResetAnim(LTAnimTracker* pTracker)
 {
-	LTObject* pObj = (LTObject*)pTracker->GetModelInstance();
+	LTObject* pObj = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pObj)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::ResetAnim", LT_INVALIDPARAMS);
 
@@ -86,7 +90,7 @@ LTRESULT ServerModelLT::ResetAnim(LTAnimTracker* pTracker)
 
 LTRESULT ServerModelLT::SetWeightSet(LTAnimTracker* pTracker, HMODELWEIGHTSET hSet)
 {
-	LTObject* pObj = (LTObject*)pTracker->GetModelInstance();
+	LTObject* pObj = pTracker ? pTracker->GetModelInstance() : nullptr;
 	if (!pTracker || !pObj)
 		RETURN_ERROR_NAMED(2, "ServerModelLT::SetWeightSet", LT_INVALIDPARAMS);
 
@@ -126,7 +130,9 @@ LTRESULT ServerModelLT::RemoveTracker(HOBJECT hObj, LTAnimTracker* pTracker)
 {
 	LTRESULT dResult = CommonModelLT::RemoveTracker(hObj, pTracker);
 
-	if (!dResult)
+	// A game animator also unlinks its trackers during object destruction.
+	// The removal notice already replaces any animation-state notification.
+	if (!dResult && !(hObj->m_ChangeFlags & 1))
 		sm_SetObjectChangeFlag(m_pServerMgr, hObj, CF_MODELINFO);
 
 	return dResult;
@@ -279,36 +285,15 @@ void sm_ModelStringKeyCallback(LTAnimTracker* pTracker, AnimKeyFrame* pFrame);
 // copy.  /Os declines it -- server.dll 0x1002a7f2 is called out of line from
 // its single site at 0x1002a43d -- so /O1 is unaffected.  File-private, so
 // nothing outside servermodel.cpp can move either way.
-inline void sm_UpdateObjectTrackers(CServerMgr* pMgr, LTObject* pObject)
-{
-	LTAnimTracker* pTracker;
-	uint32         nMS;
-
-	if (pObject->m_ObjectType == OT_MODEL)
-	{
+inline void sm_UpdateObjectTrackers(CServerMgr* manager, LTObject* object) {
+    if (object->m_ObjectType != OT_MODEL) return;
 #ifdef NOLFSRC_MODERN
-		// M-P1-23: the tick's fraction of a millisecond carried to the
-		// next tick (once per tick, whichever object asks first)
-		static P1TickMs s_P1Ms;
-		nMS = (uint32)P1_TickMs(&s_P1Ms, pMgr->m_FrameTime, pMgr->m_Time);
+    static P1TickMs tick;
+    const auto elapsed = static_cast<uint32>(P1_TickMs(&tick, manager->m_FrameTime, manager->m_Time));
 #else
-		nMS = (uint32)(pMgr->m_FrameTime * 1000.0f);
+    const auto elapsed = static_cast<uint32>(manager->m_FrameTime * 1000.0f);
 #endif
-
-		if (nMS > 0)
-		{
-			pTracker = ((ModelInstance*)pObject)->m_pTrackerList;
-
-			while (pTracker)
-			{
-				pTracker->m_StringKeyCallback = sm_ModelStringKeyCallback;
-
-				at_UpdateTracker(pTracker, nMS);
-
-				pTracker = pTracker->GetNext();
-			}
-		}
-	}
+    model_UpdateTrackers(*static_cast<ModelInstance*>(object), elapsed, sm_ModelStringKeyCallback);
 }
 
 // 0x1002a6de — how far the object should move this frame, given the frame
@@ -363,82 +348,40 @@ inline void sm_UpdateObjectTrackers(CServerMgr* pMgr, LTObject* pObject)
 // unaffected -- with the caveat that this body is still a NEAR at /O1 (276 of
 // 276 bytes, see above), so it is the one of the three whose /O1 behaviour is
 // not proven byte-for-byte.  At 276 bytes it is far past anything /Os expands.
-inline int sm_GetFrameMove(CServerMgr* pMgr, LTObject* pObject,
-                           float fFrameTime, LTVector* pOffset)
-{
-	GlobalForceControl* pControl;
-	LTLink*             pHead;
-	LTLink*             pCur;
-	InterObjectLink*    pLink;
-	LTObject*           pContainer;
-	ContainerPhysics    cp;
-	int                 nNotified;
-	int                 nResult;
-
-	if (!(pObject->m_ChangeFlags & CHANGEFLAG_MOTION))
-		return 0;
-
-	pControl = &pMgr->m_ForceControl;
-
-	pControl->m_fFrameTime = fFrameTime;
-	pControl->m_pObj       = pObject;
-
-	// The list head is formed INSIDE the condition, not above it: the shipped
-	// build loads m_pSData only on the path that walks it, which is what a
-	// short-circuit && buys and what hoisting the assignment above the `if`
-	// costs.
-	if (!(pObject->m_Flags & FLAG_CONTAINER) &&
-	    (pHead = &pObject->m_pSData->m_Links, pHead->m_pNext != pHead))
-	{
-		cp.m_Acceleration = pObject->m_Acceleration;
-		cp.m_Velocity     = pObject->m_Velocity;
-		nNotified         = 0;
-		cp.m_Flags        = pObject->m_Flags;
-		cp.m_hObject      = (HOBJECT)pObject;
-
-		pCur = pHead->m_pNext;
-		while (pCur != pHead)
-		{
-			pLink = (InterObjectLink*)pCur->m_pData;
-			pCur  = pCur->m_pNext;
-
-			if (pLink->m_Type != INTERLINK_CONTAINER)
-				continue;
-
-			pContainer = pLink->m_pOwner;
-
-			if (!(pContainer->m_Flags & FLAG_CONTAINER))
-				continue;
-
-			pContainer->m_pSData->m_pBaseClass->EngineMessageFn(
-			    MID_AFFECTPHYSICS, &cp, 0.0f);
-
-			nNotified++;
-		}
-
-		pControl->m_pVelocity     = &cp.m_Velocity;
-		pControl->m_pAcceleration = &cp.m_Acceleration;
-		pControl->m_nObjFlags     = cp.m_Flags;
-
-		nResult = phys_ComputeFrameMove(pControl);
-
-		*pOffset = pControl->m_vFrameMove;
-
-		if (nNotified)
-			pObject->m_ChangeFlags |= CHANGEFLAG_MOTION;
-	}
-	else
-	{
-		pControl->m_pVelocity     = &pObject->m_Velocity;
-		pControl->m_pAcceleration = &pObject->m_Acceleration;
-		pControl->m_nObjFlags     = pObject->m_Flags;
-
-		nResult = phys_ComputeFrameMove(pControl);
-
-		*pOffset = pControl->m_vFrameMove;
-	}
-
-	return nResult;
+inline int sm_GetFrameMove(CServerMgr* manager, LTObject* object, float seconds, LTVector* offset) {
+    if (!(object->m_ChangeFlags & CHANGEFLAG_MOTION)) return 0;
+    ObjectCallbackGuard guard(*object);
+    ContainerPhysics physics{};
+    physics.m_Acceleration = object->m_Acceleration;
+    physics.m_Velocity = object->m_Velocity;
+    physics.m_Flags = object->m_Flags;
+    physics.m_hObject = object;
+    const bool use_local = !(object->m_Flags & FLAG_CONTAINER) && object->m_pSData && !object->m_pSData->m_Links.IsTiedOff();
+    struct Context { CServerMgr* manager; ObjectCallbackGuard& guard; ContainerPhysics& physics; int notified = 0; } context{manager,guard,physics};
+    if (use_local) {
+        manager->m_InterObjectLinks.VisitContainers(object,[](void* pointer,LTObject* container) {
+            auto& context = *static_cast<Context*>(pointer);
+            if (!context.guard.unchanged()) return false;
+            if ((container->m_Flags & FLAG_CONTAINER) && container->m_pSData &&
+                !container->m_pSData->m_Removing && container->m_pSData->m_pBaseClass) {
+                context.manager->m_ClassMgr.message(container->m_pSData->m_pBaseClass,MID_AFFECTPHYSICS,&context.physics,0);
+                ++context.notified;
+            }
+            return context.guard.unchanged();
+        },&context);
+    }
+    if (!guard.unchanged()) return 0;
+    auto& control = manager->m_ForceControl;
+    // Game callbacks can recursively compute motion for other objects.
+    // Restore all shared computation inputs after those callbacks finish.
+    control.m_fFrameTime = seconds; control.m_pObj = object;
+    control.m_pVelocity = use_local ? &physics.m_Velocity : &object->m_Velocity;
+    control.m_pAcceleration = use_local ? &physics.m_Acceleration : &object->m_Acceleration;
+    control.m_nObjFlags = use_local ? physics.m_Flags : object->m_Flags;
+    const auto result = phys_ComputeFrameMove(&control);
+    *offset = control.m_vFrameMove;
+    if (context.notified) object->m_ChangeFlags |= CHANGEFLAG_MOTION;
+    return result;
 }
 
 // 0x1002a49f — the motion half of one object's update: work out the frame's
@@ -490,6 +433,7 @@ inline int sm_GetFrameMove(CServerMgr* pMgr, LTObject* pObject,
 // VEC_INIT for the acceleration clear, or Dot for MagSqr.
 inline void sm_MoveObjectForFrame(CServerMgr* pMgr, LTObject* pObject)
 {
+    ObjectCallbackGuard guard(*pObject);
 	LTVector vOldPos;
 	LTVector vNewPos;
 	LTVector vOffset;
@@ -505,7 +449,8 @@ inline void sm_MoveObjectForFrame(CServerMgr* pMgr, LTObject* pObject)
 	{
 		vNewPos = pObject->m_Pos + vOffset;
 
-		sm_MoveObject((IWorldSim*)pMgr, pObject, &vNewPos, 5);
+		sm_MoveObject(pMgr, pObject, &vNewPos, 5);
+        if (!guard.unchanged()) return;
 
 		if ((pObject->m_Flags & FLAG_REMOVEIFOUTSIDE) && pMgr->m_pWorldFile &&
 		    (pObject->m_Pos.x < pMgr->m_WorldBoxMin.x ||
@@ -548,7 +493,10 @@ inline void sm_MoveObjectForFrame(CServerMgr* pMgr, LTObject* pObject)
 //     wrapping the tail.
 void sm_UpdateObject(CServerMgr* pMgr, LTObject* pObject)
 {
+    ObjectCallbackGuard guard(*pObject);
+    if (!pObject->m_pSData) return;
 	sm_UpdateObjectTrackers(pMgr, pObject);
+    if (!guard.unchanged()) return;
 
 	if (pObject->m_pSData->m_NextUpdate > 0.0f)
 	{
@@ -556,7 +504,9 @@ void sm_UpdateObject(CServerMgr* pMgr, LTObject* pObject)
 
 		if (pObject->m_pSData->m_NextUpdate <= 0.0f)
 		{
-			pObject->m_pSData->m_pBaseClass->EngineMessageFn(MID_UPDATE, LTNULL, 0.0f);
+            if (pObject->m_pSData->m_pBaseClass)
+                pMgr->m_ClassMgr.message(pObject->m_pSData->m_pBaseClass,MID_UPDATE, LTNULL, 0.0f);
+            if (!guard.unchanged()) return;
 
 			if (!(pObject->m_ChangeFlags & 0x04))
 				return;
@@ -631,176 +581,34 @@ struct ClassDef* cls_FindFlagged(void* pUnused, struct ClassDef* pClass, uint32 
 	return NULL;
 }
 
-// 0x1002a8b6 — read the world file's object list and create every object in
-// it. The world's object records are a run at the offset the second dword of
-// the file gives; each is a class name, then a run of properties, and the
-// properties are hung on the manager's m_pCurProps list so that the game's
-// MID_PRECREATE / MID_INITIALUPDATE handlers can read them back through
-// GetPropGeneric. The list is freed and re-emptied after every object.
-//
-// Read off the bytes rather than guessed:
-//
-//   * four of the values the stream gives up are read and never looked at
-//     again — the first dword of the file, the per-record size word, the
-//     position GetPos hands back and the property's flags dword. They are
-//     still locals with their addresses taken, which is why the frame has
-//     room for them.
-//   * a class the file names but the game does not have is a printed warning
-//     and nothing else; a CF_NORUNTIME class is skipped silently; and unless
-//     the caller asked for everything, a class that is not CF_ALWAYSLOAD (nor
-//     descended from one) is skipped too. All three paths converge on a null
-//     pClassDef, and the object is only allocated when that survives.
-//   * pClassDef lives in the dead pStream parameter slot — pStream is cached
-//     in %esi at the top and its slot never read again.
-//   * each property record is allocated to fit: `nLen + 0x5b`, which is the
-//     0x58 bytes in front of the value plus three. Written as the literal
-//     because ObjectProp's declared value union is 0x68 bytes, so no
-//     sizeof spelling reproduces it.
-//   * the two error checks — one inside the loop after the class name and one
-//     after the loop — are two written-out error blocks. lithtech.exe keeps
-//     both (0x0046a1c2 and 0x0046a21b, each with its own epilogue); /O1
-//     cross-jumps them into one in server.dll, which is why that image reads
-//     as a single block with a jump into it.
-//   * the allocate and the free are the inline helpers (servermodel.h):
-//     server.dll calls 0x10001c54 / 0x1002abf8, lithtech.exe expands them.
-//   * m_Pos is re-initialised after the two name terminators, not before:
-//     lithtech.exe's stores come in that order (0x00469f3e..0x00469f5c).
-LTRESULT sm_LoadWorldObjects(CServerMgr* pMgr, ILTStream* pStream,
-                             char* pszWorldName, uint32 bFlag)
-{
-	ObjectCreateStruct ocs;
-	ClassDef*   pClassDef;
-	LPBASECLASS pObject;
-	LTObject*   pNewObject;
-	ObjectProp* pProp;
-	ObjectProp* pNext;
-	uint32      nFileHeader;
-	uint32      nObjectsOffset;
-	uint32      nNumObjects;
-	uint32      nNumProps;
-	uint32      nPropFlags;
-	uint32      nPos;
-	uint32      i;
-	uint32      j;
-	uint16      nRecordSize;
-	uint16      nPropLen;
-	uint8       nPropType;
-	char        sClassName[0x100];
-	char        sPropName[0x100];
-	char        sPropString[0x258];
-
-	pStream->SeekTo(0);
-	pStream->Read(&nFileHeader, 4);
-	pStream->Read(&nObjectsOffset, 4);
-	pStream->SeekTo(nObjectsOffset);
-	pStream->Read(&nNumObjects, 4);
-
-	for (i = 0; i < nNumObjects; i++)
-	{
-		pStream->Read(&nRecordSize, 2);
-		nPos = pStream->GetPos();
-		pStream->ReadString(sClassName, sizeof(sClassName));
-
-		if (pStream->ErrorStatus() != LT_OK)
-		{
-			pMgr->SetupError(LT_INVALIDWORLDFILE, pszWorldName);
-
-			RETURN_ERROR(1, "LoadObjects", LT_INVALIDWORLDFILE);
-		}
-
-		pClassDef = sub_10001741(pMgr->m_ClassMgr.m_pUnknown00, sClassName);
-
-		if (pClassDef)
-		{
-			if (pClassDef->m_ClassFlags & CF_NORUNTIME)
-			{
-				pClassDef = NULL;
-			}
-			else if (bFlag == 0 &&
-			         !cls_FindFlagged(pMgr->m_ClassMgr.m_pUnknown00, pClassDef,
-			                          CF_ALWAYSLOAD))
-			{
-				pClassDef = NULL;
-			}
-		}
-		else
-		{
-			dsi_ServerError("Server is missing class %s", sClassName);
-		}
-
-		if (pClassDef)
-			pObject = sm_AllocateObjectInline(pMgr, pClassDef);
-		else
-			pObject = NULL;
-
-		ocs.Clear();
-		ocs.m_Flags = 0;
-		ocs.m_ObjectType = 0;
-		ocs.m_Filename[0] = 0;
-		ocs.m_SkinNames[0][0] = 0;
-		ocs.m_Pos.Init();
-
-		pStream->Read(&nNumProps, 4);
-
-		for (j = 0; j < nNumProps; j++)
-		{
-			pStream->ReadString(sPropName, sizeof(sPropName));
-			pStream->Read(&nPropType, 1);
-			pStream->Read(&nPropFlags, 4);
-			pStream->Read(&nPropLen, 2);
-
-			pProp = (ObjectProp*)dalloc(nPropLen + 0x5b);
-
-			pProp->m_Type = nPropType;
-			strncpy(pProp->m_Name, sPropName, sizeof(pProp->m_Name) - 1);
-
-			if (nPropType == 0)
-			{
-				pStream->ReadString(sPropString, sizeof(sPropString));
-				strncpy(pProp->m_String, sPropString, nPropLen - 1);
-			}
-			else
-			{
-				pStream->Read(pProp->m_String, nPropLen);
-			}
-
-			pProp->m_pNext = g_pServerMgr->m_pCurProps;
-			g_pServerMgr->m_pCurProps = pProp;
-		}
-
-		if (pClassDef && pObject)
-		{
-			strncpy(ocs.m_ClassName, sClassName, sizeof(ocs.m_ClassName) - 1);
-			ocs.m_ClassName[sizeof(ocs.m_ClassName) - 1] = 0;
-
-			pObject->EngineMessageFn(MID_PRECREATE, &ocs, 1.0f);
-
-			if (sm_CreateObjectInWorld(pMgr, pObject, pClassDef,
-			                           &ocs, 0xffff, 1.0f,
-			                           &pNewObject) != LT_OK)
-			{
-				sm_FreeObjectInline(pMgr, pClassDef, pObject);
-			}
-		}
-
-		pProp = g_pServerMgr->m_pCurProps;
-
-		while (pProp)
-		{
-			pNext = pProp->m_pNext;
-			dfree(pProp);
-			pProp = pNext;
-		}
-
-		g_pServerMgr->m_pCurProps = NULL;
-	}
-
-	if (pStream->ErrorStatus() != LT_OK)
-	{
-		pMgr->SetupError(LT_INVALIDWORLDFILE, pszWorldName);
-
-		RETURN_ERROR(1, "LoadObjects", LT_INVALIDWORLDFILE);
-	}
-
-	return LT_OK;
+// Create authored world actors from the bounded decoder's owned inventory.
+// Missing classes retain the original warning-and-skip behavior; editor-only
+// classes and classes outside the caller's CF_ALWAYSLOAD policy are filtered.
+LTRESULT sm_LoadWorldObjects(CServerMgr* manager, ILTStream* stream, char* world_name, uint32 load_all) {
+    if (!manager || !stream || !world_name) return LT_INVALIDPARAMS;
+    ServerCallbackGuard server(manager->m_Lifetime);
+    try {
+        // A precreate callback can replace or end the world. Keep this authored
+        // inventory independent of the live world's storage throughout dispatch.
+        const auto definitions = manager->m_World.ObjectDefinitions();
+        for (const auto& authored : definitions) {
+            auto* record = manager->m_ClassMgr.find(authored.class_name);
+            if (!record) {
+                dsi_ServerError("Server is missing class %s", authored.class_name.c_str());
+                continue;
+            }
+            auto* definition = record->m_pClassDef;
+            if ((definition->m_ClassFlags & CF_NORUNTIME) ||
+                (!load_all && !cls_FindFlagged(&manager->m_ClassMgr, definition, CF_ALWAYSLOAD))) continue;
+            auto properties = std::make_shared<ObjectProperties>(std::span<const WorldProperty>(authored.properties));
+            ObjectCreateStruct create;
+            manager->CreateObjectWithProperties(reinterpret_cast<HCLASS>(record), &create, std::move(properties), PRECREATE_WORLDFILE);
+            if (!server.unchanged()) return LT_ERROR;
+        }
+        return LT_OK;
+    } catch (const std::exception& error) {
+        nolf::platform::log("world object properties", error.what());
+        if (server.unchanged()) manager->SetupError(LT_INVALIDWORLDFILE, world_name);
+        return LT_INVALIDWORLDFILE;
+    }
 }

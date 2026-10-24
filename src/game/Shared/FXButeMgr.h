@@ -21,10 +21,10 @@
 #include "DebrisMgr.h"
 
 #ifdef  _CLIENTBUILD
-#include "..\ClientShellDLL\SpecialFX.h"
-#include "..\ClientShellDLL\BaseScaleFX.h"
-#include "..\ClientShellDLL\DynamicLightFX.h"
-#include "..\ClientShellDLL\SoundFX.h"
+#include "../ClientShellDLL/SpecialFX.h"
+#include "../ClientShellDLL/BaseScaleFX.h"
+#include "../ClientShellDLL/DynamicLightFX.h"
+#include "../ClientShellDLL/SoundFX.h"
 #endif
 
 class CFXButeMgr;
@@ -52,6 +52,7 @@ extern CFXButeMgr* g_pFXButeMgr;
 
 struct PROJECTILECLASSDATA
 {
+	virtual ~PROJECTILECLASSDATA() = default;
 	PROJECTILECLASSDATA()
 	{
 		szName[0] = '\0';

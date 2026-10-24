@@ -8,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "RotatingDoor.h"
 
 BEGIN_CLASS(RotatingDoor)

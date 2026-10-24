@@ -1,0 +1,44 @@
+diff --git a/src/Message.c b/src/Message.c
+index 557f840..afee234 100644
+--- a/src/Message.c
++++ b/src/Message.c
+@@ -13,6 +13,8 @@ void DmMessage_copy(DmMessage* slf, DmMessage* cpy, int64_t time) {
+ 		cpy->band.band = DmBand_retain(slf->band.band);
+ 	} else if (slf->type == DmMessage_STYLE) {
+ 		cpy->style.style = DmStyle_retain(slf->style.style);
++	} else if (slf->type == DmMessage_SEGMENT && slf->segment.segment != NULL) {
++		cpy->segment.segment = DmSegment_retain(slf->segment.segment);
+ 	}
+ 
+ 	if (time >= 0) {
+@@ -29,6 +31,8 @@ void DmMessage_free(DmMessage* slf) {
+ 		DmBand_release(slf->band.band);
+ 	} else if (slf->type == DmMessage_STYLE) {
+ 		DmStyle_release(slf->style.style);
++	} else if (slf->type == DmMessage_SEGMENT && slf->segment.segment != NULL) {
++		DmSegment_release(slf->segment.segment);
+ 	}
+ }
+ 
+diff --git a/src/Performance.c b/src/Performance.c
+index 8ca920e..767f798 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -139,7 +139,7 @@ DmResult DmPerformance_playSegment(DmPerformance* slf, DmSegment* sgt, DmTiming
+ 	DmMessage msg;
+ 	msg.time = 0;
+ 	msg.type = DmMessage_SEGMENT;
+-	msg.segment.segment = DmSegment_retain(sgt);
++	msg.segment.segment = sgt; // The queued copy retains it.
+ 	msg.segment.loop = 0;
+ 
+ 	if (mtx_lock(&slf->lock) != thrd_success) {
+@@ -802,7 +802,7 @@ static void DmPerformance_handleSegmentMessage(DmPerformance* slf, DmMessage_Seg
+ 		DmMessage m;
+ 		m.type = DmMessage_SEGMENT;
+ 		m.time = 0;
+-		m.segment.segment = DmSegment_retain(sgt);
++		m.segment.segment = sgt; // The queued copy retains it.
+ 		m.segment.loop = msg->loop + 1;
+ 
+ 		DmMessageQueue_add(&slf->control_queue, &m, slf->time + slf->segment->length, DmQueueConflict_KEEP);

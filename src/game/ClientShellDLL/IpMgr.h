@@ -68,13 +68,10 @@ public:
 	BOOL				ExistIp(char* sIp);
 
 	BOOL				AddIp(char* sIp);
-	BOOL				AddIpFromEditControl(HWND hEdit, HWND hList = NULL);
 
 	BOOL				RemoveIp(char* sIp);
 	void				RemoveAll();
-	BOOL				RemoveSelectedIpFromListBox(HWND hList);
 
-	int					FillListBox(HWND hList);
 
 	int					ReadIps();
 	int					WriteIps();

@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIUtils.h"
 #include "ServerUtilities.h"
 #include "GameServerShell.h"
@@ -37,7 +39,7 @@ char c_szNoReaction[]			= "Nothing";
 
 LTBOOL FindGrenadeDangerPosition(const LTVector& vPos, LTFLOAT fDangerRadiusSqr, LTVector* pvDangerPos, CGrenade** ppGrenadeDanger)
 {
-	_ASSERT(pvDangerPos);
+	GAME_ASSERT(pvDangerPos);
 
 	CGrenade** ppGrenade = g_lstGrenades.GetItem(TLIT_FIRST);
 	while ( ppGrenade && *ppGrenade )

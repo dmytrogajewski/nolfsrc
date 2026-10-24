@@ -1,11 +1,50 @@
+#include "physics_lifetime.h"
 // server.dll — the physics module (reconstruction). Build /O1.
 #include <math.h>
+#include <vector>
 #include "worldsim.h"
+#include "world_clip.h"
+#include <algorithm>
+#include <array>
+#include <limits>
+#include <stdexcept>
+
+namespace {
+thread_local std::vector<WorldPoly*>* g_FloorContacts = nullptr;
+void record_floor(WorldPoly* polygon) {
+    if (g_FloorContacts && polygon && polygon->GetPlane()->m_Normal.y > WS_FLOOR_NORMAL_Y &&
+        std::find(g_FloorContacts->begin(),g_FloorContacts->end(),polygon) == g_FloorContacts->end()) g_FloorContacts->push_back(polygon);
+}
+class FloorContactsScope {
+public:
+    FloorContactsScope() : previous_(g_FloorContacts) { g_FloorContacts = &contacts_; }
+    ~FloorContactsScope() { g_FloorContacts = previous_; }
+    WorldPoly* Select(const CMoveState& input, LTVector position) const {
+        WorldPoly* best = nullptr;
+        float best_up = -1, best_gap = 1;
+        const auto minimum = position-input.m_vDims, maximum = position+input.m_vDims;
+        for (auto* polygon : contacts_) {
+            const auto* plane = polygon->GetPlane();
+            const auto normal = plane->m_Normal;
+            const float support = phys_SupportRadius(input.m_vDims,input.m_pObject->m_Flags,input.m_pObject->m_Flags2,normal);
+            const float gap = normal.Dot(position)-plane->m_Dist-support;
+            if (gap < -.15f || gap > .25f || !w_PolygonTouchesBox(*polygon->m_pOwner,minimum,maximum,.15f)) continue;
+            if (normal.y > best_up || (normal.y == best_up && std::fabs(gap) < best_gap)) {
+                best = polygon; best_up = normal.y; best_gap = std::fabs(gap);
+            }
+        }
+        return best;
+    }
+private:
+    std::vector<WorldPoly*>* previous_;
+    std::vector<WorldPoly*> contacts_;
+};
+}
 
 // 0x10056ff8 (.bss) -- bspq_TestSphere's node stack, declared in worldsim.h.
 // 1000 entries: the next global the image references, g_nPhysMoves at
 // 0x10057f98, is exactly 0xfa0 bytes on.
-BSPNode* g_NodeStack[1000];
+
 
 // Walking the tree for anything inside a sphere. The walk keeps its own stack
 // rather than recursing: where the sphere straddles a plane, the near side is
@@ -23,7 +62,7 @@ BSPNode* g_NodeStack[1000];
 // first arm and the other two jump backwards into it -- what shipped.
 int bspq_TestSphere(BSPNode* pNode, CSphereQuery* pQuery)
 {
-	BSPNode** ppTop = g_NodeStack;
+	std::vector<BSPNode*> pending;
 	LTVector  v;
 	float     fDist;
 
@@ -31,11 +70,10 @@ int bspq_TestSphere(BSPNode* pNode, CSphereQuery* pQuery)
 	{
 		if (pNode->m_Flags & BSPNODE_LEAF)
 		{
-			if (ppTop == g_NodeStack)
+			if (pending.empty())
 				return 0;
 
-			ppTop--;
-			pNode = *ppTop;
+			pNode = pending.back(); pending.pop_back();
 		}
 
 		{
@@ -66,8 +104,7 @@ int bspq_TestSphere(BSPNode* pNode, CSphereQuery* pQuery)
 
 					if (!(pBack->m_Flags & BSPNODE_LEAF))
 					{
-						*ppTop = pBack;
-						ppTop++;
+						pending.push_back(pBack);
 					}
 				}
 
@@ -146,12 +183,12 @@ int CSimContext::ClassifyAxis(float f)
 float g_fStepMinNormalY = 0.1f;
 float g_fStepSlopeLimit = 0.7071f;
 
-CSphereQuery g_BoxSphere;
-CSphereQuery g_SphereAtOffset;
-CSphereQuery g_SphereAtDelta;
-float        g_fBoxRadius;
+thread_local CSphereQuery g_BoxSphere;
+thread_local CSphereQuery g_SphereAtOffset;
+thread_local CSphereQuery g_SphereAtDelta;
+thread_local float        g_fBoxRadius;
 
-LTVector g_SweepPoints[2][8];
+thread_local LTVector g_SweepPoints[2][8];
 // The box's own six faces as planes. Only the distances ever change --
 // ws_SetupBoxGeometry touches nothing but m_Dist -- so the six axis normals
 // have to be written once, and the initialiser below is where this
@@ -167,7 +204,7 @@ LTVector g_SweepPoints[2][8];
 // a masked relocation and only the section the array lands in differs, and it
 // keeps the array correct when the game runs. Move it to whatever
 // initialiser turns up rather than deleting it.
-LTPlane  g_BoxPlanes[6] = {
+thread_local LTPlane  g_BoxPlanes[6] = {
 	LTPlane( 1.0f,  0.0f,  0.0f, 0.0f),
 	LTPlane(-1.0f,  0.0f,  0.0f, 0.0f),
 	LTPlane( 0.0f,  1.0f,  0.0f, 0.0f),
@@ -258,146 +295,16 @@ inline void ws_SetupBoxGeometry(LTVector* pMin, LTVector* pMax)
 // one the loop's exit test compares. Writing `g_BoxPlanes[i].m_Dist` at both
 // use sites gives the same instructions with two frame slots transposed and
 // the exit test on the other induction variable.
-int w_IsPolyBlocking(WorldPolyOwner* pOwner)
+int w_IsPolyBlocking(WorldPolyOwner* polygon)
 {
-	LTVector   vClipped[WS_MAX_CLIP_VERTS];
-	LTVector*  pWork[WS_MAX_CLIP_VERTS];
-	LTVector*  pInList[WS_MAX_POLY_VERTS];
-	LTVector** ppIn;
-	LTVector** ppOut;
-	LTVector** ppOutBase;
-	float      fPrevDist;
-	float      fCurDist;
-	float      fSign;
-	int        nStored;
-	int        bPrevIn;
-	int        bCurIn;
-	int        nAxis;
-	int        nPrev;
-	int        nVerts;
-	int        i;
-	int        j;
-	float*     pDist;
-	float      fSum;
-	float      fDX, fDY, fDZ;
-
-	g_nPhysStatA8++;
-
-#ifdef LT_SERVER_TIMERS
-	CountAdder cntAdder(&g_nPhysStatA4);
-#endif
-
-	if (!(pOwner->m_pParent->m_nFlags & WBSP_SOLID))
-		return 0;
-
-	// All four terms are pushed onto the FPU stack before any of the squaring
-	// happens, deepest first, which is the reverse of the order they are used
-	// in: so the four assignments below run sum, z, y, x and the comparison
-	// then reads them back x, y, z, sum.
-	fSum = g_BoxSphere.m_fRadius + pOwner->m_fRadius;
-	fDZ  = g_BoxSphere.m_vPoint.z - pOwner->m_vCentre.z;
-	fDY  = g_BoxSphere.m_vPoint.y - pOwner->m_vCentre.y;
-	fDX  = g_BoxSphere.m_vPoint.x - pOwner->m_vCentre.x;
-
-	if (fDX * fDX + fDY * fDY + fDZ * fDZ > fSum * fSum)
-		return 0;
-
-	ppOut     = pWork;
-	ppOutBase = pWork;
-	ppIn      = pInList;
-
-	nVerts = pOwner->m_nVertices;
-
-	nStored = 0;
-
-#ifdef NOLFSRC_MODERN
-	// fixed: w_IsPolyBlocking has no bounds checks (RETAIL_BUGS.md). A
-	// polygon too big for the lists, or a clip that would run out of room,
-	// is answered as blocking: it has already passed the sphere test, and
-	// colliding with it is the safe mistake.
-	if (nVerts > WS_MAX_POLY_VERTS)
-		return 1;
-
-#endif
-	for (j = 0; j < nVerts; j++)
-		pInList[j] = pOwner->m_Vertices[j].m_pPos;
-
-	for (i = 0; i < 6; i++)
-	{
-		pDist = &g_BoxPlanes[i].m_Dist;
-		fSign = g_BoxSigns[i];
-		nAxis = i >> 1;
-
-		nPrev = nVerts - 1;
-
-		fPrevDist = fSign * (*ppIn[nPrev])[nAxis] - *pDist;
-
-		if (fPrevDist > WS_CLIP_SLOP)
-			bPrevIn = 1;
-		else
-			bPrevIn = 0;
-
-		for (j = 0; j < nVerts; j++)
-		{
-#ifdef NOLFSRC_MODERN
-			// Room for this step's two pointers and one new vertex.
-			if (ppOut + 2 > pWork + WS_MAX_CLIP_VERTS ||
-			    nStored >= WS_MAX_CLIP_VERTS)
-				return 1;
-
-#endif
-			fCurDist = fSign * (*ppIn[j])[nAxis] - *pDist;
-
-			if (fCurDist > WS_CLIP_SLOP)
-				bCurIn = 1;
-			else
-				bCurIn = 0;
-
-			if (bPrevIn)
-			{
-				*ppOut = ppIn[nPrev];
-				ppOut++;
-			}
-
-			if (bPrevIn != bCurIn)
-			{
-				// Both ends are written out long, not through locals: the
-				// shipped code re-reads ppIn[nPrev] once per component (two
-				// uses each) and keeps only the *address* of ppIn[j], which
-				// it already has from the distance above.
-				float fT = fPrevDist / (fPrevDist - fCurDist);
-
-				vClipped[nStored].x = (ppIn[j]->x - ppIn[nPrev]->x) * fT +
-				                      ppIn[nPrev]->x;
-				vClipped[nStored].y = (ppIn[j]->y - ppIn[nPrev]->y) * fT +
-				                      ppIn[nPrev]->y;
-				vClipped[nStored].z = (ppIn[j]->z - ppIn[nPrev]->z) * fT +
-				                      ppIn[nPrev]->z;
-
-				*ppOut = &vClipped[nStored];
-				ppOut++;
-				nStored++;
-			}
-
-			fPrevDist = fCurDist;
-			nPrev     = j;
-			bPrevIn   = bCurIn;
-		}
-
-		// The count is taken before the base moves on: that keeps ppOut live
-		// across the subtraction, so the shipped code copies it into a second
-		// register to subtract in and stores the original. Assigning the base
-		// first instead lets the subtraction happen in place and comes out
-		// two bytes shorter.
-		ppIn      = ppOutBase;
-		nVerts    = ppOut - ppIn;
-		ppOutBase = ppOut;
-
-		if (nVerts == 0)
-			return 0;
-	}
-
-	return 1;
+    ++g_nPhysStatA8;
+    if (!(polygon->m_pParent->m_nFlags & WBSP_SOLID)) return 0;
+    const auto delta = g_BoxSphere.m_vPoint-polygon->m_vCentre;
+    const float radius = g_BoxSphere.m_fRadius+polygon->m_fRadius;
+    if (delta.MagSqr() > radius*radius) return 0;
+    const LTVector minimum(g_BoxPlanes[0].m_Dist,g_BoxPlanes[2].m_Dist,g_BoxPlanes[4].m_Dist);
+    const LTVector maximum(-g_BoxPlanes[1].m_Dist,-g_BoxPlanes[3].m_Dist,-g_BoxPlanes[5].m_Dist);
+    return w_PolygonTouchesBox(*polygon,minimum,maximum,-WS_CLIP_SLOP);
 }
 
 // Everything the walk needs, from where the sweep starts and ends and how big
@@ -586,25 +493,60 @@ int CSimContext::ClassifyPlane(LTPlane* pPlane, LTVector* pPoint,
 // caller asked for; the offset is what the solver has had to add to keep the
 // box out of the world, and every contact found along the way is remembered
 // in the list below so the same object cannot push twice.
-int       g_nContacts;
-WSContact g_Contacts[WS_MAX_CONTACTS];
+thread_local int       g_nContacts;
+thread_local WSContact g_Contacts[WS_MAX_CONTACTS];
 
-LTVector    g_vMoveBase;
-LTVector    g_vMoveStart;
-LTVector    g_vMoveEnd;
-CMoveState*    g_pMoveState;
-CBounceState*  g_pMoveResult;
-CPhysicsBlock* g_pPBlock;
+thread_local LTVector    g_vMoveBase;
+thread_local LTVector    g_vMoveStart;
+thread_local LTVector    g_vMoveEnd;
+thread_local CMoveState*    g_pMoveState;
+thread_local CBounceState*  g_pMoveResult;
+thread_local CPhysicsBlock* g_pPBlock;
 
 // Statistics, all zeroed at the top of each move and read back by the timing
 // console commands (names ours).
-uint32 g_nPhysMoves;
-uint32 g_nPhysNodes;
-uint32 g_nPhysContactTime;
-uint32 g_nPhysStatA4;
-uint32 g_nPhysStatA8;
-uint32 g_nPhysStepTime;
-uint32 g_nPhysMoveTime;
+thread_local uint32 g_nPhysMoves;
+thread_local uint32 g_nPhysNodes;
+thread_local uint32 g_nPhysContactTime;
+thread_local uint32 g_nPhysStatA4;
+thread_local uint32 g_nPhysStatA8;
+thread_local uint32 g_nPhysStepTime;
+thread_local uint32 g_nPhysMoveTime;
+
+namespace {
+class PhysicsScratchScope {
+public:
+    PhysicsScratchScope()
+        : move_(g_pMoveState), result_(g_pMoveResult), block_(g_pPBlock), contacts_(g_nContacts),
+          base_(g_vMoveBase), start_(g_vMoveStart), end_(g_vMoveEnd), box_(g_BoxSphere),
+          offset_(g_SphereAtOffset), delta_(g_SphereAtDelta), radius_(g_fBoxRadius) {
+        std::copy_n(g_Contacts,WS_MAX_CONTACTS,contact_records_.begin());
+        std::copy_n(g_BoxPlanes,6,planes_.begin());
+        for (unsigned i = 0; i < 2; ++i) std::copy_n(g_SweepPoints[i],8,points_[i].begin());
+    }
+    PhysicsScratchScope(CMoveState& input, CBounceState& output) : PhysicsScratchScope() { g_pMoveState = &input; g_pMoveResult = &output; }
+    ~PhysicsScratchScope() {
+        g_pMoveState = move_; g_pMoveResult = result_; g_pPBlock = block_; g_nContacts = contacts_;
+        g_vMoveBase = base_; g_vMoveStart = start_; g_vMoveEnd = end_;
+        g_BoxSphere = box_; g_SphereAtOffset = offset_; g_SphereAtDelta = delta_; g_fBoxRadius = radius_;
+        std::copy(contact_records_.begin(),contact_records_.end(),g_Contacts);
+        std::copy(planes_.begin(),planes_.end(),g_BoxPlanes);
+        for (unsigned i = 0; i < 2; ++i) std::copy(points_[i].begin(),points_[i].end(),g_SweepPoints[i]);
+    }
+private:
+    CMoveState* move_;
+    CBounceState* result_;
+    CPhysicsBlock* block_;
+    int contacts_;
+    LTVector base_, start_, end_;
+    CSphereQuery box_, offset_, delta_;
+    float radius_;
+    std::array<WSContact,WS_MAX_CONTACTS> contact_records_;
+    std::array<LTPlane,6> planes_;
+    std::array<std::array<LTVector,8>,2> points_;
+};
+}
+
 
 // Nothing is this far away, so the first corner always wins the comparison.
 #define WS_FAR 1.0e37f
@@ -844,8 +786,10 @@ void ws_HandleImpact(CollisionInfo* pInfo, CBounceState* pState,
 	LTVector vImpulse;
 	LTVector vMomentum;
 
-	if (bWorld)
-		pInfo->m_Plane = *pPoly->GetPlane();
+	if (bWorld) {
+        pInfo->m_Plane = *pPoly->GetPlane();
+        record_floor(pPoly);
+    }
 
 	pInfo->m_hObject = hObject;
 
@@ -1201,38 +1145,7 @@ inline int ws_HitPoly(WorldPoly* pPoly, CBounceState* pState, CPolyTest* pTest)
 // the answer is whichever leaf it lands in. The two leaf bits are tested one
 // at a time rather than together, so a node carrying 0x02 answers without
 // 0x01 ever being looked at.
-int bsp_PointInside(BSPNode* pRoot, LTVector* pPoint)
-{
-	BSPNode* pNode = pRoot;
-	LTVector v;
-	float    fDist;
-	int      nSide;
 
-	for (;;)
-	{
-		if (pNode->m_Flags & BSPNODE_LEAF_BIT1)
-			return 0;
-
-		if (pNode->m_Flags & BSPNODE_LEAF_BIT0)
-			return 1;
-
-		{
-			LTPlane* pPlane = pNode->m_pOwner->m_pParent->m_pPlane;
-
-			v = *pPoint;
-
-			fDist = v.y * pPlane->m_Normal.y + v.z * pPlane->m_Normal.z +
-			        v.x * pPlane->m_Normal.x - pPlane->m_Dist;
-		}
-
-		if (fDist > 0.0f)
-			nSide = 1;
-		else
-			nSide = 0;
-
-		pNode = pNode->m_pChild[nSide];
-	}
-}
 
 // Is a sphere entirely inside the world, entirely outside it, or across the
 // boundary? The walk keeps its own five-hundred-node stack: a node the sphere
@@ -1259,68 +1172,7 @@ int bsp_PointInside(BSPNode* pRoot, LTVector* pPoint)
 // one and the straddle path jumps backward into it, which is what shipped.
 // Same instructions either way, twenty bytes of different placement. This is
 // the "shared-exit host" near class and the arm shape moves it.
-int bsp_SphereInside(BSPNode* pRoot, LTVector* pPoint, float fRadius)
-{
-	BSPNode*  pStack[BSP_SPHERE_STACK];
-	BSPNode** ppTop = pStack;
-	BSPNode*  pNode = pRoot;
-	LTVector  v;
-	float     fDist;
 
-	for (;;)
-	{
-		// A `while` rather than `if (...) { ...; continue; }`: the CFG is the
-		// same, but VC6 only rotates a loop it was given as one. The shipped
-		// /O2 client emits the leaf test twice -- once as the loop's entry
-		// test and once at the bottom of the pop body (`test %bl,0x16(%ecx);
-		// jne`) -- and puts the 3 in %bl because the constant now has two
-		// uses, which is the extra `push %ebx` this function's frame carries.
-		// /O1 declines the duplication on size and keeps the single test the
-		// `if`/`continue` form gives, so server.dll is unaffected.
-		while (pNode->m_Flags & BSPNODE_LEAF)
-		{
-			if (ppTop == pStack)
-				return pNode->m_Flags & BSPNODE_LEAF_BIT0;
-
-			ppTop--;
-			pNode = *ppTop;
-		}
-
-		{
-			LTPlane* pPlane = pNode->m_pOwner->m_pParent->m_pPlane;
-
-			v = *pPoint;
-
-			fDist = v.y * pPlane->m_Normal.y + v.z * pPlane->m_Normal.z +
-			        v.x * pPlane->m_Normal.x - pPlane->m_Dist;
-		}
-
-		if (fDist > fRadius)
-		{
-			pNode = pNode->m_pChild[1];
-		}
-		else
-		{
-			if (fDist < -fRadius)
-			{
-				pNode = pNode->m_pChild[0];
-				continue;
-			}
-
-			{
-				BSPNode* pBack = pNode->m_pChild[0];
-
-				if (pBack->m_Flags & BSPNODE_LEAF_BIT1)
-					return 2;
-
-				*ppTop = pBack;
-				ppTop++;
-			}
-
-			pNode = pNode->m_pChild[1];
-		}
-	}
-}
 
 // The walk's entry point, whose whole job is to unpack the query: the two
 // ends the caller pointed at are copied onto the stack so the recursion can
@@ -1330,26 +1182,14 @@ int bsp_SphereInside(BSPNode* pRoot, LTVector* pPoint, float fRadius)
 // The two twelve-byte copies are the by-value arguments, and the order they
 // are written in is the push order: the end vector goes to the higher slot
 // first, then the start.
-int bspq_IntersectLine(BSPNode* pRoot, CLineQuery* pQuery)
-{
-	return bspq_IntersectLineRec(pRoot, pQuery, *pQuery->m_pStart,
-	                             *pQuery->m_pEnd);
-}
+
 
 // The constructor is `inline`, defined here beside its only user in this
 // file (objbank.cpp keeps its own copy of the class and the same body). /O1
 // declines to expand it and server.dll calls the COMDAT at 0x1000f08d; /O2
 // expands it in lithtech.exe (0x0043c360), where the dead stores to the three
 // pointers go and m_pPoly, +0x0c, +0x10 are zeroed in that order.
-inline CLineQuery::CLineQuery()
-{
-	m_pStart    = LTNULL;
-	m_pEnd      = LTNULL;
-	m_pHit      = LTNULL;
-	m_pPoly     = LTNULL;
-	m_Unknown0c = 0;
-	m_Unknown10 = 0;
-}
+
 
 // The line query, from the outside: build the query object, hand it to the
 // walk, and if the walk found something copy the polygon's plane out for the
@@ -1361,28 +1201,7 @@ inline CLineQuery::CLineQuery()
 // the six-store zeroing constructor at 0x1000f08d and only then assigns the
 // three pointers, so the two unknown dwords and the result are left at the
 // zero the constructor put there.
-WorldPoly* bsp_IntersectLine(BSPNode* pRoot, LTVector* pStart, LTVector* pEnd,
-                             LTVector* pHit, LTPlane* pPlane)
-{
-	CLineQuery query;
 
-	query.m_pStart = pStart;
-	query.m_pEnd   = pEnd;
-	query.m_pHit   = pHit;
-
-	// The success path falls through and the failure return sits at the end
-	// with its own `xor eax,eax`: written as `if (!walk) return NULL;` the
-	// zero the walk already returned is reused instead, which is two bytes
-	// shorter and not what shipped.
-	if (bspq_IntersectLine(pRoot, &query))
-	{
-		*pPlane = *query.m_pPoly->GetPlane();
-
-		return query.m_pPoly;
-	}
-
-	return NULL;
-}
 
 // Move a point rather than a box. There are no contacts and no box geometry
 // to rebuild: the segment is handed to the world, and whatever it hits first
@@ -1417,7 +1236,7 @@ void ws_MovePoint(CMoveState* pMove, CBounceState* pState)
 	if (g_DebugLevel > 0)
 	{
 		dsi_ServerError("Error: (point) physics recursed infinitely on a %s",
-		                pMove->m_pHost->GetObjectName(pMove->m_pObject));
+		                pMove->m_pHost->GetObjectClassName(pMove->m_pObject));
 	}
 }
 
@@ -1428,6 +1247,7 @@ void ws_MovePoint(CMoveState* pMove, CBounceState* pState)
 // move in progress.
 int ws_GetBoxStatus(BSPNode* pRoot, LTVector* pMin, LTVector* pMax)
 {
+    PhysicsScratchScope scratch;
 	int nStatus;
 
 	g_BoxSphere.m_vPoint = *pMax - *pMin;
@@ -1465,6 +1285,19 @@ int ws_GetBoxStatus(BSPNode* pRoot, LTVector* pMin, LTVector* pMax)
 	return 1;
 }
 
+// Main-world movement collides with finite solid boundary polygons. BSP leaf
+// membership remains a separate volume query for containers and brush models.
+int ws_BoxTouchesSolidSurface(BSPNode* root, LTVector minimum, LTVector maximum) {
+    if (!root) return 0;
+    PhysicsScratchScope scratch;
+    g_BoxSphere.m_vPoint = (minimum+maximum)*.5f;
+    g_BoxSphere.m_fRadius = (maximum-minimum).Mag()*.5f+.1f;
+    g_vMoveBase.Init();
+    ws_SetupBoxGeometry(&minimum,&maximum);
+    return bspq_TestSphere(root,&g_BoxSphere);
+}
+
+
 // The sweep ran into something. Back its destination out along the surface's
 // normal by a little more than it went in, and if the surface is a wall --
 // its normal dead level -- reflect the travel along the wall as well, so the
@@ -1473,6 +1306,7 @@ int ws_GetBoxStatus(BSPNode* pRoot, LTVector* pMin, LTVector* pMax)
 // game; a floor is not, because walking up a slope is not a collision.
 void CSimContext::DeflectOffHit(WorldPoly* pPoly, CBounceState* pState)
 {
+    record_floor(pPoly);
 	LTVector vOffset;
 	LTVector vSide;
 
@@ -1526,9 +1360,10 @@ void CSimContext::DeflectOffHit(WorldPoly* pPoly, CBounceState* pState)
 // the vImpulse[1] copy in shipped, after two in ours. Store order of those
 // three statements, pVel2's position, declaration order and Dot(*pVel2) do
 // not move it.
-void ws_ObjectsCollided(IPhysicsSim* pSim, LTObject* pObj1, LTObject* pObj2,
+void ws_ObjectsCollided(IObjectMover* pSim, LTObject* pObj1, LTObject* pObj2,
                         LTVector* pNormal, float fDist)
 {
+    MovePairGuard guard(*pSim,*pObj1,*pObj2);
 	LTVector       vImpulse[2];
 	LTVector       vRel;
 	LTVector       vNormal2;
@@ -1536,7 +1371,7 @@ void ws_ObjectsCollided(IPhysicsSim* pSim, LTObject* pObj1, LTObject* pObj2,
 	LTVector*      pVel2;
 	float          fDot[2];
 
-	pInfo = pSim->GetOwner()->m_pInfo;
+	pInfo = *pSim->GetCollisionInfo();
 
 	fDot[0] = pObj1->m_Velocity.x * pNormal->x +
 	          pObj1->m_Velocity.y * pNormal->y +
@@ -1566,13 +1401,15 @@ void ws_ObjectsCollided(IPhysicsSim* pSim, LTObject* pObj1, LTObject* pObj2,
 		if ((pObj1->m_Flags & FLAG_TOUCH_NOTIFY) &&
 		    fMagSqr >= pObj1->m_ForceIgnoreLimitSqr)
 		{
-			pSim->OnBounce(pObj1, pObj2, &vImpulse[0], fMag);
+			pSim->TouchNotify(pObj1, pObj2, &vImpulse[0], fMag);
+            if (!guard.unchanged()) return;
 		}
 
 		if ((pObj2->m_Flags & FLAG_TOUCH_NOTIFY) &&
 		    fMagSqr >= pObj2->m_ForceIgnoreLimitSqr)
 		{
-			pSim->OnBounce(pObj2, pObj1, &vImpulse[1], -fMag);
+			pSim->TouchNotify(pObj2, pObj1, &vImpulse[1], -fMag);
+            if (!guard.unchanged()) return;
 		}
 	}
 
@@ -1781,8 +1618,36 @@ int ws_ShiftBox()
 // Each global is saved and replaced in turn (state, then result): lithtech
 // 0x417deb reads g_pMoveResult only after the copy, and with both saves
 // written first /O2 hoists that read above the rep movs.
-void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
+namespace {
+thread_local const PhysicsCandidates* g_SweepCandidates = nullptr;
+// Every scratch value belongs to this invocation, including exceptional and
+// nested exits. The legacy helpers share names but never retain stack state.
+
+class SweepCandidatesScope {
+public:
+    explicit SweepCandidatesScope(const CMoveState& input)
+        : previous_(g_SweepCandidates), previous_block_(g_pPBlock) {
+        LTVector minimum, maximum;
+        for (uint32 axis = 0; axis < 3; ++axis) {
+            minimum[axis] = std::min(input.m_vStart[axis],input.m_vEnd[axis])-input.m_vDims[axis]-.1f;
+            maximum[axis] = std::max(input.m_vStart[axis],input.m_vEnd[axis])+input.m_vDims[axis]+.1f;
+        }
+        if (input.m_n38) maximum.y += input.m_vDims.y*2;
+        candidates_ = input.m_pWorldBsp->PhysicsGrid().QueryBox(minimum,maximum,input.m_pWorldBsp->PolygonReferences());
+        g_SweepCandidates = candidates_.multiple_cells ? &candidates_ : nullptr;
+    }
+    ~SweepCandidatesScope() { g_SweepCandidates = previous_; g_pPBlock = previous_block_; }
+private:
+    const PhysicsCandidates* previous_;
+    CPhysicsBlock* previous_block_;
+    PhysicsCandidates candidates_;
+};
+}
+
+static void ws_MoveObjectStep(CMoveState* pIn, CBounceState* pState)
 {
+    FloorContactsScope floor_contacts;
+    pState->m_vPoint = pIn->m_vStart;
 #ifdef LT_SERVER_TIMERS
 	CBaseCounter  counter(0);
 #endif
@@ -1790,8 +1655,6 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 	LTVector      vMax;
 	LTVector      vMin;
 	uint32        nOldHits;
-	CBounceState* pOldResult;
-	CMoveState*   pOldState;
 	int           nTries;
 	int           bStepped;
 	uint32        nHits;
@@ -1812,10 +1675,7 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 
 	state = *pIn;
 
-	pOldState     = g_pMoveState;
-	g_pMoveState  = &state;
-	pOldResult    = g_pMoveResult;
-	g_pMoveResult = pState;
+    PhysicsScratchScope scratch(state,*pState);
 
 	pState->m_pStandingPoly = NULL;
 	pState->m_vMomentum.Init();
@@ -1825,13 +1685,13 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 	if (pIn->m_pObject->m_Flags & FLAG_POINTCOLLIDE)
 	{
 		ws_MovePoint(pIn, pState);
+        pState->m_pStandingPoly = floor_contacts.Select(*pIn,pState->m_vPoint);
 
-		g_pMoveState  = pOldState;
-		g_pMoveResult = pOldResult;
 
 		return;
 	}
 
+    SweepCandidatesScope candidates(*pIn);
 	g_nContacts = 0;
 
 	g_vMoveStart = pIn->m_vStart;
@@ -1845,11 +1705,16 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 
 	if (!g_pPBlock)
 	{
-		dsi_ServerError("World %s doesn't have PBlocks!",
-		                g_pMoveState->m_pWorldBsp->m_Name);
+		// Pushes against the vis-only BSP land here every frame; the
+		// physics BSP still collides, so one report per world is enough.
+		thread_local std::weak_ptr<WorldGeometryLifetime> s_Reported;
+		if (s_Reported.lock() != g_pMoveState->m_pWorldBsp->m_GeometryLifetime)
+		{
+			s_Reported = g_pMoveState->m_pWorldBsp->m_GeometryLifetime;
+			dsi_ServerError("World %s doesn't have PBlocks!",
+			                g_pMoveState->m_pWorldBsp->m_Name);
+		}
 
-		g_pMoveState  = pOldState;
-		g_pMoveResult = pOldResult;
 
 		return;
 	}
@@ -1860,7 +1725,7 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 	{
 		float fStepHeight;
 
-		pIn->m_pHost->GetStepper()->GetStepHeight(&fStepHeight);
+		pIn->m_pHost->Physics()->GetStairHeight(fStepHeight);
 
 		if (fStepHeight < 0.0f)
 			fStepHeight = pIn->m_vDims.y * 0.5f;
@@ -1904,6 +1769,9 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 	for (nTries = 0; nTries < WS_MAX_MOVE_STEPS; nTries++)
 	{
 		nHits = pState->m_nHits;
+        const auto previous_start=g_vMoveStart,previous_end=g_vMoveEnd;
+        const auto previous_momentum=pState->m_vMomentum,previous_velocity=pState->m_vVelocityAdd;
+        const auto previous_contacts=g_nContacts;
 
 		if (ws_ShiftBox())
 		{
@@ -1918,6 +1786,18 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 
 		if (nHits == pState->m_nHits)
 			break;
+
+        // The first pass reports intersecting faces; its retry must be
+        // allowed to resolve them. A later pass that repeats every position,
+        // constraint and response cannot advance this static sweep. Treat
+        // that closed corner as blocked instead of processing the same hits
+        // forty times and reporting an infinite-recursion error.
+        const auto same=[](LTVector a,LTVector b) { return a.x==b.x && a.y==b.y && a.z==b.z; };
+        if (nTries && previous_contacts==g_nContacts && same(previous_start,g_vMoveStart) && same(previous_end,g_vMoveEnd) &&
+            same(previous_momentum,pState->m_vMomentum) && same(previous_velocity,pState->m_vVelocityAdd)) {
+            g_vMoveEnd=g_vMoveStart;
+            break;
+        }
 	}
 
 	if (nTries == WS_MAX_MOVE_STEPS)
@@ -1925,7 +1805,7 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 		if (g_DebugLevel > 0)
 		{
 			dsi_ServerError("Error: physics recursed infinitely on a %s",
-			                g_pMoveState->m_pHost->GetObjectName(
+			                g_pMoveState->m_pHost->GetObjectClassName(
 			                    pIn->m_pObject));
 		}
 
@@ -1933,13 +1813,48 @@ void ws_MoveObject(CMoveState* pIn, CBounceState* pState)
 	}
 
 	pState->m_vPoint = g_vMoveEnd;
+    pState->m_pStandingPoly = floor_contacts.Select(*pIn,pState->m_vPoint);
 
-	g_pMoveState  = pOldState;
-	g_pMoveResult = pOldResult;
 
 	if (pState->m_nHits == 0 && bStepped)
 		pState->m_nHits = 1;
 }
+
+void ws_MoveObject(CMoveState* input, CBounceState* output)
+{
+    const auto displacement = input->m_vEnd-input->m_vStart;
+    float extent = 0;
+    for (uint32 axis = 0; axis < 3; ++axis)
+        if (input->m_vDims[axis] > 0 && (!extent || input->m_vDims[axis] < extent)) extent = input->m_vDims[axis];
+    const float step_length = std::max(2.f,extent*2);
+    const float distance = std::max({std::fabs(displacement.x),std::fabs(displacement.y),std::fabs(displacement.z)});
+    if ((input->m_pObject->m_Flags & FLAG_POINTCOLLIDE) || distance <= step_length) {
+        ws_MoveObjectStep(input,output); return;
+    }
+    const double count = std::ceil(double(distance)/step_length);
+    if (!std::isfinite(count) || count > std::numeric_limits<uint32>::max()) throw std::invalid_argument("physics displacement exceeds native step count");
+    const auto steps = static_cast<uint32>(count);
+    const auto increment = displacement/float(steps);
+    CMoveState request = *input;
+    struct VelocityScope {
+        LTObject& object; ObjectCallbackGuard guard; LTVector original;
+        explicit VelocityScope(LTObject& value) : object(value), guard(value), original(value.m_Velocity) {}
+        ~VelocityScope() { if (guard.same_data()) object.m_Velocity = original; }
+    } velocity(*input->m_pObject);
+    output->m_vPoint = input->m_vStart; output->m_nHits = 0; output->m_pStandingPoly = nullptr;
+    output->m_vMomentum.Init(); output->m_vVelocityAdd.Init();
+    for (uint32 i = 0; i < steps; ++i) {
+        request.m_vStart = output->m_vPoint; request.m_vEnd = request.m_vStart+increment;
+        velocity.object.m_Velocity = velocity.original+output->m_vVelocityAdd;
+        CBounceState step;
+        ws_MoveObjectStep(&request,&step);
+        output->m_nHits += step.m_nHits; output->m_vMomentum += step.m_vMomentum;
+        output->m_vVelocityAdd += step.m_vVelocityAdd; output->m_pStandingPoly = step.m_pStandingPoly;
+        output->m_vPoint = step.m_vPoint;
+        if ((step.m_vPoint-request.m_vStart).MagSqr() < .000001f) break;
+    }
+}
+
 
 // Does the swept cylinder reach this polygon? The cheap rejections come
 // first: a plane the sweep is moving away from cannot be hit, and neither can
@@ -2310,7 +2225,7 @@ int CSimContext::TestPoly(WorldPolyOwner* pPoly, WorldPoly* pHandle)
 // through the whole frame.
 int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 {
-	uint16        nStack[WS_NODE_STACK];
+	std::vector<uint16> nStack;
 	CSimContext   sim;
 	LTVector      vNext;
 	LTVector      vStep;
@@ -2333,8 +2248,7 @@ int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 	float         fStepLong;
 	float         fSide;
 
-	uint16*       pTop;
-	WSNode*       pNode;
+	const WSNode*       pNode;
 	WorldPolyRef* pRec;
 	LTPlane*      pPlane;
 	int           nStart, nEnd, nSide;
@@ -2464,22 +2378,23 @@ int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 			}
 
 			nBlock = nRoot;
-			pTop  = nStack;
+			nStack.clear();
+			std::size_t candidate_index = 0;
 
 			for (;;)
 			{
-				if (nBlock == WS_NODE_EMPTY || nBlock == WS_NODE_SOLID)
-				{
-					if (pTop == nStack)
-						break;
-
-					pTop--;
-					nBlock = *pTop;
+				if (g_SweepCandidates) {
+					if (candidate_index == g_SweepCandidates->nodes.size()) break;
+					pNode = g_SweepCandidates->nodes[candidate_index++];
+				} else {
+					if (nBlock == WS_NODE_EMPTY || nBlock == WS_NODE_SOLID) {
+						if (nStack.empty()) break;
+						nBlock = nStack.back(); nStack.pop_back();
+					}
+					pNode = &g_pPBlock->m_pNodes[nBlock];
 				}
+				++g_nPhysNodes;
 
-				g_nPhysNodes++;
-
-				pNode  = &g_pPBlock->m_pNodes[nBlock];
 				pRec   = &pRecs[pNode->m_nPoly];
 				pPlane = pRec->m_pOwner->m_pParent->m_pPlane;
 
@@ -2541,8 +2456,7 @@ int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 							    pNode->m_nChild[nSide == 0] !=
 							        WS_NODE_SOLID)
 							{
-								*pTop = pNode->m_nChild[nSide == 0];
-								pTop++;
+								if (!g_SweepCandidates) nStack.push_back(pNode->m_nChild[nSide == 0]);
 							}
 
 							nBlock = pNode->m_nChild[nSide];
@@ -2580,8 +2494,7 @@ int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 						if (pNode->m_nChild[nSide == 0] != WS_NODE_EMPTY &&
 						    pNode->m_nChild[nSide == 0] != WS_NODE_SOLID)
 						{
-							*pTop = pNode->m_nChild[nSide == 0];
-							pTop++;
+							if (!g_SweepCandidates) nStack.push_back(pNode->m_nChild[nSide == 0]);
 						}
 
 						nBlock = pNode->m_nChild[nSide];
@@ -2667,68 +2580,20 @@ int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 // seen from above (its height carried along each edge) and the highest of
 // what is left is the answer: for a plane over a convex region, it is at one
 // of the region's corners.
-static int ws_PolyTopOver(WorldPolyOwner* pPoly, float x0, float x1,
-                          float z0, float z1, float* pTop)
+static int ws_PolyTopOver(WorldPolyOwner* polygon, float x0, float x1, float z0, float z1, float* top)
 {
-	LTVector vA[40], vB[40];
-	LTVector *pIn = vA, *pOut = vB, *pSwap;
-	uint32   nIn, nOut, i, nSide;
-	float    fLimit, fSign, fCur, fPrev, fT;
-
-	if (pPoly->m_nVertices < 3 || pPoly->m_nVertices > 32)
-		return -1;   // not ours to answer: the retail lift
-
-	for (i = 0; i < pPoly->m_nVertices; i++)
-		vA[i] = *pPoly->m_Vertices[i].m_pPos;
-	nIn = pPoly->m_nVertices;
-
-	for (nSide = 0; nSide < 4 && nIn; nSide++)
-	{
-		// x >= x0, x <= x1, z >= z0, z <= z1, as fSign * (v - fLimit) >= 0
-		fLimit = (nSide == 0) ? x0 : (nSide == 1) ? x1 : (nSide == 2) ? z0 : z1;
-		fSign  = (nSide & 1) ? -1.0f : 1.0f;
-
-		nOut  = 0;
-		fPrev = fSign * (((nSide < 2) ? pIn[nIn - 1].x : pIn[nIn - 1].z) - fLimit);
-
-		for (i = 0; i < nIn; i++)
-		{
-			const LTVector& vPrev = pIn[i ? i - 1 : nIn - 1];
-			const LTVector& vCur  = pIn[i];
-
-			fCur = fSign * (((nSide < 2) ? vCur.x : vCur.z) - fLimit);
-
-			if ((fCur >= 0.0f) != (fPrev >= 0.0f))
-			{
-				fT = fPrev / (fPrev - fCur);
-				pOut[nOut++] = vPrev + (vCur - vPrev) * fT;
-			}
-			if (fCur >= 0.0f)
-				pOut[nOut++] = vCur;
-
-			fPrev = fCur;
-		}
-
-		pSwap = pIn; pIn = pOut; pOut = pSwap;
-		nIn = nOut;
-	}
-
-	if (!nIn)
-		return 0;
-
-	*pTop = pIn[0].y;
-	for (i = 1; i < nIn; i++)
-	{
-		if (pIn[i].y > *pTop)
-			*pTop = pIn[i].y;
-	}
-	return 1;
+    const std::array<AxisClipPlane,4> planes{{{0,x0,1},{0,x1,-1},{2,z0,1},{2,z1,-1}}};
+    const auto clipped = w_ClipPolygon(*polygon,planes);
+    if (clipped.empty()) return 0;
+    *top = clipped.front().y;
+    for (const auto point : clipped) *top = std::max(*top,point.y);
+    return 1;
 }
 #endif
 
 int ws_StairStep(uint16 nBlock, CBounceState* pState)
 {
-	uint16         nStack[WS_NODE_STACK];
+	std::vector<uint16> nStack;
 	LTVector       vMax;
 	LTVector       vMin;
 	LTVector       vSave;
@@ -2744,12 +2609,12 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 	LTVector       vNormal;
 	WorldPolyRef*  pRecs;
 	LTPlane*       pPlane;
-	WSNode*        pNode;
+	const WSNode*        pNode;
 	int            nResult;
 	LTVector       vPush;
 	float          fRise;
 	WorldPolyRef*  pRec;
-	uint16*        pTop;
+
 
 	uint16          nChild;
 	WorldPolyOwner* pOwner;
@@ -2767,20 +2632,23 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 
 	pRecs = g_pMoveState->m_pWorldBsp->GetPolyRefs();
 
-	pTop  = nStack;
+	nStack.clear();
+	std::size_t candidate_index = 0;
 
 	for (;;)
 	{
-		if (nBlock == WS_NODE_EMPTY || nBlock == WS_NODE_SOLID)
-		{
-			if (pTop == nStack)
-				break;
-
-			pTop--;
-			nBlock = *pTop;
+		if (g_SweepCandidates) {
+			if (candidate_index == g_SweepCandidates->nodes.size()) break;
+			pNode = g_SweepCandidates->nodes[candidate_index++];
+		} else {
+			if (nBlock == WS_NODE_EMPTY || nBlock == WS_NODE_SOLID) {
+				if (nStack.empty()) break;
+				nBlock = nStack.back(); nStack.pop_back();
+			}
+			pNode = &g_pPBlock->m_pNodes[nBlock];
 		}
+		++g_nPhysNodes;
 
-		pNode  = &g_pPBlock->m_pNodes[nBlock];
 		pOwner = pRecs[pNode->m_nPoly].m_pOwner;
 		pRec   = &pRecs[pNode->m_nPoly];
 		pPlane = pOwner->m_pParent->m_pPlane;
@@ -2924,6 +2792,18 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 #endif
 						vPush = vFlat * -fBest;
 
+                        // A step may consume the lowered foot volume, never
+                        // turn its half-height negative. Long falls used to
+                        // lift both ends by thousands of units, then test an
+                        // inverted box against floors above the real start.
+                        // Reject that step and let the full box sweep handle
+                        // the fall and its first contact normally.
+                        if (vPush.y > 2.0f * g_pMoveState->m_vDims.y) {
+                            nResult = 1;
+                            nBlock = pNode->m_nChild[1];
+                            continue;
+                        }
+
 						if (pRec->m_pOwner->m_pParent->m_nFlags & WBSP_NOSTEP)
 						{
 							if (fRise < vPush.y)
@@ -2976,8 +2856,7 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 
 			if (nChild != WS_NODE_EMPTY && nChild != WS_NODE_SOLID)
 			{
-				*pTop = nChild;
-				pTop++;
+				if (!g_SweepCandidates) nStack.push_back(nChild);
 			}
 
 			nBlock = pNode->m_nChild[1];
@@ -3030,7 +2909,7 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 // structure.
 int ws_MoveBox(uint16 nBlock, CBounceState* pState, int bRetry)
 {
-	uint16     nStack[WS_NODE_STACK];
+	std::vector<uint16> nStack;
 	CPolyTest  test;
 #ifdef LT_SERVER_TIMERS
 	CountAdder cntAdder(&g_nPhysStepTime);
@@ -3046,9 +2925,9 @@ int ws_MoveBox(uint16 nBlock, CBounceState* pState, int bRetry)
 
 	WorldPolyRef* pRecs;
 	WorldPolyRef* pRec;
-	WSNode*       pNode;
+	const WSNode*       pNode;
 	uint32        nProjected;
-	uint16*       pTop;
+
 	uint16        nNode;
 	uint16        nChild;
 	int           nStart, nEnd, nSide;
@@ -3086,25 +2965,24 @@ int ws_MoveBox(uint16 nBlock, CBounceState* pState, int bRetry)
 
 	pRecs = g_pMoveState->m_pWorldBsp->GetPolyRefs();
 
-	pTop  = nStack;
+	nStack.clear();
+	std::size_t candidate_index = 0;
 	nNode = nBlock;
 
 	for (;;)
 	{
-		if (nNode == WS_NODE_EMPTY || nNode == WS_NODE_SOLID)
-		{
-			if (pTop == nStack)
-			{
-				return 1;
+		if (g_SweepCandidates) {
+			if (candidate_index == g_SweepCandidates->nodes.size()) return 1;
+			pNode = g_SweepCandidates->nodes[candidate_index++];
+		} else {
+			if (nNode == WS_NODE_EMPTY || nNode == WS_NODE_SOLID) {
+				if (nStack.empty()) return 1;
+				nNode = nStack.back(); nStack.pop_back();
 			}
-
-			pTop--;
-			nNode = *pTop;
+			pNode = &g_pPBlock->m_pNodes[nNode];
 		}
+		++g_nPhysNodes;
 
-		g_nPhysNodes++;
-
-		pNode  = &g_pPBlock->m_pNodes[nNode];
 		pRec   = &pRecs[pNode->m_nPoly];
 		pPlane = pRec->m_pOwner->m_pParent->m_pPlane;
 
@@ -3235,8 +3113,7 @@ int ws_MoveBox(uint16 nBlock, CBounceState* pState, int bRetry)
 
 				if (nChild != WS_NODE_EMPTY && nChild != WS_NODE_SOLID)
 				{
-					*pTop = nChild;
-					pTop++;
+					if (!g_SweepCandidates) nStack.push_back(nChild);
 				}
 
 				nNode = pNode->m_nChild[nSide];
@@ -3285,8 +3162,7 @@ int ws_MoveBox(uint16 nBlock, CBounceState* pState, int bRetry)
 
 			if (nChild != WS_NODE_EMPTY && nChild != WS_NODE_SOLID)
 			{
-				*pTop = nChild;
-				pTop++;
+				if (!g_SweepCandidates) nStack.push_back(nChild);
 			}
 
 			nNode = pNode->m_nChild[nSide];

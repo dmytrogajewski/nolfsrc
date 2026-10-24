@@ -1,7 +1,7 @@
 // FolderTexture.cpp: implementation of the CFolderTexture class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderTexture.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

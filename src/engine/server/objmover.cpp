@@ -59,67 +59,8 @@
 #include "sharedcommon.h"       // quat_ConvertToMatrix
 #include "commonphysics.h"      // wm_MoveObject
 #include "de_error.h"
-
-
-// ---- views for what the headers leave incomplete ----------------------- //
-
-// The game object hung off SObjData+0x20 -- the SDK's BaseClass
-// (ltengineobjects.h), whose virtual destructor is declared first, which
-// puts EngineMessageFn at slot 1.  Same view, same reason, as
-// src/engine/server/packet.cpp's CLinkBaseClass and lt2new1.cpp's
-// CBaseClassView; ltobject_internal.h leaves the member's type incomplete.
-class CBaseClassQ47C
-{
-public:
-	virtual void   _v00() = 0;
-	virtual uint32 EngineMessageFn(uint32 messageID, void* pData, float fData) = 0;
-};
-
-// From ltserverobj.h; nothing here includes that header, so the value is
-// spelled out, the way packet.cpp spells MID_LINKBROKEN out.  Slot 7 of this
-// same vtable pushes 6 = MID_CRUSH, which is how the numbering is checked.
-#define MID_TOUCHNOTIFY_Q47C 3
-#define MID_CRUSH_Q47C       6
-
-
-// ---- the class --------------------------------------------------------- //
-//
-// Layout is spritecontrol.cpp's CObjectMover exactly: the vptr at +0x00 and
-// the server manager at +0x04.  Every slot this file does not define stays
-// pure, so the class is abstract and NO vtable of ours is emitted -- the
-// shipped table is built by the translation unit that defines all thirteen,
-// and a second copy in .rdata would be a new symbol with no shipped address.
-class CObjectMoverQ47C
-{
-public:
-	// 0x0047c020 / 0x1003524a
-	virtual void SetObjectChangeFlags(LTObject* pObj, uint32 nFlags);
-	// 0x0047c110 / 0x10035260
-	virtual CollisionInfo** GetCollisionInfo();
-	// 0x0047c120 / 0x10035269
-	virtual void TouchNotify(LTObject* pObj, HOBJECT hToucher,
-	                         LTVector* pStopVel, float fForceMag);
-	// 0x0047c1a0 / 0x100352d5
-	virtual void Attach(LTObject* pObj, LTObject* pParent);
-	// 0x0047c1d0 / 0x100352f5
-	virtual void Detach(LTObject* pObj);
-	// 0x0047c1f0 / 0x1003530b
-	virtual void UpdateAttachments(WMMoveState* pState);
-	virtual int  _v18() = 0;
-	// 0x0047c180 / 0x100352b4
-	virtual uint32 Crush(LTObject* pObj, void* pData);
-	virtual void _v20() = 0;
-	// 0x00490730 / 0x100355db -- defined below.
-	virtual int  _v24();
-	// 0x0047c550 / 0x100355df
-	virtual LTBOOL CanDeactivate(LTObject* pObj);
-	// 0x0047c590 / 0x100355ec
-	virtual char*  GetObjectClassName(LTObject* pObj);
-	virtual uint32 _v30() = 0;
-
-	// +0x04 -- reached as `0x4(%ecx)` by slots 0, 1, 2, 3, 4 and 5.
-	class CServerMgr* m_pMgr;
-};
+#include "object_lifetime.h"
+#include <vector>
 
 
 // ======================================================================= //
@@ -144,7 +85,7 @@ public:
 //  have to materialise the code.  The server twin cannot tell you this --
 //  it forwards %eax by accident.
 // ======================================================================= //
-void CObjectMoverQ47C::SetObjectChangeFlags(LTObject* pObj, uint32 nFlags)
+void ServerObjectMover::SetObjectChangeFlags(LTObject* pObj, uint32 nFlags)
 {
 	sm_SetObjectChangeFlag(m_pMgr, pObj, nFlags);
 }
@@ -155,7 +96,7 @@ void CObjectMoverQ47C::SetObjectChangeFlags(LTObject* pObj, uint32 nFlags)
 //  add $0x6ac,%eax; ret` -- the ADDRESS of CServerMgr::m_pCollisionInfo.
 //  Below the 8-unmasked-byte floor, so a masked byte match cannot credit it.
 // ======================================================================= //
-CollisionInfo** CObjectMoverQ47C::GetCollisionInfo()
+CollisionInfo** ServerObjectMover::GetCollisionInfo()
 {
 	return &m_pMgr->m_pCollisionInfo;
 }
@@ -198,7 +139,7 @@ CollisionInfo** CObjectMoverQ47C::GetCollisionInfo()
 //     lithtech.exe (`mov 0x14(%esp),%esi; push %esi`, 0x0047c13f) and as
 //     `fld`/`fstp` in server.dll.  One source, two schedulers.
 // ======================================================================= //
-void CObjectMoverQ47C::TouchNotify(LTObject* pObj, HOBJECT hToucher,
+void ServerObjectMover::TouchNotify(LTObject* pObj, HOBJECT hToucher,
                                    LTVector* pStopVel, float fForceMag)
 {
 	if (m_pMgr->m_pCollisionInfo)
@@ -206,8 +147,8 @@ void CObjectMoverQ47C::TouchNotify(LTObject* pObj, HOBJECT hToucher,
 		m_pMgr->m_pCollisionInfo->m_vStopVel = *pStopVel;
 		m_pMgr->m_pCollisionInfo->m_hObject  = hToucher;
 
-		((CBaseClassQ47C*)pObj->m_pSData->m_pBaseClass)->EngineMessageFn(
-		    MID_TOUCHNOTIFY_Q47C, hToucher, fForceMag);
+		m_pMgr->m_ClassMgr.message(pObj->m_pSData->m_pBaseClass,
+		    MID_TOUCHNOTIFY, hToucher, fForceMag);
 	}
 }
 
@@ -220,10 +161,10 @@ void CObjectMoverQ47C::TouchNotify(LTObject* pObj, HOBJECT hToucher,
 //  never read.  lithtech.exe pushes the zero as an integer immediate,
 //  server.dll as `fldz; fstps (%esp)`.
 // ======================================================================= //
-uint32 CObjectMoverQ47C::Crush(LTObject* pObj, void* pData)
+uint32 ServerObjectMover::Crush(LTObject* pObj, void* pData)
 {
-	return ((CBaseClassQ47C*)pObj->m_pSData->m_pBaseClass)->EngineMessageFn(
-	    MID_CRUSH_Q47C, pData, 0.0f);
+	return m_pMgr->m_ClassMgr.message(pObj->m_pSData->m_pBaseClass,
+	    MID_CRUSH, pData, 0.0f);
 }
 
 
@@ -235,7 +176,7 @@ uint32 CObjectMoverQ47C::Crush(LTObject* pObj, void* pData)
 //  (1, pObj, pParent, m_pMgr).  The flag store sits among the argument
 //  pushes on both images, so it is the statement before the call.
 // ======================================================================= //
-void CObjectMoverQ47C::Attach(LTObject* pObj, LTObject* pParent)
+void ServerObjectMover::Attach(LTObject* pObj, LTObject* pParent)
 {
 	pObj->m_ChangeFlags |= 0x40;
 	sm_CreateInterObjectLink(m_pMgr, pParent, pObj, 1);
@@ -248,7 +189,7 @@ void CObjectMoverQ47C::Attach(LTObject* pObj, LTObject* pParent)
 //  0x10013a87) with (m_pMgr, pObj, 1, 0).  `ret $4`, nothing returned.
 //  lithtech.exe's copy was first written as ltnew1.cpp's CSub47c1d0View.
 // ======================================================================= //
-void CObjectMoverQ47C::Detach(LTObject* pObj)
+void ServerObjectMover::Detach(LTObject* pObj)
 {
 	sm_BreakAttachments(m_pMgr, pObj, 1, 0);
 }
@@ -389,67 +330,45 @@ static inline void om_InitMoveState(WMMoveState* pState, void* pContainer,
                                     uint32 nPriority)
 {
 	pState->m_pContainer = (CUnknown210*)pContainer;
-	pState->m_pUnknown04 = (CUnknown6A8Obj*)pUnknown04;
+	pState->m_pUnknown04 = static_cast<IObjectMover*>(pUnknown04);
 	pState->m_pObj       = pObj;
 	pState->m_nUnknown0C = nPriority;
 	pState->m_pPushList  = 0;
 	pState->m_nPushCount = 0;
 }
 
-void CObjectMoverQ47C::UpdateAttachments(WMMoveState* pState)
+void ServerObjectMover::UpdateAttachments(WMMoveState* request)
 {
-	LTMatrix    mRot;
-	WMMoveState state;
-	LTVector    vOffset;
-	LTVector    vNew;
-	Attachment* pAttach;
-	LTObject*   pChild;
-
-	state.m_pContainer = LTNULL;
-	state.m_pUnknown04 = LTNULL;
-	state.m_pObj       = LTNULL;
-	state.m_nUnknown64 = 0;
-
-	pAttach = pState->m_pObj->m_pAttachments;
-
-	while (pAttach)
-	{
-		pChild = sm_FindObjectByID(m_pMgr, pAttach->m_nChildID);
-
-		if (pChild)
-		{
-			vOffset = pAttach->m_Offset.m_Pos;
-
-			quat_ConvertToMatrix(&pState->m_pObj->m_Rotation, &mRot);
-			mRot.Apply3x3(vOffset);
-
-			vNew = pState->m_pObj->m_Pos + vOffset;
-
-			om_InitMoveState(&state, pState->m_pContainer, pState->m_pUnknown04,
-			                 pChild, pChild->m_BlockingPriority);
-
-			wm_MoveObject(&state, vNew, 0xd);
-
-			// Two spellings that server.dll does not see and lithtech.exe
-			// does (both measured; server.dll is identical either way):
-			//  * a NAMED product rather than the product assigned straight
-			//    into the child: the named local is what spends the last of
-			//    /O2's inline budget, so the EARLIER Apply3x3(const&, &)
-			//    stays a call to 0x0047c400 as shipped (written straight in,
-			//    VC6 expands it and the function is 605 bytes, not 518);
-			//  * the attachment's rotation through a const REFERENCE: it is
-			//    what makes the expanded quat_Mul load b[] before a[] in
-			//    every term but the first (0x0047c32a..0x0047c3a3), the
-			//    order its out-of-line copy has.  Named straight in the
-			//    product, all sixteen products load a[] first (7 blocks).
-			const LTRotation& rOffset = pAttach->m_Offset.m_Rot;
-			LTRotation        rNew    = pState->m_pObj->m_Rotation * rOffset;
-
-			pChild->m_Rotation = rNew;
-		}
-
-		pAttach = pAttach->m_pNext;
-	}
+    auto* manager = m_pMgr;
+    auto* parent = request->m_pObj;
+    ServerCallbackGuard server(manager->m_Lifetime);
+    ObjectCallbackGuard parent_guard(*parent);
+    struct Entry {
+        Attachment* record;
+        uint64 generation;
+        LTObject* child;
+        ObjectCallbackGuard guard;
+        LTransform offset;
+    };
+    std::vector<Entry> entries;
+    for (auto* attachment = parent->m_pAttachments; attachment; attachment = attachment->m_pNext)
+        entries.push_back({attachment,attachment->m_Generation,attachment->m_pChild,ObjectCallbackGuard(*attachment->m_pChild),attachment->m_Offset});
+    for (const auto& entry : entries) {
+        if (!server.unchanged() || !parent_guard.unchanged()) return;
+        if (!entry.guard.unchanged()) continue;
+        auto* record = am_FindAttachment(&manager->m_Unknown390,reinterpret_cast<HATTACHMENT>(entry.record));
+        if (!record || record->m_Generation != entry.generation) continue;
+        LTMatrix rotation; quat_ConvertToMatrix(&parent->m_Rotation,&rotation);
+        auto offset = entry.offset.m_Pos; rotation.Apply3x3(offset);
+        const auto orientation = parent->m_Rotation * entry.offset.m_Rot;
+        WMMoveState state;
+        state.Init(request->m_pContainer,request->m_pUnknown04,entry.child,entry.child->m_BlockingPriority);
+        wm_MoveObject(&state,parent->m_Pos + offset,0xd);
+        if (!server.unchanged() || !parent_guard.unchanged()) return;
+        if (!entry.guard.unchanged()) continue;
+        record = am_FindAttachment(&manager->m_Unknown390,reinterpret_cast<HATTACHMENT>(entry.record));
+        if (record && record->m_Generation == entry.generation) entry.child->m_Rotation = orientation;
+    }
 }
 
 
@@ -475,14 +394,9 @@ void CObjectMoverQ47C::UpdateAttachments(WMMoveState* pState)
 // ahead of slot 10 in .text. Read by CWMMoveSetup::Setup (0x1001efd8, commonphysics.h) into
 // the move record's +0x18. lthread.h's LCriticalSection::IsValid claims the
 // same address (the same body; /OPT:ICF).
-int CObjectMoverQ47C::_v24()
+LTBOOL ServerObjectMover::CanPlace(LTObject* pObj)
 {
-	return 1;
-}
-
-LTBOOL CObjectMoverQ47C::CanDeactivate(LTObject* pObj)
-{
-	return sm_CanDeactivate(pObj);
+	return !pObj->m_pAttachments && pObj->m_StandingOnMe.IsTiedOff() && sm_CanDeactivate(pObj);
 }
 
 
@@ -490,7 +404,7 @@ LTBOOL CObjectMoverQ47C::CanDeactivate(LTObject* pObj)
 //  SLOT 11 -- 0x0047c590 (18 bytes) / 0x100355ec (18 bytes).  The object's
 //  class name: m_pSData (0x188) -> m_pClass (0x24) -> the name (+0x00).
 // ======================================================================= //
-char* CObjectMoverQ47C::GetObjectClassName(LTObject* pObj)
+const char* ServerObjectMover::GetObjectClassName(LTObject* pObj)
 {
-	return pObj->m_pSData->m_pClass->m_pClassName;
+	return pObj->m_pSData->m_pClass->m_ClassName;
 }

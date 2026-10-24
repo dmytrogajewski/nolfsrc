@@ -1,5 +1,8 @@
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AnimationMgr.h"
 
 // ISSUES:
@@ -195,7 +198,7 @@ void CAnimationContext::GetPropsString(char* szBuffer, uint nBufferLength)
 
 void CAnimationContext::EnablePitch(const CAnimationInstance& ani)
 {
-	_ASSERT(ani.IsPitched());
+	GAME_ASSERT(ani.IsPitched());
 
 	m_fPitch = m_fPitchTarget;
 //	g_pLTServer->CPrint("pitch = %f", m_fPitch);
@@ -683,10 +686,10 @@ CAnimationContext* CAnimationMgr::CreateAnimationContext(HOBJECT hObject)
 	pAnimationContext->m_fPitch = 0.5f;
 
 	if ( LT_OK != g_pModelLT->AddTracker(hObject, &pAnimationContext->m_trkPitchDown) )
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 
 	if ( LT_OK != g_pModelLT->AddTracker(hObject, &pAnimationContext->m_trkPitchUp) )
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 
 	for ( uint32 iPitchWeightset = 0 ; iPitchWeightset < CAnimationContext::kNumPitchWeightsets ; iPitchWeightset++ )
 	{
@@ -719,7 +722,7 @@ const CAnimationProp& CAnimationMgr::FindAnimationProp(const char* szName) const
 
 	for ( uint32 iAnimationProp = 0 ; iAnimationProp < m_cAnimationProps ; iAnimationProp++ )
 	{
-        if ( !_stricmp(m_aszAnimationPropNames[iAnimationProp], szName) )
+        if ( !nolf::ascii_compare(m_aszAnimationPropNames[iAnimationProp], szName) )
 		{
 			return m_aAnimationProps[iAnimationProp];
 		}

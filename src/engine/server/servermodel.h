@@ -94,14 +94,14 @@ inline LTRESULT sm_SetObjectChangeFlag(CServerMgr* pServerMgr, LTObject* pObj,
 	// sweep tests the same bit the same way.
 	if (!(pObj->m_ChangeFlags & 4))
 		RETURN_ERROR_INFO(1, "SetObjectChangeFlags", LT_OBJECTNOTINWORLD,
-		                  pObj->m_pSData->m_pClass->m_pClassName);
+		                  pObj->m_pSData->m_pClass->m_ClassName);
 
 	CObjectMapEntry* pEntry =
 		&pServerMgr->m_Unknown8fc.m_pArray[pObj->m_ObjectID];
 
 	if (pEntry->m_nFlags != 1 || !pEntry->m_pRecord)
 		RETURN_ERROR_INFO(1, "SetObjectChangeFlags", LT_ERROR,
-		                  pObj->m_pSData->m_pClass->m_pClassName);
+		                  pObj->m_pSData->m_pClass->m_ClassName);
 
 	if (pObj->m_pSData->m_ClientChangeFlags == 0 && pServerMgr->m_bWorldLoaded)
 	{
@@ -167,33 +167,14 @@ public:
 // COMDATs these emit onto the same two addresses in server.dll.
 inline LPBASECLASS sm_AllocateObjectInline(CServerMgr* pMgr, ClassDef* pClassDef)
 {
-	CClassStats* pStats;
-	LPBASECLASS  pObject;
-
-	pStats = (CClassStats*)pClassDef->m_pInternal[pMgr->m_ClassMgr.m_nIndex];
-
-	pObject = (LPBASECLASS)sb_Allocate(&pStats->m_Bank);
-
-	pObject->m_hObject = LTNULL;
-	pObject->m_pFirstAggregate = LTNULL;
-
-	pClassDef->m_ConstructFn(pObject);
-
-	return pObject;
+	return pMgr->m_ClassMgr.allocate(pClassDef);
 }
 
 inline void sm_FreeObjectInline(CServerMgr* pMgr, ClassDef* pClassDef,
                                 LPBASECLASS pObject)
 {
-	CClassStats* pStats =
-		(CClassStats*)pClassDef->m_pInternal[pMgr->m_ClassMgr.m_nIndex];
-
-	pClassDef->m_DestructFn(pObject);
-
-	do
-	{
-		sb_Free(&pStats->m_Bank, pObject);
-	} while (0);
+	(void)pClassDef;
+	pMgr->m_ClassMgr.destroy(pObject);
 }
 
 #endif

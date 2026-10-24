@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIHelicopter.h"
 #include "CharacterHitBox.h"
 #include "SearchLight.h"
@@ -201,7 +204,7 @@ AI_Helicopter::~AI_Helicopter()
 
 void AI_Helicopter::HandleBrokenLink(HOBJECT hLink)
 {
-	_ASSERT(hLink);
+	GAME_ASSERT(hLink);
 	if ( !hLink ) return;
 
 	if ( -1 != m_iObjectGunner && m_apObjects[m_iObjectGunner] && (hLink == m_apObjects[m_iObjectGunner]->m_hObject) )
@@ -380,7 +383,7 @@ LTBOOL AI_Helicopter::HandleCommand(char** pTokens, int nArgs)
 
 	for ( int iState = 0 ; iState < s_cStateMaps ; iState++ )
 	{
-		if ( !_stricmp(pTokens[0], s_aStateMaps[iState].szState) )
+		if ( !nolf::ascii_compare(pTokens[0], s_aStateMaps[iState].szState) )
 		{
 			// Change states
 
@@ -393,7 +396,7 @@ LTBOOL AI_Helicopter::HandleCommand(char** pTokens, int nArgs)
 
 	// Non-state-changing messages
 
-	if ( !_stricmp(pTokens[0], "FX") )
+	if ( !nolf::ascii_compare(pTokens[0], "FX") )
 	{
 		if ( nArgs != 4 )
 		{
@@ -401,7 +404,7 @@ LTBOOL AI_Helicopter::HandleCommand(char** pTokens, int nArgs)
 			return LTTRUE;
 		}
 
-		if ( !_stricmp(pTokens[1], "IMPACT") )
+		if ( !nolf::ascii_compare(pTokens[1], "IMPACT") )
 		{
 			HCLASS hClass = g_pLTServer->GetClass("Explosion");
 			if (!hClass) return LTTRUE;
@@ -438,7 +441,7 @@ LTBOOL AI_Helicopter::HandleCommand(char** pTokens, int nArgs)
 			}
 		}
 	}
-	else if ( !_stricmp(pTokens[0], "LIGHTFOLLOW") )
+	else if ( !nolf::ascii_compare(pTokens[0], "LIGHTFOLLOW") )
 	{
 		if ( m_iObjectSearchLight == -1 ) return LTTRUE;
 
@@ -492,7 +495,7 @@ void AI_Helicopter::SetState(CAIHelicopterState::AIHelicopterStateType eState)
 
 	if ( !m_pHelicopterState )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -500,7 +503,7 @@ void AI_Helicopter::SetState(CAIHelicopterState::AIHelicopterStateType eState)
 
 	if ( !m_pHelicopterState->Init(this) )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		FACTORY_DELETE(m_pHelicopterState);
         m_pHelicopterState = LTNULL;
 	}
@@ -791,7 +794,7 @@ void AI_Helicopter::SetSearchlightRotation(LTRotation& rRot)
 {
 	if ( -1 == m_iObjectSearchLight )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		m_rRotSearchlight = rRot;
 		return;
 	}
@@ -818,8 +821,9 @@ void AI_Helicopter::SetSearchlightRotation(LTRotation& rRot)
 
         g_pLTServer->RemoveAttachment(hAttachment);
         LTRotation rotTemp(~rSocketRot*rRot);
+        LTVector offset(0,0,0);
         g_pLTServer->CreateAttachment(m_hObject, hSearchLight, (char*)m_apObjectPositions[m_iObjectSearchLight]->GetName(),
-            &LTVector(0,0,0), &rotTemp, &hAttachment);
+            &offset, &rotTemp, &hAttachment);
 
 		m_rRotSearchlight = rRot;
 	}
@@ -906,7 +910,7 @@ void AI_Helicopter::SetSearchlightPosition(LTVector& vPos)
 /*
 	if ( -1 == m_iObjectSearchLight )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		m_vPosSearchlight = vPos;
 		return;
 	}
@@ -924,7 +928,7 @@ void AI_Helicopter::SetSearchlightPosition(LTVector& vPos)
 		m_vPosSearchlight = vPos;
 	}
 */
-	_ASSERT(LTFALSE);
+	GAME_ASSERT(LTFALSE);
 }
 
 // ----------------------------------------------------------------------- //
@@ -961,7 +965,7 @@ void AI_Helicopter::SetGunnerRotation(LTRotation& rRot)
 {
 	if ( -1 == m_iObjectGunner )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		m_rRotGunner = rRot;
 		return;
 	}
@@ -988,8 +992,9 @@ void AI_Helicopter::SetGunnerRotation(LTRotation& rRot)
 
         g_pLTServer->RemoveAttachment(hAttachment);
         LTRotation rotTemp(~rSocketRot*rRot);
+        LTVector offset(0,0,0);
         g_pLTServer->CreateAttachment(m_hObject, hGunner, (char*)m_apObjectPositions[m_iObjectGunner]->GetName(),
-            &LTVector(0,0,0), &rotTemp, &hAttachment);
+            &offset, &rotTemp, &hAttachment);
 
 		m_rRotGunner = rRot;
 	}
@@ -1031,7 +1036,7 @@ void AI_Helicopter::SetGunnerPosition(LTVector& vPos)
 /*
 	if ( -1 == m_iObjectGunner )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		m_vPosGunner = vPos;
 		return;
 	}
@@ -1049,7 +1054,7 @@ void AI_Helicopter::SetGunnerPosition(LTVector& vPos)
 		m_vPosGunner = vPos;
 	}
 */
-	_ASSERT(LTFALSE);
+	GAME_ASSERT(LTFALSE);
 }
 
 // ----------------------------------------------------------------------- //

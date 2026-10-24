@@ -2,13 +2,15 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "GroupCtrl.h"
 #include "InterfaceMgr.h"
 
 CGroupSubCtrl::CGroupSubCtrl(CLTGUICtrl* pCtrl, LTIntPt offset, LTBOOL bSelectable)
 {
-	_ASSERT(pCtrl);
+	GAME_ASSERT(pCtrl);
 	m_pCtrl = pCtrl;
 	m_Offset = offset;
 	m_bSelectable = bSelectable;
@@ -176,7 +178,7 @@ LTBOOL CGroupCtrl::OnEnter()
 // Returns FALSE if there isn't one under the specified point.
 LTBOOL CGroupCtrl::GetControlUnderPoint(int xPos, int yPos, int *pnIndex)
 {
-	_ASSERT(pnIndex);
+	GAME_ASSERT(pnIndex);
 	if (!m_bSubSelect)
         return LTFALSE;
 
@@ -206,7 +208,7 @@ LTBOOL CGroupCtrl::GetControlUnderPoint(int xPos, int yPos, int *pnIndex)
 // Add/Remove controls to the array
 int CGroupCtrl::AddControl ( CLTGUICtrl *pControl, LTIntPt offset, LTBOOL bSelectable)
 {
-	_ASSERT(pControl);
+	GAME_ASSERT(pControl);
 	CGroupSubCtrl *pNewCtrl = debug_new3(CGroupSubCtrl, pControl,offset,bSelectable);
 	m_controlArray.Add(pNewCtrl);
 

@@ -18,7 +18,9 @@
 #ifndef __LTHREAD_H__
 #define __LTHREAD_H__
 
-#include <windows.h>
+#include "platform/sync.h"
+#include <atomic>
+#include <thread>
 #include "ltbasedefs.h"
 // GenList<> and GenListPos: the message queues below implement that
 // interface, which is what their twelve-slot vtables are.
@@ -44,10 +46,12 @@ public:
 
 	void   Enter();                          // 0x100155aa
 	void   Leave();                          // 0x100155b2
-	LTBOOL IsValid();                        // 0x100355db
+	LTBOOL IsValid();
+    void lock() { Enter(); }
+    void unlock() { Leave(); }                        // 0x100355db
 
 public:
-	CRITICAL_SECTION m_CS;
+	nolf::platform::RecursiveMutex m_CS;
 };
 
 
@@ -60,9 +64,9 @@ public:
 	                                         // two payload dwords are cleared
 
 	// The list threads through the messages themselves; the payload follows.
-	LThreadMessage* m_pNext;                 // +0x00
-	LThreadMessage* m_pPrev;                 // +0x04
-	uint32          m_Data[6];               // +0x08
+	LThreadMessage* m_pNext{};                 // +0x00
+	LThreadMessage* m_pPrev{};                 // +0x04
+	uintptr_t       m_Data[6]{};               // +0x08
 };
 
 
@@ -76,7 +80,7 @@ extern LThreadMessageBank g_ThreadMessageBank;
 extern LCriticalSection   g_ThreadCS;
 
 // 0x10015b65 — hand every message in the list back to the bank.
-void tm_FreeMessages(class LMessageList* pList, LThreadMessageBank* pBank);
+
 
 
 // The queue's message list. Polymorphic — LThreadQueue's constructor stores
@@ -445,7 +449,7 @@ public:
 public:
 	LCriticalSection m_CS;                   // 0x00
 	LThreadMsgList   m_MessageList;          // 0x18
-	HANDLE           m_hEvent;               // 0x24  manual reset; set on post
+	nolf::platform::Event m_hEvent;               // 0x24  manual reset; set on post
 };
 
 
@@ -478,9 +482,11 @@ public:
 public:
 	LThreadQueue m_IncomingQueue;            // 0x04
 	LThreadQueue m_OutgoingQueue;            // 0x2c
-	HANDLE       m_hThread;                  // 0x54
-	DWORD        m_ThreadID;                 // 0x58
-	HANDLE       m_hEvent;                   // 0x5c
+	std::jthread m_hThread;                  // 0x54
+	uint64 m_ThreadID{};                 // 0x58
+	nolf::platform::Event m_hEvent;                   // cooperative quit signal
+    std::atomic<bool> m_Failed{false};
+    std::stop_source m_Stop;
 };
 
 #endif  // __LTHREAD_H__

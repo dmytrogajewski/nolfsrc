@@ -1,7 +1,7 @@
 // FolderMouse.cpp: implementation of the CFolderMouse class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMouse.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

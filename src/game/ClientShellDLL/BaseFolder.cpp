@@ -1,7 +1,9 @@
 // BaseFolder.cpp: implementation of the CBaseFolder class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "BaseFolder.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -1260,7 +1262,7 @@ int CBaseFolder::SetSelection(int select, LTBOOL bFindSelectable)
 			if (m_nLastDrawn < 0)
 			{
 				//no items are drawn
-				_ASSERT(0);
+				GAME_ASSERT(0);
 				break;
 			}
 		}
@@ -1311,7 +1313,7 @@ void CBaseFolder::CalculateLastDrawn()
 // Returns FALSE if there isn't one under the specified point.
 LTBOOL CBaseFolder::GetControlUnderPoint(int xPos, int yPos, int *pnIndex)
 {
-	_ASSERT(pnIndex);
+	GAME_ASSERT(pnIndex);
 
 
 	// See if the user clicked on any of the controls.

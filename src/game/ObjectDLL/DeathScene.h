@@ -12,6 +12,8 @@
 #define __DEATH_SCENE_H__
 
 #include "ltengineobjects.h"
+#include "AssertMgr.h"
+#include <cassert>
 
 class CDeathScene
 {
@@ -121,7 +123,7 @@ class CDeathScene
 
 inline void CDeathScene::Set(CCharacter *pCharacter, Body *pBody)
 {
-	_ASSERT(pCharacter && pBody);
+	GAME_ASSERT(pCharacter && pBody);
 	if ( !pCharacter || !pBody ) return;
 
 	m_eCharacterDeath = pCharacter->GetDeathType();

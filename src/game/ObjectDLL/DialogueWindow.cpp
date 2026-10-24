@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "DialogueWindow.h"
 #include "CinematicTrigger.h"
 

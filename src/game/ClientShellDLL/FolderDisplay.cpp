@@ -1,7 +1,13 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // FolderDisplay.cpp: implementation of the CFolderDisplay class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "FolderDisplay.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -322,9 +328,9 @@ void CFolderDisplay::BuildRendererArray()
 				FolderDisplayRenderer renderer;
 
 				renderer.m_bHardware=pCurrentMode->m_bHardware;
-				_mbscpy((unsigned char*)renderer.m_renderDll, (const unsigned char*)pCurrentMode->m_RenderDLL);
-				_mbscpy((unsigned char*)renderer.m_description, (const unsigned char*)pCurrentMode->m_Description);
-				_mbscpy((unsigned char*)renderer.m_internalName, (const unsigned char*)pCurrentMode->m_InternalName);
+				std::strcpy(renderer.m_renderDll, pCurrentMode->m_RenderDLL);
+				std::strcpy(renderer.m_description, pCurrentMode->m_Description);
+				std::strcpy(renderer.m_internalName, pCurrentMode->m_InternalName);
 
 				m_rendererArray.Add(renderer);
 				nRenderIndex=m_rendererArray.GetSize()-1;
@@ -390,7 +396,7 @@ void CFolderDisplay::SortRenderModes(int nRendererIndex)
 // -1 is returned if it cannot be found
 int CFolderDisplay::GetRendererIndex(RMode *pMode)
 {
-	_ASSERT(pMode);
+	GAME_ASSERT(pMode);
 	if (!pMode)
 	{
 		return -1;
@@ -402,8 +408,8 @@ int CFolderDisplay::GetRendererIndex(RMode *pMode)
 	unsigned int i;
 	for (i=0; i < m_rendererArray.GetSize(); i++)
 	{
-		if (_mbsicmp((const unsigned char*)m_rendererArray[i].m_description, (const unsigned char*)pMode->m_Description) == 0 &&
-			_mbsicmp((const unsigned char*)m_rendererArray[i].m_renderDll, (const unsigned char*)pMode->m_RenderDLL) == 0)
+		if (nolf::ascii_compare(m_rendererArray[i].m_description, pMode->m_Description) == 0 &&
+			nolf::ascii_compare(m_rendererArray[i].m_renderDll, pMode->m_RenderDLL) == 0)
 		{
 			nRenderIndex=i;
 			break;
@@ -483,9 +489,9 @@ RMode CFolderDisplay::GetRendererModeStruct(int nRendererIndex, int nResolutionI
 	RMode mode;
 	mode.m_bHardware=m_rendererArray[nRendererIndex].m_bHardware;
 
-	_mbscpy((unsigned char*)mode.m_RenderDLL, (const unsigned char*)m_rendererArray[nRendererIndex].m_renderDll);
-	_mbscpy((unsigned char*)mode.m_InternalName, (const unsigned char*)m_rendererArray[nRendererIndex].m_internalName);
-	_mbscpy((unsigned char*)mode.m_Description, (const unsigned char*)m_rendererArray[nRendererIndex].m_description);
+	std::strcpy(mode.m_RenderDLL, m_rendererArray[nRendererIndex].m_renderDll);
+	std::strcpy(mode.m_InternalName, m_rendererArray[nRendererIndex].m_internalName);
+	std::strcpy(mode.m_Description, m_rendererArray[nRendererIndex].m_description);
 
 	FolderDisplayResolution resolution=m_rendererArray[nRendererIndex].m_resolutionArray[nResolutionIndex];
 	mode.m_Width=resolution.m_dwWidth;
@@ -500,20 +506,20 @@ RMode CFolderDisplay::GetRendererModeStruct(int nRendererIndex, int nResolutionI
 // Returns TRUE if two renderers are the same
 LTBOOL CFolderDisplay::IsRendererEqual(RMode *pRenderer1, RMode *pRenderer2)
 {
-	_ASSERT(pRenderer1);
-	_ASSERT(pRenderer2);
+	GAME_ASSERT(pRenderer1);
+	GAME_ASSERT(pRenderer2);
 
-	if (_mbsicmp((const unsigned char*)pRenderer1->m_RenderDLL, (const unsigned char*)pRenderer2->m_RenderDLL) != 0)
+	if (nolf::ascii_compare(pRenderer1->m_RenderDLL, pRenderer2->m_RenderDLL) != 0)
 	{
         return LTFALSE;
 	}
 
-	if (_mbsicmp((const unsigned char*)pRenderer1->m_InternalName, (const unsigned char*)pRenderer2->m_InternalName) != 0)
+	if (nolf::ascii_compare(pRenderer1->m_InternalName, pRenderer2->m_InternalName) != 0)
 	{
         return LTFALSE;
 	}
 
-	if (_mbsicmp((const unsigned char*)pRenderer1->m_Description, (const unsigned char*)pRenderer2->m_Description) != 0)
+	if (nolf::ascii_compare(pRenderer1->m_Description, pRenderer2->m_Description) != 0)
 	{
         return LTFALSE;
 	}
@@ -593,8 +599,8 @@ void CFolderDisplay::OnFocus(LTBOOL bFocus)
 					continue;
 
 				RMode p1Mode = GetRendererModeStruct(n, 0);
-				if (_mbsicmp((const unsigned char*)p1Mode.m_RenderDLL, (const unsigned char*)currentMode.m_RenderDLL) != 0 ||
-					_mbsicmp((const unsigned char*)p1Mode.m_Description, (const unsigned char*)currentMode.m_Description) != 0)
+				if (nolf::ascii_compare(p1Mode.m_RenderDLL, currentMode.m_RenderDLL) != 0 ||
+					nolf::ascii_compare(p1Mode.m_Description, currentMode.m_Description) != 0)
 					continue;
 
 				m_pRendererCtrl->SetSelIndex(n);
@@ -736,7 +742,7 @@ FolderDisplayResolution CFolderDisplay::GetCurrentSelectedResolution()
 	int nRendererIndex=m_pRendererCtrl->GetSelIndex();
 	int nResolutionIndex=m_pResolutionCtrl->GetSelIndex();
 
-	_ASSERT(nRendererIndex >= 0 && nResolutionIndex >= 0);
+	GAME_ASSERT(nRendererIndex >= 0 && nResolutionIndex >= 0);
 	if (nRendererIndex >= 0 && nResolutionIndex >= 0)
 		return m_rendererArray[nRendererIndex].m_resolutionArray[nResolutionIndex];
 	else

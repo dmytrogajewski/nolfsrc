@@ -100,7 +100,7 @@ void CDebugMgr::RecordException(PEXCEPTION_POINTERS pExceptionInfo)
     m_pchBuffer += wsprintf(m_pchBuffer,  "Exception code: %08X\n",
 		pExceptionRecord->ExceptionCode);
     // Now print information about where the fault occured
-    TCHAR szFaultingModule[MAX_PATH];    DWORD section, offset;
+    TCHAR szFaultingModule[LT_MAX_PATH];    DWORD section, offset;
     FindLogicalAddress(  pExceptionRecord->ExceptionAddress,
                         szFaultingModule,
                         sizeof( szFaultingModule ),
@@ -109,7 +109,7 @@ void CDebugMgr::RecordException(PEXCEPTION_POINTERS pExceptionInfo)
               pExceptionRecord->ExceptionAddress,
               section, offset, szFaultingModule );
 
-	TCHAR szMap[MAX_PATH] = "";
+	TCHAR szMap[LT_MAX_PATH] = "";
 	wsprintf(szMap, szFaultingModule);
 	wsprintf(&szMap[lstrlen(szMap)-3], "MAP");
 	TCHAR szSymbol[256] = "<unknown>";
@@ -184,7 +184,7 @@ void CDebugMgr::RecordStack(const CONTEXT* pContext)
 
     do
     {
-        TCHAR szModule[MAX_PATH] = "";
+        TCHAR szModule[LT_MAX_PATH] = "";
         DWORD section = 0, offset = 0;
 
         FindLogicalAddress((PVOID)pc, szModule,sizeof(szModule),section,offset );
@@ -198,7 +198,7 @@ void CDebugMgr::RecordStack(const CONTEXT* pContext)
 		{
 			// Generate the name of the map file
 
-			TCHAR szMap[MAX_PATH] = "";
+			TCHAR szMap[LT_MAX_PATH] = "";
 			wsprintf(szMap, szModule);
 			wsprintf(&szMap[lstrlen(szMap)-3], "MAP");
 

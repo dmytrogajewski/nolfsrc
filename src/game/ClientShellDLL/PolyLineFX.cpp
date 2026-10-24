@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "PolyLineFX.h"
 #include "iltclient.h"
 #include "SFXMgr.h"

@@ -10,14 +10,15 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "WeaponModel.h"
 #include "ClientUtilities.h"
 #include "GameClientShell.h"
 #include "ShellCasingFX.h"
 #include "SFXMsgIds.h"
 #include "GameSettings.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "WeaponFX.h"
 #include "ProjectileFX.h"
 #include "ClientServerShared.h"
@@ -1639,7 +1640,7 @@ void CWeaponModel::OnModelKey(HLOCALOBJ hObj, ArgList* pArgList)
 	char* pKey = pArgList->argv[0];
 	if (!pKey) return;
 
-	if (stricmp(pKey, WEAPON_KEY_FIRE) == 0)
+	if (nolf::ascii_compare(pKey, WEAPON_KEY_FIRE) == 0)
 	{
 		// Only allow fire keys if it is a fire animation...
 
@@ -1652,7 +1653,7 @@ void CWeaponModel::OnModelKey(HLOCALOBJ hObj, ArgList* pArgList)
 			}
 		}
 	}
-	else if (stricmp(pKey, WEAPON_KEY_SOUND) == 0)
+	else if (nolf::ascii_compare(pKey, WEAPON_KEY_SOUND) == 0)
 	{
 		if (pArgList->argc > 1 && pArgList->argv[1])
 		{
@@ -1697,11 +1698,11 @@ void CWeaponModel::OnModelKey(HLOCALOBJ hObj, ArgList* pArgList)
 			}
 		}
 	}
-	else if (stricmp(pKey, WEAPON_KEY_FX) == 0)
+	else if (nolf::ascii_compare(pKey, WEAPON_KEY_FX) == 0)
 	{
 		m_PVFXMgr.HandleFXKey(pArgList);
 	}
-	else if (stricmp(pKey, WEAPON_KEY_FIREFX) == 0)
+	else if (nolf::ascii_compare(pKey, WEAPON_KEY_FIREFX) == 0)
 	{
 		// Only allow fire keys if it is a fire animation...
 
@@ -1716,7 +1717,7 @@ void CWeaponModel::OnModelKey(HLOCALOBJ hObj, ArgList* pArgList)
 
 		m_PVFXMgr.HandleFXKey(pArgList);
 	}
-	else if (stricmp(pKey, WEAPON_KEY_SUNGLASS) == 0)
+	else if (nolf::ascii_compare(pKey, WEAPON_KEY_SUNGLASS) == 0)
 	{
 		HandleSunglassMode();
 	}
@@ -3634,7 +3635,7 @@ LTBOOL CWeaponModel::IsGadgetAmmo(AMMO* pAmmo)
 
 	// Special case
 
-	if (strcmpi(pAmmo->szName, "Coin") == 0) return LTTRUE;
+	if (nolf::ascii_compare(pAmmo->szName, "Coin") == 0) return LTTRUE;
 
 	return LTFALSE;
 }
@@ -3795,7 +3796,8 @@ void CWeaponModel::ChangeAmmo(uint8 nNewAmmoId, LTBOOL bForce)
 	// Make sure this is an ammo type our current weapon can use...
 
 	if (!m_pWeapon) return;
-	for (int i=0; i < m_pWeapon->nNumAmmoTypes; i++)
+	int i = 0;
+	for (; i < m_pWeapon->nNumAmmoTypes; i++)
 	{
 		if (nNewAmmoId == m_pWeapon->aAmmoTypes[i])
 		{

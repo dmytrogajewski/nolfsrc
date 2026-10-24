@@ -46,6 +46,8 @@ extern RDCaps g_RDCaps;
 // resolving to the screen when it presents or reads pixels.
 bool rd_CreateDevice(void* hWnd, uint32_t nWidth, uint32_t nHeight, bool bWindowed, int nSwapInterval,
                      int nSamples);
+// Zero while no device is active; changes across every successful restart.
+uint64_t rd_DeviceGeneration(void);
 void rd_DestroyDevice(void);        // waits for drawing to finish first
 void rd_Present(void);
 // What the device is ("AMD Radeon ... (4.6 Mesa 24.0)"), for the console,

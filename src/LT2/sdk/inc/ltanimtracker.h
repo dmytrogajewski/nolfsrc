@@ -106,6 +106,11 @@
 	{
 	public:
 
+        LTAnimTracker() {
+            m_Link.m_pPrev = m_Link.m_pNext = LTNULL;
+            m_Link.m_pData = LTNULL;
+        }
+
 		// Tells if the frame locators are on valid frames.
 		LTBOOL			IsValid();
 		
@@ -139,12 +144,15 @@
 
 		StringKeyCallback	m_StringKeyCallback;	// Set this if you want to be notifies of string keys.
 		void			*m_pUser1;		// Use this for whatever you want.
-		unsigned long	m_CurKey;		// Stuff used to track where it is in the keyframes.
+		uint32			m_CurKey;		// Stuff used to track where it is in the keyframes.
 
 		unsigned short	m_Flags;			// Combination of AT_ flags above.
 		unsigned short	m_InterpolationMS;	// How far we've interpolated between prev and cur
 											// (when switching animations).  Set to NOT_INTERPOLATING
 											// if not interpolating.
+
+		uint64 m_MutationGeneration = 0;
+        uint64 m_InterpolationElapsed = 0;
 
 		AnimTimeRef		m_TimeRef;
 	};

@@ -4,6 +4,8 @@
 #define __AI_H__
 
 #include "Character.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "Attachments.h"
 #include "AIButeMgr.h"
 #include "AIReactions.h"
@@ -152,15 +154,15 @@ class CAI : public CCharacter
 
 		CWeapon* GetCurrentWeapon() { return m_apWeapons[0]; }
 		int GetNumWeapons() { return m_cWeapons; }
-		CWeapon* GetWeapon(int iWeapon) { _ASSERT(iWeapon >= 0 && iWeapon < m_cWeapons); return m_apWeapons[iWeapon]; }
-		CAttachmentPosition* GetWeaponPosition(int iWeapon) { _ASSERT(iWeapon >= 0 && iWeapon < m_cWeapons); return m_apWeaponPositions[iWeapon]; }
+		CWeapon* GetWeapon(int iWeapon) { GAME_ASSERT(iWeapon >= 0 && iWeapon < m_cWeapons); return m_apWeapons[iWeapon]; }
+		CAttachmentPosition* GetWeaponPosition(int iWeapon) { GAME_ASSERT(iWeapon >= 0 && iWeapon < m_cWeapons); return m_apWeaponPositions[iWeapon]; }
 
 		// Object methods (attachments)
 
 		BaseClass* GetCurrentObject() { return m_apObjects[0]; }
 		int GetNumObjects() { return m_cObjects; }
-		BaseClass* GetObject(int iObject) { _ASSERT(iObject >= 0 && iObject < m_cObjects); return m_apObjects[iObject]; }
-		CAttachmentPosition* GetObjectPosition(int iObject) { _ASSERT(iObject >= 0 && iObject < m_cObjects); return m_apObjectPositions[iObject]; }
+		BaseClass* GetObject(int iObject) { GAME_ASSERT(iObject >= 0 && iObject < m_cObjects); return m_apObjects[iObject]; }
+		CAttachmentPosition* GetObjectPosition(int iObject) { GAME_ASSERT(iObject >= 0 && iObject < m_cObjects); return m_apObjectPositions[iObject]; }
 
 		// Damage stuff
 

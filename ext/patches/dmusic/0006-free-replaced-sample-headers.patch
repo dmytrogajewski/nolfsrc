@@ -1,0 +1,13 @@
+diff --git a/src/util/Tsf.c b/src/util/Tsf.c
+index 26c0029..e7549e3 100644
+--- a/src/util/Tsf.c
++++ b/src/util/Tsf.c
+@@ -613,6 +613,8 @@ static DmResult Dm_createHydra(DmDls* dls, struct tsf_hydra* hydra, float** pcm,
+ 	hydra->ibags[hydra->ibagNum - 1].instGenNdx = hydra->igenNum - 1;
+ 	hydra->ibags[hydra->ibagNum - 1].instModNdx = hydra->imodNum - 1;
+ 
++	// The decoded sample headers replace the skeleton's.
++	Dm_free(hydra->shdrs);
+ 	hydra->shdrNum = default_shdrs_len;
+ 	hydra->shdrs = default_shdrs;
+ 

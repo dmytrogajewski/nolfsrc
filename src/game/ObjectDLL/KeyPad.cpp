@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "KeyPad.h"
 #include "SoundMgr.h"
 #include "ServerUtilities.h"
@@ -169,7 +171,9 @@ uint32 KeyPad::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD h
             ILTCommon* pCommon = g_pLTServer->Common();
 			if (!pCommon) return 0;
 
-			const char *szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+
+			const char* szMsg = szMsgStorage.c_str();
 
 			// ConParse does not destroy szMsg, so this is safe
 			ConParse parse;
@@ -179,7 +183,7 @@ uint32 KeyPad::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD h
 			{
 				if (parse.m_nArgs > 0 && parse.m_Args[0])
 				{
-					if (_stricmp(parse.m_Args[0], s_szGadget) == 0)
+					if (nolf::ascii_compare(parse.m_Args[0], s_szGadget) == 0)
 					{
 						HandleGadgetMsg(parse);
 					}

@@ -1,3 +1,5 @@
+#include "engine/portable/text.h"
+#include "engine/portable/string.h"
 //*********************************************************************************
 //*********************************************************************************
 // Project:		Lith Tech Font Manager
@@ -15,17 +17,6 @@
 // and control flow, but SP3-vs-SP6 differences in callee-saved register
 // tie-breaking (ebx/ebp swapped), deferred-block emission order, and one
 // spilled-vs-registered value (verified instruction-by-instruction).
-
-//*********************************************************************************
-
-#ifdef NOLFSRC_MODERN
-// A new version, so a FontData.fnt the scan wrote before the modern build
-// fixed HUD_CHOOSER.pcx's shadow colour (M-P4-10) is dropped and rescanned:
-// the cache is matched on the name and width alone, which did not change.
-#define LTF_OFFSETS_VERSION		1.02f
-#else
-#define LTF_OFFSETS_VERSION		1.01f
-#endif
 
 //*********************************************************************************
 
@@ -66,6 +57,7 @@ LithBitmapFont::~LithBitmapFont()
 
 LTBOOL LithBitmapFont::Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS)
 {
+	if (!lfCS || !lfCS->szFontBitmap || std::strlen(lfCS->szFontBitmap) >= LTF_OFFSETS_NAME_SIZE) return LTFALSE;
 	if (LithFont::Init(pClient, lfCS))
 	{
 		// Create the font surface
@@ -80,7 +72,7 @@ LTBOOL LithBitmapFont::Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS)
 				m_rRect.Init(0, 0, 0, m_nSurfHeight);
 
 				strcpy(m_lfOD.szRefName, lfCS->szFontBitmap);
-				strupr(m_lfOD.szRefName);
+				nolf::ascii_uppercase(m_lfOD.szRefName);
 
 				m_nGroupFlags = lfCS->nGroupFlags;
 
@@ -90,6 +82,7 @@ LTBOOL LithBitmapFont::Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS)
 					m_hTransColor = lfCS->hTransColor;
 				}
 
+				m_OffsetCacheKey = nolf::font_offset_key(*m_pClient,lfCS->szFontBitmap,m_nSurfWidth,m_nSurfHeight,m_nGroupFlags,lfCS->nFixedPitch);
 				if (!LoadOffsets())
 				{
 					if (!CalcOffsets(lfCS->nFixedPitch))
@@ -115,6 +108,7 @@ LTBOOL LithBitmapFont::Init(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS)
 
 void LithBitmapFont::Free()
 {
+	m_OffsetCacheKey.reset();
 	if (m_pClient)
 	{
 		if (m_pFont)
@@ -233,14 +227,8 @@ void LithBitmapFont::SetDrawData(HSURFACE pDest, char *szString, LITHFONTDRAWDAT
 	if (!lfDD)
 		return;
 
-	m_pDest = pDest;
-	m_szString = szString;
-
-	if (index >= 0)
-	{
-		if (index < (int)strlen(szString))
-			szString[index] = '\0';
-	}
+    m_pDest = pDest;
+    m_szString = PrepareText(szString,index);
 
 	m_lfDD = lfDD;
 	m_dwFlags = lfDD->dwFlags;
@@ -265,11 +253,8 @@ void LithBitmapFont::SetDrawData(HSURFACE pDest, char *szString, LITHFONTDRAWDAT
 		m_nY += lfDD->nYOffset;
 	}
 
-	// Only reformat the string if something has changed
-	if (m_lfDD->bForceFormat || !m_lfSD->szPrevString || m_lfSD->szPrevString != szString)
-	{
-		m_lfSD->szPrevString = szString;
-
+    if (UpdateLayoutIdentity(*m_lfSD,*m_lfDD,m_dwFlags))
+    {
 		m_nExtraLetterSpace = m_lfDD->nLetterSpace;
 
 		if (m_dwFlags & LTF_DRAW_FORMATTED)
@@ -300,51 +285,9 @@ void LithBitmapFont::ClearDrawData()
 // too (shipped zeroes its slot before the call), so the body sits in if (pFile).
 LTBOOL LithBitmapFont::LoadOffsets()
 {
-	if (!m_pClient)
-		return LTFALSE;
-
-	LTBOOL bFound = LTFALSE;
-
-	FILE *pFile = fopen(LTF_OFFSETS_FILENAME, "rb");
-	if (pFile)
-	{
-		// Check the version of the file
-		LTFLOAT fVersion;
-		fread(&fVersion, sizeof(LTFLOAT), 1, pFile);
-
-		if (fVersion != LTF_OFFSETS_VERSION)
-		{
-			fclose(pFile);
-			remove(LTF_OFFSETS_FILENAME);
-			return LTFALSE;
-		}
-
-		// Read the number of fonts in the file
-		uint32 nNumFonts;
-		fread(&nNumFonts, sizeof(uint32), 1, pFile);
-
-		LITHFONTOFFSETDATA *pData = new LITHFONTOFFSETDATA[nNumFonts];
-
-		fread(pData, sizeof(LITHFONTOFFSETDATA), nNumFonts, pFile);
-
-		// Find the font in the list
-		for (int i = 0; i < (int)nNumFonts; i++)
-		{
-			if (_mbscmp((unsigned char*)pData[i].szRefName, (unsigned char*)m_lfOD.szRefName) == 0)
-			{
-				if (m_nSurfWidth == pData[i].pOffsets[LTF_NUM_TOTAL_CHARS])
-				{
-					m_lfOD = pData[i];
-					bFound = LTTRUE;
-				}
-			}
-		}
-
-		delete[] pData;
-		fclose(pFile);
-	}
-
-	return bFound;
+    if (!m_pClient || !m_OffsetCacheKey) return LTFALSE;
+    try { return nolf::FontOffsetCache().load(*m_OffsetCacheKey,m_lfOD); }
+    catch (const std::exception&) { return LTFALSE; }
 }
 
 //*********************************************************************************
@@ -377,6 +320,7 @@ LTBOOL LithBitmapFont::CalcOffsets(uint8 nPitch)
 		if (m_nGroupFlags & LTF_INCLUDE_LOWERCASE)	nNumChars += LTF_NUM_LETTERS;
 		if (m_nGroupFlags & LTF_INCLUDE_SYMBOLS_4)	nNumChars += LTF_NUM_SYMBOLS_4;
 
+		if (!nNumChars) return LTFALSE;
 		if (m_nSurfWidth / nNumChars != nPitch)
 			m_pClient->CPrint("LithFontMgr! ERROR!! - A fixed pitch calculation was incorrect on font %s", m_szRefName);
 		else
@@ -506,67 +450,9 @@ uint32 LithBitmapFont::FindOffset(uint32 nStartPos)
 
 LTBOOL LithBitmapFont::SaveOffsets()
 {
-	if (!m_pClient)
-		return LTFALSE;
-
-	LTBOOL bFound = LTFALSE;
-	LTFLOAT fVersion = LTF_OFFSETS_VERSION;
-	uint32 nNumFonts = 0;
-	LITHFONTOFFSETDATA *pData = LTNULL;
-
-	FILE *pFile = fopen(LTF_OFFSETS_FILENAME, "rb");
-	if (pFile)
-	{
-		fread(&fVersion, sizeof(LTFLOAT), 1, pFile);
-		fread(&nNumFonts, sizeof(uint32), 1, pFile);
-
-		pData = new LITHFONTOFFSETDATA[nNumFonts];
-
-		fread(pData, sizeof(LITHFONTOFFSETDATA), nNumFonts, pFile);
-
-		// Replace the data for this font if it's already in the list
-		for (int i = 0; i < (int)nNumFonts; i++)
-		{
-			if (_mbscmp((unsigned char*)pData[i].szRefName, (unsigned char*)m_lfOD.szRefName) == 0)
-			{
-				pData[i] = m_lfOD;
-				bFound = LTTRUE;
-			}
-		}
-
-		fclose(pFile);
-	}
-
-	fVersion = LTF_OFFSETS_VERSION;
-	remove(LTF_OFFSETS_FILENAME);
-
-	pFile = fopen(LTF_OFFSETS_FILENAME, "wb");
-	if (pFile)
-	{
-		if (bFound)
-		{
-			fseek(pFile, 0, SEEK_SET);
-			fwrite(&fVersion, sizeof(LTFLOAT), 1, pFile);
-			fwrite(&nNumFonts, sizeof(uint32), 1, pFile);
-			fwrite(pData, sizeof(LITHFONTOFFSETDATA), nNumFonts, pFile);
-		}
-		else
-		{
-			nNumFonts++;
-			fseek(pFile, 0, SEEK_SET);
-			fwrite(&fVersion, sizeof(LTFLOAT), 1, pFile);
-			fwrite(&nNumFonts, sizeof(uint32), 1, pFile);
-			fwrite(pData, sizeof(LITHFONTOFFSETDATA), nNumFonts - 1, pFile);
-			fwrite(&m_lfOD, sizeof(LITHFONTOFFSETDATA), 1, pFile);
-		}
-
-		fclose(pFile);
-	}
-
-	if (pData)
-		delete[] pData;
-
-	return LTTRUE;
+    if (!m_pClient || !m_OffsetCacheKey) return LTFALSE;
+    try { return nolf::FontOffsetCache().store(*m_OffsetCacheKey,m_lfOD); }
+    catch (const std::exception&) { return LTFALSE; }
 }
 
 //*********************************************************************************
@@ -646,7 +532,7 @@ void LithBitmapFont::SetFormatData(uint32 nFormatWidth)
 	m_lfFD->nNumLines = 0;
 	m_lfFD->pIndex[0] = 0;
 
-	while (m_szString[nIndex] != '\0')
+	while (m_szString[nIndex] != '\0' && m_lfFD->nNumLines+1 < LTF_MAX_FORMAT_LINES)
 	{
 		char c = m_szString[nIndex];
 
@@ -697,7 +583,7 @@ void LithBitmapFont::SetFormatData(uint32 nFormatWidth)
 		}
 	}
 
-	if (nWidth)
+	if (nWidth && m_lfFD->nNumLines+1 < LTF_MAX_FORMAT_LINES)
 	{
 		// Add the last line
 		m_lfFD->pIndex[m_lfFD->nNumLines+1] = nIndex;
@@ -716,10 +602,10 @@ void LithBitmapFont::SetFormatData(uint32 nFormatWidth)
 		if (m_dwFlags & LTF_TIMED_LETTERS)
 			m_lfSD->fTotalDrawTime += m_lfFD->nNumChars * m_lfDD->fLetterDelay;
 
-		if (m_dwFlags & LTF_TIMED_LINES)
+		if ((m_dwFlags & LTF_TIMED_LINES) && m_lfFD->nNumLines > 0)
 			m_lfSD->fTotalDrawTime += (m_lfFD->nNumLines - 1) * m_lfDD->fLineDelay;
 
-		if (m_dwFlags & LTF_TIMED_SCROLL)
+		if ((m_dwFlags & LTF_TIMED_SCROLL) && m_lfFD->nNumLines > m_nWaitLines)
 			m_lfSD->fTotalDrawTime += (m_lfFD->nNumLines - m_nWaitLines) * m_lfDD->fLineScrollTime;
 
 		for (uint32 i = 0; i < m_lfFD->nNumLines; i++)
@@ -733,7 +619,7 @@ void LithBitmapFont::SetFormatData(uint32 nFormatWidth)
 
 void LithBitmapFont::Draw_Method_Normal()
 {
-	if (!m_lfFD)
+	if (!m_lfFD || !m_lfFD->nNumLines)
 		return;
 
 	int nLineHeight = m_lfDD->nLineSpace + m_nHeight;
@@ -755,7 +641,7 @@ void LithBitmapFont::Draw_Method_Normal()
 		uint32 nStartIndex = m_lfFD->pIndex[i];
 		uint32 nEndIndex = m_lfFD->pIndex[i+1];
 
-		int x;
+		int x = m_nX;
 		switch (m_byJustify)
 		{
 			case LTF_JUSTIFY_LEFT:		x = m_nX;					break;
@@ -795,7 +681,7 @@ void LithBitmapFont::Draw_Method_Normal()
 // high-dword store; the allocation is unchanged.
 void LithBitmapFont::Draw_Method_Timed()
 {
-	if (!m_lfFD)
+	if (!m_lfFD || !m_lfFD->nNumLines)
 		return;
 
 	if (!m_lfDD)
@@ -833,7 +719,7 @@ void LithBitmapFont::Draw_Method_Timed()
 	}
 
 	// Figure out the time at which the current line started
-	for (i = 1; i < (uint32)nCurLine; i++)
+	for (uint32 i = 1; i < (uint32)nCurLine; i++)
 	{
 		if (m_dwFlags & LTF_TIMED_LETTERS)
 			fLineTime += m_lfFD->pTimes[i-1];
@@ -881,14 +767,14 @@ void LithBitmapFont::Draw_Method_Timed()
 	}
 
 	// Draw each line
-	for (i = 0; i < (uint32)nCurLine; i++)
+	for (uint32 i = 0; i < (uint32)nCurLine; i++)
 	{
 		uint32 nEndIndex = m_lfFD->pIndex[i+1];
 		uint32 nStartIndex = m_lfFD->pIndex[i];
 		uint32 nWidth = m_lfFD->pWidths[i];
-		int x;
+		int x = m_nX;
 
-		if ((m_dwFlags & LTF_TIMED_LETTERS) && i == (uint32)nCurLine - 1 && fElapsed < m_lfSD->fTotalDrawTime)
+		if ((m_dwFlags & LTF_TIMED_LETTERS) && m_lfFD->pTimes[i] > 0.0f && i == (uint32)nCurLine - 1 && fElapsed < m_lfSD->fTotalDrawTime)
 		{
 			// This line is still updating... draw a partial line
 			uint32 nIndex = nStartIndex + (uint32)((fElapsed - fLineTime) / m_lfFD->pTimes[i] * (nEndIndex - nStartIndex));

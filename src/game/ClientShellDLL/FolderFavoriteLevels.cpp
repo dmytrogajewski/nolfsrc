@@ -1,7 +1,7 @@
 // FolderFavoriteLevels.cpp: implementation of the CFolderFavoriteLevels class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderFavoriteLevels.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

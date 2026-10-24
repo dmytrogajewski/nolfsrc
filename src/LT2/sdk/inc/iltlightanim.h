@@ -12,7 +12,7 @@
 	#define LIGHTANIMFRAME_NONE	0xFFFFFFFF
 
 	// NOTE: you can write HLIGHTANIMs to messages as uint32's.
-	typedef unsigned long HLIGHTANIM;
+	typedef uint32 HLIGHTANIM;
 
 
 	// LightAnim info;

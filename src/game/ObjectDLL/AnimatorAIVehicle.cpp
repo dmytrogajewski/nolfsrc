@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "ObjectMsgs.h"
 #include "MsgIDs.h"
 #include "SFXMsgIds.h"
@@ -39,7 +41,7 @@ CAnimatorAIVehicle::~CAnimatorAIVehicle()
     LTRESULT dwResult;
 
     dwResult = g_pModelLT->RemoveTracker(m_hObject, m_aAniTrackers[m_eAniTrackerFire].m_pAnimTracker);
-	_ASSERT(LT_OK == dwResult);
+	GAME_ASSERT(LT_OK == dwResult);
 }
 
 // ----------------------------------------------------------------------- //
@@ -138,7 +140,7 @@ void CAnimatorAIVehicle::Update()
 	}
 	else
 	{
-		_ASSERT(!"CAnimatorAIVehicle::Update - Main ani not set!");
+		GAME_ASSERT(!"CAnimatorAIVehicle::Update - Main ani not set!");
 	}
 
 	AniAIVehicleFire* pAniAIVehicleFire = m_apAniAIVehicleFires[m_eFire];
@@ -148,7 +150,7 @@ void CAnimatorAIVehicle::Update()
 	}
 	else
 	{
-		_ASSERT(!"CAnimatorAIVehicle::Update - No firing animation!");
+		GAME_ASSERT(!"CAnimatorAIVehicle::Update - No firing animation!");
 	}
 
 	// Record the state etc
@@ -184,7 +186,7 @@ void CAnimatorAIVehicle::ResetAniTracker(AniTracker eAniTracker)
 	}
 	else
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 	}
     g_pLTServer->EndMessage(hMessage);
 
@@ -202,7 +204,7 @@ LTBOOL CAnimatorAIVehicle::SetDims(HMODELANIM hAni)
 {
     LTVector vDims;
     LTRESULT dResult = g_pLTServer->GetModelAnimUserDims(m_hObject, &vDims, hAni);
-    _ASSERT(dResult == LT_OK);
+    GAME_ASSERT(dResult == LT_OK);
 
     CCharacter* pCharacter = (CCharacter*)g_pLTServer->HandleToObject(m_hObject);
 

@@ -1,0 +1,6 @@
+#pragma once
+#include <cstdint>
+namespace nolf {
+// SDK interfaces must match even when sizeof and their public versions agree.
+inline constexpr std::uint64_t sdk_abi_fingerprint = 0x@NOLF_SDK_ABI_HASH@ULL;
+}

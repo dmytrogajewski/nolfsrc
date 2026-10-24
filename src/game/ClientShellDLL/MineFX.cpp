@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "MineFX.h"
 #include "WeaponModel.h"
 #include "VarTrack.h"

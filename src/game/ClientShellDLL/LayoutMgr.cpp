@@ -2,7 +2,8 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "LayoutMgr.h"
 #ifdef NOLFSRC_MODERN
 // M-P3: menus and HUD at any resolution
@@ -786,7 +787,7 @@ INT_CHAR* CLayoutMgr::GetFolderCharacter(eFolderID folderId)
 		int i = 0;
 		while (i < (int)m_CharacterArray.GetSize())
 		{
-			if (stricmp(szTest,m_CharacterArray[i]->szName) == 0)
+			if (nolf::ascii_compare(szTest,m_CharacterArray[i]->szName) == 0)
 				return m_CharacterArray[i];
 			i++;
 		}

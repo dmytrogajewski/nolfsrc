@@ -8,11 +8,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
 #include <stdlib.h>
 #include "ServerUtilities.h"
 #include "iltserver.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "SoundTypes.h"
 #include "CVarTrack.h"
 #include "ObjectMsgs.h"
@@ -233,7 +234,7 @@ void SendTriggerMsgToObject(LPBASECLASS pSender, HOBJECT hObj, HSTRING hMsg)
 			}
 		}
 
-        g_pLTServer->WriteToMessageDWord(hMessage, (uint32)g_pLTServer->GetStringData(hMsg));
+        if (WriteTriggerMessage(hMessage, g_pLTServer->GetStringData(hMsg)) != LT_OK) { hMessage->Release(); return; }
         g_pLTServer->EndMessage(hMessage);
 	}
 }
@@ -280,7 +281,7 @@ void SendTriggerMsgToObject(LPBASECLASS pSender, HOBJECT hObj, LTBOOL, const cha
 			}
 		}
 
-        g_pLTServer->WriteToMessageDWord(hMessage, (uint32)szMessage);
+        if (WriteTriggerMessage(hMessage, szMessage) != LT_OK) { hMessage->Release(); return; }
         g_pLTServer->EndMessage(hMessage);
 	}
 }
@@ -297,7 +298,7 @@ void SendTriggerMsgToObject(LPBASECLASS pSender, HOBJECT hObj, LTBOOL, const cha
 
 LTBOOL IsPlayer( HOBJECT hObject )
 {
-    static HCLASS hPlayerTest = g_pLTServer->GetClass( "CPlayerObj" );
+    const HCLASS hPlayerTest = g_pLTServer->GetClass( "CPlayerObj" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hPlayerTest ));
 }
@@ -314,7 +315,7 @@ LTBOOL IsPlayer( HOBJECT hObject )
 
 LTBOOL IsAI( HOBJECT hObject )
 {
-    static HCLASS hTest  = g_pLTServer->GetClass( "CAI" );
+    const HCLASS hTest  = g_pLTServer->GetClass( "CAI" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hTest ));
 }
@@ -331,7 +332,7 @@ LTBOOL IsAI( HOBJECT hObject )
 
 LTBOOL IsDog ( HOBJECT hObject )
 {
-    static HCLASS hTest  = g_pLTServer->GetClass( "AI_Dog" );
+    const HCLASS hTest  = g_pLTServer->GetClass( "AI_Dog" );
     HCLASS hClass = g_pLTServer->GetObjectClass(hObject);
     return g_pLTServer->IsKindOf(hClass, hTest);
 }
@@ -348,7 +349,7 @@ LTBOOL IsDog ( HOBJECT hObject )
 
 LTBOOL IsVehicle( HOBJECT hObject )
 {
-    static HCLASS hTest  = g_pLTServer->GetClass( "Vehicle" );
+    const HCLASS hTest  = g_pLTServer->GetClass( "Vehicle" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hTest ));
 }
@@ -365,7 +366,7 @@ LTBOOL IsVehicle( HOBJECT hObject )
 
 LTBOOL IsCharacter( HOBJECT hObject )
 {
-    static HCLASS hCharacterTest = g_pLTServer->GetClass( "CCharacter" );
+    const HCLASS hCharacterTest = g_pLTServer->GetClass( "CCharacter" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hCharacterTest ));
 }
@@ -382,7 +383,7 @@ LTBOOL IsCharacter( HOBJECT hObject )
 
 LTBOOL IsCharacterHitBox( HOBJECT hObject )
 {
-    static HCLASS hTest  = g_pLTServer->GetClass( "CCharacterHitBox" );
+    const HCLASS hTest  = g_pLTServer->GetClass( "CCharacterHitBox" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hTest ));
 }
@@ -399,7 +400,7 @@ LTBOOL IsCharacterHitBox( HOBJECT hObject )
 
 LTBOOL IsBody( HOBJECT hObject )
 {
-    static HCLASS hTest  = g_pLTServer->GetClass( "Body" );
+    const HCLASS hTest  = g_pLTServer->GetClass( "Body" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hTest ));
 }
@@ -416,7 +417,7 @@ LTBOOL IsBody( HOBJECT hObject )
 
 LTBOOL IsGameBase( HOBJECT hObject )
 {
-    static HCLASS hTest = g_pLTServer->GetClass( "GameBase" );
+    const HCLASS hTest = g_pLTServer->GetClass( "GameBase" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hTest ));
 }
@@ -658,7 +659,7 @@ void WriteConsoleString(char* sKey, char* sValue)
     if (g_pLTServer)
 	{
 		char sTemp[256];
-        wsprintf(sTemp, "+%s \"%s\"", sKey, sValue);
+        snprintf(sTemp, sizeof(sTemp), "+%s \"%s\"", sKey, sValue);
         g_pLTServer->RunGameConString(sTemp);
 	}
 }
@@ -668,7 +669,7 @@ void WriteConsoleInt(char* sKey, int nValue)
     if (g_pLTServer)
 	{
 		char sTemp[256];
-		wsprintf(sTemp, "+%s %i", sKey, nValue);
+		snprintf(sTemp, sizeof(sTemp), "+%s %i", sKey, nValue);
         g_pLTServer->RunGameConString(sTemp);
 	}
 }

@@ -1,0 +1,7 @@
+NOLF_FONT_API(CreateFont)
+NOLF_FONT_API(DeleteFont)
+NOLF_FONT_API(SetFontExtraSpace)
+NOLF_FONT_API(GetFontExtraSpace)
+NOLF_FONT_API(CreateSurfaceFromString)
+NOLF_FONT_API(GetStringDimensions)
+NOLF_FONT_API(DrawStringToSurface)

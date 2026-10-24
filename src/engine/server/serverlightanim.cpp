@@ -20,17 +20,9 @@
 // — /O1's four-byte spelling of a -1 store. The reference parameter is
 // loaded into a callee-saved register before the call and used again after
 // it, which is what one reference used twice gives.
-class CWorldLightAnims
-{
-public:
-	// slot 0: nonzero if the world has an animation of that name, with its
-	// handle written through the second argument (name ours).
-	virtual LTBOOL FindLightAnim(const char* pName, HLIGHTANIM* phLightAnim) = 0;
-};
-
 LTRESULT ServerLightAnimLT::FindLightAnim(const char* pName, HLIGHTANIM& hLightAnim)
 {
-	if (((CWorldLightAnims*)&m_pServerMgr->m_World)->FindLightAnim(pName, &hLightAnim))
+	if (m_pServerMgr->m_World.FindLightAnim(pName, &hLightAnim))
 		return LT_OK;
 
 	hLightAnim = (HLIGHTANIM)-1;
@@ -78,118 +70,6 @@ LTRESULT ServerLightAnimLT::SetLightAnimInfo(HLIGHTANIM hLightAnim, LAInfo& info
 }
 
 
-// ---- the record and the caller's view ------------------------------------ //
-
-// 0x100129da — everything a light animation can be asked about. The shadow-map
-// flag comes out with the rest even though nothing can put it back: it was
-// fixed when the animation was baked.
-void la_GetInfo(LightAnim* pAnim, LAInfo* pInfo)
-{
-	pInfo->m_bShadowMap = pAnim->m_bShadowMap;
-	pInfo->m_iFrames[0] = pAnim->m_iFrames[0];
-	pInfo->m_iFrames[1] = pAnim->m_iFrames[1];
-	pInfo->m_fPercentBetween = pAnim->m_fPercentBetween;
-	pInfo->m_fBlendPercent = pAnim->m_fBlendPercent;
-	pInfo->m_vLightPos = pAnim->m_vLightPos;
-	pInfo->m_vLightColor = pAnim->m_vLightColor;
-	pInfo->m_fLightRadius = pAnim->m_fLightRadius;
-}
-
-// 0x10012ac3 — what about an animation the caller's LAInfo would change, as a
-// bit per field, and whether that is anything at all.
-//
-// Nothing is compared exactly: every float goes through a quantization first,
-// so a change too small for the wire format to carry is not a change. The
-// frame pair is the exception — those are integers and compare directly.
-//
-// Read off the bytes rather than guessed:
-//
-//   * the quantizer is `(int)(x * 32.0f)` for the two percentages and a bare
-//     `(int)x` for the radius. The 32.0f is loaded once into %st(1) and four
-//     `fmul %st(1),%st` share it, which is VC6 commoning the constant across
-//     four separate `* 32.0f` in the source, not one hoisted local.
-//   * the position and colour go through 0x10012a59 with scales of 10.0 and
-//     255.0 — the .rdata operands are doubles, and 255.0 is the range the SDK
-//     header documents for the colour.
-//   * the first flag is `movl $0x1,(%eax)` where the other five are `orl`.
-//     That is VC6 folding `|= 1` into a store because the zeroing three
-//     instructions earlier is still the last thing to have touched the word;
-//     the later ones reload the pointer because __ftol clobbers eax.
-//   * the position, colour and radius are only looked at for a shadow-mapped
-//     animation (`cmpl $0x0,0x20(%esi)` jumps straight to the return),
-//     matching la_SetInfo, which cannot change the flag itself.
-LTBOOL la_CompareInfo(LightAnim* pAnim, LAInfo* pInfo, uint32* pChangeFlags)
-{
-	*pChangeFlags = 0;
-
-	if (pAnim->m_iFrames[0] != pInfo->m_iFrames[0] ||
-	    pAnim->m_iFrames[1] != pInfo->m_iFrames[1])
-	{
-		*pChangeFlags |= 1;
-	}
-
-	if ((int)(pAnim->m_fPercentBetween * 32.0f) !=
-	    (int)(pInfo->m_fPercentBetween * 32.0f))
-	{
-		*pChangeFlags |= 2;
-	}
-
-	if ((int)(pAnim->m_fBlendPercent * 32.0f) !=
-	    (int)(pInfo->m_fBlendPercent * 32.0f))
-	{
-		*pChangeFlags |= 4;
-	}
-
-	if (pAnim->m_bShadowMap)
-	{
-		if (la_QuantizedVecDiffers(&pAnim->m_vLightPos, &pInfo->m_vLightPos, 10.0f))
-			*pChangeFlags |= 8;
-
-		if (la_QuantizedVecDiffers(&pAnim->m_vLightColor, &pInfo->m_vLightColor, 255.0f))
-			*pChangeFlags |= 0x10;
-
-		if ((int)pAnim->m_fLightRadius != (int)pInfo->m_fLightRadius)
-			*pChangeFlags |= 0x20;
-	}
-
-	return *pChangeFlags != 0;
-}
-
-// 0x10012a1c — and back the other way, without the shadow-map flag.
-void la_SetInfo(LightAnim* pAnim, LAInfo* pInfo)
-{
-	pAnim->m_iFrames[0] = pInfo->m_iFrames[0];
-	pAnim->m_iFrames[1] = pInfo->m_iFrames[1];
-	pAnim->m_fPercentBetween = pInfo->m_fPercentBetween;
-	pAnim->m_fBlendPercent = pInfo->m_fBlendPercent;
-	pAnim->m_vLightPos = pInfo->m_vLightPos;
-	pAnim->m_vLightColor = pInfo->m_vLightColor;
-	pAnim->m_fLightRadius = pInfo->m_fLightRadius;
-}
-
-// 0x10012a59 — the position/colour half of the comparison above: quantize
-// both vectors by the same scale and answer whether any component lands on a
-// different integer.
-//
-// The scale is a double, not a float: `fmull 0x10(%ebp)` reads eight bytes
-// and the caller pushes eight, so `pA->x * fScale` widens the component
-// rather than narrowing the scale.
-//
-// One shared `push $1; pop %eax` serves all three failures, which is the
-// OR-merged condition and not three separate returns.
-int la_QuantizedVecDiffers(LTVector* pA, LTVector* pB, double fScale)
-{
-	if ((int)(pA->x * fScale) != (int)(pB->x * fScale) ||
-	    (int)(pA->y * fScale) != (int)(pB->y * fScale) ||
-	    (int)(pA->z * fScale) != (int)(pB->z * fScale))
-	{
-		return 1;
-	}
-
-	return 0;
-}
-
-
 // 0x1002896d — is there already a queued change for this animation on this
 // client? The queue is short and unsorted, so it is a linear walk; the index
 // is written only on a hit and the answer is a plain int (`xor %eax,%eax` for
@@ -204,25 +84,6 @@ int la_QuantizedVecDiffers(LTVector* pA, LTVector* pB, double fScale)
 // lithtech's /O2 copy (0x00466610) hoists it as `mov 0xc(%esp),%esi` (a
 // uint16 parameter gives `mov 0xc(%esp),%si`, one byte longer), and the
 // caller passes its HLIGHTANIM uncast (server.dll identical either way).
-int la_FindClientChange(Client* pClient, uint32 hLightAnim, uint32* pnIndex)
-{
-	CLAClient* pLAClient = (CLAClient*)pClient;
-	uint32     i;
-
-	for (i = 0; i < pLAClient->m_nChanges; i++)
-	{
-		if (pLAClient->m_Changes[i].m_hLightAnim == (uint16)hLightAnim)
-		{
-			*pnIndex = i;
-
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
-
 // 0x100289a2 — every client that is listening gets told, by having the change
 // queued on it. An animation index the world does not have is dropped before
 // the walk even starts.
@@ -235,30 +96,18 @@ int la_FindClientChange(Client* pClient, uint32 hLightAnim, uint32* pnIndex)
 void sm_LightAnimChanged(CServerMgr* pServerMgr, HLIGHTANIM hLightAnim,
                          uint32 dwChangeFlags)
 {
-	if (hLightAnim >= pServerMgr->m_nLightAnims)
+	if (hLightAnim > UINT16_MAX || hLightAnim >= pServerMgr->m_nLightAnims)
 		return;
 
 	LTLink* pCur = pServerMgr->m_ClientList.m_Head.m_pNext;
 
 	while (pCur != &pServerMgr->m_ClientList.m_Head)
 	{
-		CLAClient* pClient = (CLAClient*)pCur->m_pData;
-		uint32     nIndex;
-
-		if (la_FindClientChange((Client*)pClient, hLightAnim, &nIndex))
-		{
-			pClient->m_Changes[nIndex].m_ChangeFlags |= dwChangeFlags;
-		}
-		else
-		{
-			if (pClient->m_nChanges >= MAX_CLIENTLACHANGES)
-				sm_Unknown26755(pServerMgr, (Client*)pClient);
-
-			pClient->m_Changes[pClient->m_nChanges].m_hLightAnim = hLightAnim;
-			pClient->m_Changes[pClient->m_nChanges].m_ChangeFlags = dwChangeFlags;
-
-			pClient->m_nChanges++;
-		}
+		Client* pClient = static_cast<Client*>(pCur->m_pData);
+        if (!pClient->QueueLightChange(hLightAnim,dwChangeFlags)) {
+            sm_Unknown26755(pServerMgr,pClient);
+            pClient->QueueLightChange(hLightAnim,dwChangeFlags);
+        }
 
 		pCur = pCur->m_pNext;
 	}
@@ -322,7 +171,7 @@ void la_WriteChange(CServerMgr* pMgr, LightAnim* pAnim, uint32 hLightAnim,
 	if (nChangeFlags & 8)
 	{
 		lmsg_WriteCompPos(&pMsg->m_Write, &pAnim->m_vLightPos,
-		                  (CPosRef*)&pMgr->m_World);
+		                  pMgr->m_World.PositionReference());
 	}
 
 	// The colour bytes go through CPacket::WriteType itself, not WriteByte:

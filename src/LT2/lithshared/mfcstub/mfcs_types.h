@@ -3,7 +3,9 @@
 #ifndef __MFCS_TYPES_H__
 #define __MFCS_TYPES_H__
 
-#include "..\stdlith\stdlith.h"
+#include "../stdlith/stdlithdefs.h"
+#include "../stdlith/dynarray.h"
+#include "../stdlith/linklist.h"
 
 // string types
 typedef const char *LPCTSTR;

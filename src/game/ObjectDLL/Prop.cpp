@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Prop.h"
 #include "ServerUtilities.h"
 #include "ClientServerShared.h"
@@ -56,7 +58,7 @@ LTRESULT CPropPlugin::PreHook_EditStringList(
 	{
 		return LT_OK;
 	}
-	else if (_strcmpi("DetailLevel", szPropName) == 0)
+	else if (nolf::ascii_compare("DetailLevel", szPropName) == 0)
 	{
 		strcpy(aszStrings[(*pcStrings)++], "Low");
 		strcpy(aszStrings[(*pcStrings)++], "Medium");
@@ -239,7 +241,8 @@ uint32 Prop::ObjectMessageFn( HOBJECT hSender, uint32 messageID, HMESSAGEREAD hR
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -479,12 +482,12 @@ void Prop::TriggerMsg(HOBJECT hSender, const char* szMsg)
 		int nArgs;
         bMore = g_pLTServer->Parse(pCommand, &s_pCommandPos, s_tokenSpace, s_pTokens, &nArgs);
 
-		if ( !_stricmp(s_pTokens[0], "ANIM") )
+		if ( !nolf::ascii_compare(s_pTokens[0], "ANIM") )
 		{
             g_pLTServer->SetModelLooping(m_hObject, LTFALSE);
             g_pLTServer->SetModelAnimation(m_hObject, g_pLTServer->GetAnimIndex(m_hObject, s_pTokens[1]));
 		}
-		else if ( !_stricmp(s_pTokens[0], "ANIMLOOP") )
+		else if ( !nolf::ascii_compare(s_pTokens[0], "ANIMLOOP") )
 		{
             g_pLTServer->SetModelLooping(m_hObject, LTTRUE);
             g_pLTServer->SetModelAnimation(m_hObject, g_pLTServer->GetAnimIndex(m_hObject, s_pTokens[1]));
@@ -680,7 +683,7 @@ LTBOOL Prop::HandleGotyCommand(char* pCmd)
 		{
 			for (int i=0; i < c_nNumGotyCmds; i++)
 			{
-				if (_stricmp(s_GotyCmds[i].pCmdName, parse.m_Args[0]) == 0)
+				if (nolf::ascii_compare(s_GotyCmds[i].pCmdName, parse.m_Args[0]) == 0)
 				{
 					return s_GotyCmds[i].pProcessFn(this, &parse);
 				}

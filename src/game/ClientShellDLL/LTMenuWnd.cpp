@@ -9,9 +9,9 @@
 ;	COMMENT:		Copyright (c) 2000, Monolith Productions, Inc.
 ;
 ****************************************************************************/
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "LTMenuWnd.h"
-#include "LTGuiMgr.h"
+#include "ltguimgr.h"
 #include "LTWndMessages.h"
 
 #include "GameClientShell.h"
@@ -413,7 +413,7 @@ BOOL CLTMenuWnd::SendMessage(CLTWnd* pSender, int nMsg, int nParam1,int nParam2)
 			if(nParam2 >= m_nNumItems)
 				return TRUE;
 
-			m_byActivatedSelection = BYTE(nParam2 + 1);
+			m_byActivatedSelection = static_cast<uint8>(nParam2 + 1);
 			TRACE("Choice # %d selected!\n",m_byActivatedSelection);
 
 			return TRUE;
@@ -480,7 +480,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -490,7 +490,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -500,7 +500,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -510,7 +510,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -520,7 +520,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -530,7 +530,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -540,7 +540,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -550,7 +550,7 @@ BOOL CLTMenuWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTMenuWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}

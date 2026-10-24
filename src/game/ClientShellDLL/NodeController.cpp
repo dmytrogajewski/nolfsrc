@@ -8,12 +8,14 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "SFXMsgIds.h"
 #include "NodeController.h"
 #include "iltmodel.h"
 #include "ilttransform.h"
-#include "CharacterFx.h"
+#include "CharacterFX.h"
 #include "SoundMgr.h"
 #include "VarTrack.h"
 #ifdef NOLFSRC_MODERN
@@ -190,7 +192,7 @@ CNodeController::~CNodeController()
 
 LTBOOL CNodeController::Init(CCharacterFX* pCharacterFX)
 {
-	_ASSERT(pCharacterFX);
+	GAME_ASSERT(pCharacterFX);
     if ( !pCharacterFX ) return LTFALSE;
 
 	if (!g_vtLipSyncMaxRot.IsInitted())
@@ -213,7 +215,7 @@ LTBOOL CNodeController::Init(CCharacterFX* pCharacterFX)
 	HMODELNODE hCurNode = INVALID_MODEL_NODE;
     while ( g_pLTClient->GetNextModelNode(GetCFX()->GetServerObj(), hCurNode, &hCurNode) == LT_OK)
 	{
-		_ASSERT(m_cNodes < MAX_NODES);
+		GAME_ASSERT(m_cNodes < MAX_NODES);
 
 		char szName[64] = "";
         g_pLTClient->GetModelNodeName(GetCFX()->GetServerObj(), hCurNode, szName, 64);
@@ -256,7 +258,7 @@ void CNodeController::Update()
 {
 	// Check to see if we are controlling any nodes, and en/dis-able the callback accordingly
 
-	_ASSERT(m_cNodeControls >= 0);
+	GAME_ASSERT(m_cNodeControls >= 0);
 
 #ifdef NOLFSRC_MODERN
 	// M-P2-10: big head mode needs the callback even with nothing else to control
@@ -319,7 +321,7 @@ void CNodeController::Update()
 					break;
 
 				default:
-                    _ASSERT(LTFALSE);
+                    GAME_ASSERT(LTFALSE);
                     m_aNodeControls[iNodeControl].bValid = LTFALSE;
 					break;
 			}
@@ -1078,7 +1080,7 @@ void CNodeController::HandleNodeConrolLipSync(HSTRING hSound, LTFLOAT fRadius)
 	// Add the node control structure...
 	int iNodeControl = (iCtrl > -1) ? iCtrl : AddNodeControl();
 
-	_ASSERT(iNodeControl >= 0);
+	GAME_ASSERT(iNodeControl >= 0);
 	if ( iNodeControl < 0 )
 		return;
 
@@ -1148,7 +1150,7 @@ void CNodeController::HandleNodeControlScriptMessage(HMESSAGEREAD hMessage)
 		// Add the node control structure...
 		int iNodeControl = AddNodeControl();
 
-		_ASSERT(iNodeControl >= 0);
+		GAME_ASSERT(iNodeControl >= 0);
 		if ( iNodeControl < 0 || g_pModelButeMgr->GetNScriptNumPts((ModelNScript)nScript) < 2)
 			continue;
 
@@ -1204,7 +1206,7 @@ void CNodeController::HandleNodeControlHeadFollowObjMessage(HMESSAGEREAD hMessag
 
 	// Add the node control structure...
 	int iNodeControl = (iCtrl > -1) ? iCtrl : AddNodeControl();
-	_ASSERT(iNodeControl >= 0);
+	GAME_ASSERT(iNodeControl >= 0);
 	if ( iNodeControl < 0 )
 		return;
 
@@ -1275,7 +1277,7 @@ void CNodeController::HandleNodeControlHeadFollowPosMessage(HMESSAGEREAD hMessag
 
 	// Add the node control structure...
 	int iNodeControl = (iCtrl > -1) ? iCtrl : AddNodeControl();
-	_ASSERT(iNodeControl >= 0);
+	GAME_ASSERT(iNodeControl >= 0);
 	if ( iNodeControl < 0 )
 		return;
 
@@ -1365,7 +1367,7 @@ int CNodeController::AddNodeControl()
 void CNodeController::AddNodeControlRotationTimed(ModelNode eModelNode, const LTVector& vAxis, LTFLOAT fDistance, LTFLOAT fDuration)
 {
 	int iNodeControl = AddNodeControl();
-	_ASSERT(iNodeControl >= 0);
+	GAME_ASSERT(iNodeControl >= 0);
 	if ( iNodeControl < 0 ) return;
 
     m_aNodeControls[iNodeControl].bValid = LTTRUE;
@@ -1391,7 +1393,7 @@ void CNodeController::AddNodeControlRotationTimed(ModelNode eModelNode, const LT
 
 void CNodeController::RemoveNodeControl(int iNodeControl)
 {
-	_ASSERT(!m_aNodeControls[iNodeControl].bValid);
+	GAME_ASSERT(!m_aNodeControls[iNodeControl].bValid);
 
 	m_aNodes[m_aNodeControls[iNodeControl].eModelNode].cControllers--;
 
@@ -1409,7 +1411,7 @@ void CNodeController::RemoveNodeControl(int iNodeControl)
 void CNodeController::NodeControlFn(HOBJECT hObj, HMODELNODE hNode, LTMatrix *pGlobalMat, void *pUserData)
 {
 	CNodeController* pNC = (CNodeController*)pUserData;
-	_ASSERT(pNC);
+	GAME_ASSERT(pNC);
 	if ( !pNC ) return;
 
 	pNC->HandleNodeControl(hObj, hNode, pGlobalMat);

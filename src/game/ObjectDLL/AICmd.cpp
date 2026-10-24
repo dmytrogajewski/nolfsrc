@@ -1,6 +1,7 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "AICmd.h"
 #include "AINodeMgr.h"
 
@@ -104,18 +105,18 @@ class AICmdPlugin : public IObjectPlugin
 
         LTRESULT PreHook_EditStringList(const char* szRezPath, const char* szPropName, char** aszStrings, uint32* pcStrings, const uint32 cMaxStrings, const uint32 cMaxStringLength)
 		{
-			if (_strcmpi("Move", szPropName) == 0)
+			if (nolf::ascii_compare("Move", szPropName) == 0)
 			{
 				strcpy(aszStrings[(*pcStrings)++], "Run");
 				strcpy(aszStrings[(*pcStrings)++], "Walk");
 				strcpy(aszStrings[(*pcStrings)++], "Swim");
 			}
-			else if (_strcmpi("Posture", szPropName) == 0)
+			else if (nolf::ascii_compare("Posture", szPropName) == 0)
 			{
 				strcpy(aszStrings[(*pcStrings)++], "Crouch");
 				strcpy(aszStrings[(*pcStrings)++], "Stand");
 			}
-			else if (_strcmpi("Mood", szPropName) == 0)
+			else if (nolf::ascii_compare("Mood", szPropName) == 0)
 			{
 				strcpy(aszStrings[(*pcStrings)++], "Happy");
 				strcpy(aszStrings[(*pcStrings)++], "Angry");
@@ -124,7 +125,7 @@ class AICmdPlugin : public IObjectPlugin
 				strcpy(aszStrings[(*pcStrings)++], "Agree");
 				strcpy(aszStrings[(*pcStrings)++], "Disagree");
 			}
-			else if (_strcmpi("Task", szPropName) == 0)
+			else if (nolf::ascii_compare("Task", szPropName) == 0)
 			{
 				strcpy(aszStrings[(*pcStrings)++], "Wait");
 				strcpy(aszStrings[(*pcStrings)++], "Clipboard");

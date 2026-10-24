@@ -16,6 +16,10 @@
 #include <math.h>
 #include "ltbasedefs.h"
 #include "ltmatrix.h"
+#include "engine/portable/string.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 // 0x100117ae and 0x100117f2 — a 4x4 from three euler angles, and a matrix's
 // rotation as a quaternion. Both are servermath.h's; declared here because
@@ -208,6 +212,7 @@ void mat_GetEulerVectors(LTVector vAngles, LTVector* pRight, LTVector* pUp,
 void gp_Clear(GenericProp* pProp)
 {
 	pProp->m_Vec.Init();
+	pProp->m_Color.Init();
 	pProp->m_Rotation.Init();
 	pProp->m_String[0] = 0;
 	pProp->m_Long = 0;
@@ -219,11 +224,14 @@ void gp_Clear(GenericProp* pProp)
 // the string setter reaches this one directly once it has a value.
 void gp_SetFloatValue(GenericProp* pProp, float fValue)
 {
-	sprintf(pProp->m_String, "%f", fValue);
+	if (!std::isfinite(fValue)) fValue = 0;
+	snprintf(pProp->m_String, sizeof(pProp->m_String), "%f", fValue);
 
 	pProp->m_Float = fValue;
-	pProp->m_Long = (long)fValue;
-	pProp->m_Bool = (long)fValue;
+	const auto integer = std::clamp(static_cast<double>(fValue),
+	    static_cast<double>(std::numeric_limits<int32>::min()), static_cast<double>(std::numeric_limits<int32>::max()));
+	pProp->m_Long = static_cast<int32>(integer);
+	pProp->m_Bool = static_cast<int32>(integer);
 }
 
 // One setter call per arm, cross-jumped by the compiler into a single call:
@@ -240,15 +248,17 @@ void gp_SetString(GenericProp* pProp, char* pStr)
 	gp_Clear(pProp);
 
 	sscanf(pStr, "%f %f %f", &pProp->m_Vec.x, &pProp->m_Vec.y, &pProp->m_Vec.z);
+	for (int axis = 0; axis < 3; ++axis) if (!std::isfinite(pProp->m_Vec[axis])) pProp->m_Vec[axis] = 0;
 
-	if (stricmp(pStr, "true") == 0)
+	if (nolf::ascii_compare(pStr, "true") == 0)
 		gp_SetFloatValue(pProp, 1.0f);
-	else if (stricmp(pStr, "false") == 0)
+	else if (nolf::ascii_compare(pStr, "false") == 0)
 		gp_SetFloatValue(pProp, 0.0f);
 	else
 		gp_SetFloatValue(pProp, (float)atof(pStr));
 
 	strncpy(pProp->m_String, pStr, MAX_GP_STRING_LEN);
+	pProp->m_String[MAX_GP_STRING_LEN] = 0;
 }
 
 // 0x1001126d — a vector fills both vector fields and its own text.
@@ -256,7 +266,7 @@ void gp_SetVector(GenericProp* pProp, LTVector* pVec)
 {
 	gp_Clear(pProp);
 
-	sprintf(pProp->m_String, "%f %f %f", pVec->x, pVec->y, pVec->z);
+	snprintf(pProp->m_String, sizeof(pProp->m_String), "%f %f %f", pVec->x, pVec->y, pVec->z);
 
 	pProp->m_Vec = *pVec;
 	pProp->m_Color = *pVec;

@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "ProjectileTypes.h"
 #include "ServerUtilities.h"
 #include "DamageTypes.h"
@@ -1033,8 +1035,9 @@ void CCoin::RotateToRest()
 
 		if ( pObj && pObj->m_hObject )
 		{
-			g_pLTServer->SetAcceleration(pObj->m_hObject, &LTVector(0,0,0));
-			g_pLTServer->SetVelocity(pObj->m_hObject, &LTVector(0,0,0));
+			LTVector stopped(0,0,0);
+			g_pLTServer->SetAcceleration(pObj->m_hObject, &stopped);
+			g_pLTServer->SetVelocity(pObj->m_hObject, &stopped);
 		}
 
 		g_pLTServer->SetObjectFlags(m_hObject, g_pLTServer->GetObjectFlags(m_hObject)&~FLAG_VISIBLE);
@@ -1055,7 +1058,7 @@ void CCoin::RotateToRest()
 		cinfo.vPosition = vPosition;
 
 		SURFACE* pSurf = g_pSurfaceMgr->GetSurface(m_eLastHitSurface);
-		_ASSERT(pSurf);
+		GAME_ASSERT(pSurf);
 		if (pSurf)
 		{
 			cinfo.fVolume = pSurf->fMovementNoiseModifier;

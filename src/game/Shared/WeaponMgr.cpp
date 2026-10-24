@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "WeaponMgr.h"
 #include "CommonUtilities.h"
 #include "WeaponFXTypes.h"
@@ -212,6 +215,7 @@ CWeaponMgr::CWeaponMgr()
     m_AmmoList.Init(LTTRUE);
     m_ModList.Init(LTTRUE);
     m_GearList.Init(LTTRUE);
+    m_WeaponAnisList.Init(LTTRUE);
 
     m_pWeaponOrder = LTNULL;
 	m_nFirstPlayerWeapon = 0;
@@ -606,7 +610,7 @@ WEAPON* CWeaponMgr::GetWeapon(char* pWeaponName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pWeaponName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pWeaponName) == 0))
 		{
 			return *pCur;
 		}
@@ -662,7 +666,7 @@ AMMO* CWeaponMgr::GetAmmo(char* pAmmoName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pAmmoName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pAmmoName) == 0))
 		{
 			return *pCur;
 		}
@@ -718,7 +722,7 @@ MOD* CWeaponMgr::GetMod(char* pModName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pModName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pModName) == 0))
 		{
 			return *pCur;
 		}
@@ -774,7 +778,7 @@ GEAR* CWeaponMgr::GetGear(char* pGearName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pGearName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pGearName) == 0))
 		{
 			return *pCur;
 		}
@@ -803,7 +807,7 @@ WEAPONANIS* CWeaponMgr::GetWeaponAnis(char* pAnisName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pAnisName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pAnisName) == 0))
 		{
 			return *pCur;
 		}
@@ -2278,7 +2282,7 @@ void CWeaponMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings,
 
     for (uint32 i=0; i < dwNumWeapons; i++)
 	{
-		_ASSERT(cMaxStrings > (*pcStrings) + 1);
+		GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 		pWeapon = sm_ButeMgr.GetWeapon(i);
         uint32 dwWeaponNameLen = strlen(pWeapon->szName);
@@ -2298,7 +2302,7 @@ void CWeaponMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings,
 			{
 				for (int j=0; j < pWeapon->nNumAmmoTypes; j++)
 				{
-					_ASSERT(cMaxStrings > (*pcStrings) + 1);
+					GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 					AMMO* pAmmo = g_pWeaponMgr->GetAmmo(pWeapon->aAmmoTypes[j]);
 					if (pAmmo && (*pcStrings) + 1 < cMaxStrings)

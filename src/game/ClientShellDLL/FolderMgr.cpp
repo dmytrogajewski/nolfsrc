@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "ClientRes.h"
 #include "FolderMgr.h"
 #include "ClientButeMgr.h"

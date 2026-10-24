@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "BodyState.h"
 #include "Body.h"
 #include "AIVolumeMgr.h"
@@ -56,8 +58,9 @@ void CBodyState::Init(Body* pBody)
 
     g_pLTServer->SetObjectFlags(m_pBody->m_hObject, dwFlags);
 
-    g_pLTServer->SetVelocity(m_pBody->m_hObject, &LTVector(0,0,0));
-    g_pLTServer->SetAcceleration(m_pBody->m_hObject, &LTVector(0,0,0));
+    LTVector stopped(0,0,0);
+    g_pLTServer->SetVelocity(m_pBody->m_hObject, &stopped);
+    g_pLTServer->SetAcceleration(m_pBody->m_hObject, &stopped);
 }
 
 void CBodyState::InitLoad(Body* pBody)
@@ -174,7 +177,7 @@ void CBodyStateStairs::Init(Body* pBody)
     g_pLTServer->GetObjectDims(m_pBody->m_hObject, &vDims);
 
 	CAIVolume* pVolume = g_pAIVolumeMgr->FindContainingVolume(vPos, 64.0f/*vDims.y*/);
-	_ASSERT(pVolume && pVolume->HasStairs());
+	GAME_ASSERT(pVolume && pVolume->HasStairs());
 	if ( !pVolume || !pVolume->HasStairs() )
 	{
 		m_pBody->SetState(eBodyStateNormal);
@@ -354,7 +357,7 @@ void CBodyStateLedge::Init(Body* pBody)
     g_pLTServer->GetObjectDims(m_pBody->m_hObject, &vDims);
 
 	CAIVolume* pVolume = g_pAIVolumeMgr->FindContainingVolume(vPos, 64.0f/*vDims.y*/);
-	_ASSERT(pVolume && pVolume->HasLedge());
+	GAME_ASSERT(pVolume && pVolume->HasLedge());
 	if ( !pVolume || !pVolume->HasLedge() )
 	{
 		m_pBody->SetState(eBodyStateNormal);
@@ -510,7 +513,8 @@ void CBodyStateLedge::Update()
 			dwFlags |= FLAG_GRAVITY;
             g_pLTServer->SetObjectFlags(m_pBody->m_hObject, dwFlags);
 
-			g_pLTServer->SetVelocity(m_pBody->m_hObject, &LTVector(pVolume->GetLedgeDir().x*100.0f,-500,pVolume->GetLedgeDir().y*100.0f));
+			LTVector falling(pVolume->GetLedgeDir().x*100.0f,-500,pVolume->GetLedgeDir().y*100.0f);
+			g_pLTServer->SetVelocity(m_pBody->m_hObject, &falling);
 		}
 	}
 }

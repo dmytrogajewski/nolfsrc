@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "DisplayMeter.h"
 #include "ServerUtilities.h"
 #include "ObjectMsgs.h"
@@ -131,7 +133,8 @@ uint32 DisplayMeter::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGE
 	{
 		case MID_TRIGGER :
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -229,7 +232,7 @@ void DisplayMeter::TriggerMsg(HOBJECT hSender, const char *szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if ((_stricmp(parse.m_Args[0], "show") == 0))
+			if ((nolf::ascii_compare(parse.m_Args[0], "show") == 0))
 			{
 				if (parse.m_nArgs > 1)
 				{
@@ -238,28 +241,28 @@ void DisplayMeter::TriggerMsg(HOBJECT hSender, const char *szMsg)
 				else
 					HandleShow(100);
 			}
-			else if (_stricmp(parse.m_Args[0], "plus") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "plus") == 0)
 			{
 				if (parse.m_nArgs > 1)
 				{
                     HandlePlus((uint8)atoi(parse.m_Args[1]));
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "minus") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "minus") == 0)
 			{
 				if (parse.m_nArgs > 1)
 				{
                     HandleMinus((uint8)atoi(parse.m_Args[1]));
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "set") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "set") == 0)
 			{
 				if (parse.m_nArgs > 1)
 				{
                     HandleSet((uint8)atoi(parse.m_Args[1]));
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "hide") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "hide") == 0)
 			{
 				HandleEnd();
 			}

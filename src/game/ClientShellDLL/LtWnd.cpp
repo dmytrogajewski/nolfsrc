@@ -10,9 +10,9 @@
 ;
 ****************************************************************************/
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "MouseMgr.h"
-#include "LTWnd.h"
+#include "LtWnd.h"
 
 
 #include "InterfaceMgr.h"
@@ -21,8 +21,7 @@
 extern CGameClientShell* g_pGameClientShell;
 
 // Externs
-extern HWND g_hMainWnd;
-extern RECT *g_prcClip;
+#include "engine/client/client_window.h"
 
 // Statics...
 
@@ -843,8 +842,8 @@ BOOL CLTWnd::OnLButtonDown(int xPos, int yPos)
 
 		g_mouseMgr.SetClipRect(&rcClip,!pWnd->IsFlagSet(LTWF_VDRAG),!pWnd->IsFlagSet(LTWF_HDRAG));
 
-		::MapWindowPoints(g_hMainWnd,NULL,(POINT*)&rcClip,2);
-		ClipCursor(&rcClip);
+		nolf::client_window(*g_pLTClient).confine_cursor(nolf::platform::CursorRectangle{
+            rcClip.left,rcClip.top,rcClip.right-rcClip.left+1,rcClip.bottom-rcClip.top+1});
 
 		return TRUE;
 	}
@@ -864,7 +863,7 @@ BOOL CLTWnd::OnLButtonUp(int xPos, int yPos)
 	// Stop any draggage
 	//if(s_pWndDrag)
 	g_mouseMgr.SetClipRect(NULL);
-	ClipCursor(g_prcClip);
+	nolf::client_window(*g_pLTClient).confine_cursor(std::nullopt);
 	//s_pWndDrag = NULL;
 	s_pWndCapture = NULL;
 	return(this != s_pMainWnd);

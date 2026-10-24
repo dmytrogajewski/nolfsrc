@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "EventCounter.h"
 #include "ObjectMsgs.h"
 #include "CommandMgr.h"
@@ -118,7 +120,8 @@ uint32 EventCounter::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGE
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -152,8 +155,8 @@ void EventCounter::TriggerMsg(HOBJECT hSender, const char* szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], "INC") == 0 ||
-				_stricmp(parse.m_Args[0], "INCREMENT") == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], "INC") == 0 ||
+				nolf::ascii_compare(parse.m_Args[0], "INCREMENT") == 0)
 			{
 				int nCount = 1;
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
@@ -168,8 +171,8 @@ void EventCounter::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					Increment();
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "DEC") == 0 ||
-					 _stricmp(parse.m_Args[0], "DECREMENT") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "DEC") == 0 ||
+					 nolf::ascii_compare(parse.m_Args[0], "DECREMENT") == 0)
 			{
 				int nCount = 1;
 				if (parse.m_nArgs > 1 && parse.m_Args[1])
@@ -184,11 +187,11 @@ void EventCounter::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					Decrement();
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "LOCK") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "LOCK") == 0)
 			{
                 m_bLocked = LTTRUE;
 			}
-			else if (_stricmp(parse.m_Args[0], "UNLOCK") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "UNLOCK") == 0)
 			{
                 m_bLocked = LTFALSE;
 			}

@@ -12,6 +12,7 @@
 
 #ifndef		_LITHTECH_FONT_DEFS_H_
 #define		_LITHTECH_FONT_DEFS_H_
+#include <string>
 
 //*********************************************************************************
 
@@ -159,7 +160,7 @@
 
 struct LITHFONTCREATESTRUCT
 {
-	LITHFONTCREATESTRUCT::LITHFONTCREATESTRUCT();
+	LITHFONTCREATESTRUCT();
 
 	// General font information
 	char		*szRefName;			// Reference name from each font (will be set automatically if not provided)
@@ -197,7 +198,7 @@ inline LITHFONTCREATESTRUCT::LITHFONTCREATESTRUCT()
 
 struct LITHFONTFORMATDATA
 {
-	LITHFONTFORMATDATA::LITHFONTFORMATDATA();
+	LITHFONTFORMATDATA();
 
 	uint32		nNumChars;
 	uint32		nNumLines;
@@ -219,7 +220,7 @@ inline LITHFONTFORMATDATA::LITHFONTFORMATDATA()
 
 struct LITHFONTDRAWDATA
 {
-	LITHFONTDRAWDATA::LITHFONTDRAWDATA();
+	LITHFONTDRAWDATA();
 
 	// Variables used to tell how to draw the string
 	uint32		dwFlags;
@@ -269,30 +270,34 @@ inline LITHFONTDRAWDATA::LITHFONTDRAWDATA()
 
 struct LITHFONTSAVEDATA
 {
-	LITHFONTSAVEDATA::LITHFONTSAVEDATA();
+	LITHFONTSAVEDATA();
 
 	// Times for drawing with the _TIMED method
-	LTFLOAT		fStartDrawTime;						// Start time of drawing
-	LTFLOAT		fTotalDrawTime;						// Time to draw the entire string
+	LTFLOAT		fStartDrawTime = 0;						// Start time of drawing
+	LTFLOAT		fTotalDrawTime = 0;						// Time to draw the entire string
 
 	// General formatting data for all drawing methods
 	LITHFONTFORMATDATA		lfFD;
 
 	// The previous string that was drawn
-	char *		szPrevString;
+	char *		szPrevString = nullptr;
+	std::string previousText;
+	uint64 fontGeneration = 0;
+	uint32 formatWidth = 0, formatFlags = 0;
+	LTFLOAT letterDelay = 0, lineDelay = 0, scrollTime = 0;
+	uint32 waitLines = 0;
 
 	// The last method used by the font
-	uint8		byLastState;
+	uint8		byLastState = 0;
 
 	// ***** System fonts only *****
-	int			nLastLetterSpace;					// The last letter space value used
+	int			nLastLetterSpace = 0;					// The last letter space value used
 };
 
 //---------------------------------------------------------------------------------
 
 inline LITHFONTSAVEDATA::LITHFONTSAVEDATA()
 {
-	memset(this, 0, sizeof(LITHFONTSAVEDATA));
 }
 
 //*********************************************************************************
@@ -301,7 +306,7 @@ inline LITHFONTSAVEDATA::LITHFONTSAVEDATA()
 
 struct LITHFONTOFFSETDATA
 {
-	LITHFONTOFFSETDATA::LITHFONTOFFSETDATA();
+	LITHFONTOFFSETDATA();
 
 	char		szRefName[LTF_OFFSETS_NAME_SIZE];
 	uint32		pOffsets[LTF_NUM_TOTAL_CHARS + 1];
@@ -323,7 +328,7 @@ class LithFont;
 
 struct LITHCURSORCREATESTRUCT
 {
-	LITHCURSORCREATESTRUCT::LITHCURSORCREATESTRUCT();
+	LITHCURSORCREATESTRUCT();
 
 	// General cursor information
 	char		*szRefName;			// Reference name from each cursor (will NOT be set automatically)

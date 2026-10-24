@@ -13,7 +13,7 @@
 
 // Includes...
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "GameServerShell.h"
 #include "MyGameSpyMgr.h"
 #include "PlayerObj.h"

@@ -1,6 +1,10 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "iltserver.h"
 #include "Attachments.h"
 #include "ServerUtilities.h"
@@ -10,7 +14,7 @@
 #include "iltmodel.h"
 #include "ilttransform.h"
 #include "HHWeaponModel.h"
-#include "prop.h"
+#include "Prop.h"
 #include "Spawner.h"
 #include "Body.h"
 #include "WeaponItems.h"
@@ -252,7 +256,7 @@ uint32 CAttachments::ObjectMessageFn(LPBASECLASS pObject, HOBJECT hSender, uint3
 
 LTBOOL CAttachments::ReadProp(BaseClass *pObject, ObjectCreateStruct *pStruct)
 {
-	_ASSERT(pObject && pStruct);
+	GAME_ASSERT(pObject && pStruct);
 	if (!pObject || !pStruct) return LTFALSE;
 
 	GenericProp genProp;
@@ -283,11 +287,11 @@ void CAttachments::Attach(const char* szAttachmentPosition, const char* szAttach
 	{
 		CAttachmentPosition* pAttachmentPosition = m_apAttachmentPositions[iAttachmentPosition];
 
-		if ( !_stricmp(szAttachmentPosition, pAttachmentPosition->GetName()) )
+		if ( !nolf::ascii_compare(szAttachmentPosition, pAttachmentPosition->GetName()) )
 		{
 			if ( pAttachmentPosition->HasAttachment() )
 			{
-				_ASSERT(!"CAttachments::Attach -- tried attaching to an occupied position");
+				GAME_ASSERT(!"CAttachments::Attach -- tried attaching to an occupied position");
 			}
 			else
 			{
@@ -314,7 +318,7 @@ void CAttachments::Detach(const char* szAttachmentPosition)
 	{
 		CAttachmentPosition* pAttachmentPosition = m_apAttachmentPositions[iAttachmentPosition];
 
-		if ( !_stricmp(szAttachmentPosition, pAttachmentPosition->GetName()) )
+		if ( !nolf::ascii_compare(szAttachmentPosition, pAttachmentPosition->GetName()) )
 		{
 			CAttachment* pAttachment = pAttachmentPosition->GetAttachment();
 			if ( pAttachment )
@@ -353,7 +357,7 @@ void CAttachments::Detach(const char* szAttachmentPosition)
 
 void CAttachments::CreateAttachment(CAttachmentPosition *pAttachmentPosition)
 {
-	_ASSERT(pAttachmentPosition);
+	GAME_ASSERT(pAttachmentPosition);
 	if ( !pAttachmentPosition ) return;
 
 	if ( pAttachmentPosition->HasAttachment() ) return;
@@ -361,7 +365,7 @@ void CAttachments::CreateAttachment(CAttachmentPosition *pAttachmentPosition)
 
     char *szAttachmentName = g_pLTServer->GetStringData(pAttachmentPosition->GetAttachmentName());
 
-    if ( !_stricmp(c_szNoAttachment, szAttachmentName) ) return;
+    if ( !nolf::ascii_compare(c_szNoAttachment, szAttachmentName) ) return;
 
     uint8 nWeaponID = WMGR_INVALID_ID;
     uint8 nAmmoID = WMGR_INVALID_ID;
@@ -465,8 +469,10 @@ void CAttachments::CreateWeaponAttachment(CAttachmentPosition *pAttachmentPositi
 	// Attach it
 
 	HATTACHMENT hAttachment;
+    LTVector attachmentOffset(0,0,0);
+    LTRotation attachmentRotation(0,0,0,1);
     LTRESULT dRes = g_pLTServer->CreateAttachment(m_hObject, pModel->m_hObject, (char*)pAttachmentPosition->GetName(),
-												 &LTVector(0,0,0), &LTRotation(0,0,0,1), &hAttachment);
+												 &attachmentOffset, &attachmentRotation, &hAttachment);
 
 	((CAttachmentWeapon*)pAttachment)->Init(m_hObject, pModel->m_hObject, -1, nWeaponID, nAmmoID);
 
@@ -518,8 +524,10 @@ void CAttachments::CreateObjectAttachment(CAttachmentPosition *pAttachmentPositi
 	// Attach it
 
 	HATTACHMENT hAttachment;
+    LTVector attachmentOffset(0,0,0);
+    LTRotation attachmentRotation(0,0,0,1);
     LTRESULT dRes = g_pLTServer->CreateAttachment(m_hObject, pModel->m_hObject, (char*)pAttachmentPosition->GetName(),
-											   &LTVector(0,0,0), &LTRotation(0,0,0,1), &hAttachment);
+											   &attachmentOffset, &attachmentRotation, &hAttachment);
 
 	CAttachment* pAttachment = CAttachment::Create(ATTACHMENT_TYPE_OBJECT);
 	pAttachment->Init(m_hObject, pModel->m_hObject, nAttachmentID);
@@ -579,8 +587,10 @@ void CAttachments::CreatePropAttachment(CAttachmentPosition *pAttachmentPosition
 	// Attach it
 
 	HATTACHMENT hAttachment;
+    LTVector attachmentOffset(0,0,0);
+    LTRotation attachmentRotation(0,0,0,1);
     LTRESULT dRes = g_pLTServer->CreateAttachment(m_hObject, pModel->m_hObject, (char*)pAttachmentPosition->GetName(),
-											   &LTVector(0,0,0), &rRot, &hAttachment);
+											   &attachmentOffset, &rRot, &hAttachment);
 
 	pAttachment->Init(m_hObject, pModel->m_hObject, nAttachmentID);
 	pAttachmentPosition->SetAttachment(pAttachment);
@@ -617,6 +627,8 @@ void CAttachments::ReInit(HOBJECT hNewObj)
 			if (hModel)
 			{
 				HATTACHMENT hAttachment;
+    LTVector attachmentOffset(0,0,0);
+    LTRotation attachmentRotation(0,0,0,1);
                 if (LT_OK == g_pLTServer->FindAttachment(hOldObj, hModel, &hAttachment))
 				{
                     g_pLTServer->RemoveAttachment(hAttachment);
@@ -625,7 +637,7 @@ void CAttachments::ReInit(HOBJECT hNewObj)
 				// Attach the model to us...
 
                 g_pLTServer->CreateAttachment(m_hObject, hModel, (char*)pCurPos->GetName(),
-					&LTVector(0,0,0), &LTRotation(0,0,0,1), &hAttachment);
+					&attachmentOffset, &attachmentRotation, &hAttachment);
 
 				// Re-init to set m_hObject...
 
@@ -881,6 +893,8 @@ void CAttachments::Update()
 			HOBJECT hModel = pAttachmentPosition->GetAttachment()->GetObject();
 
 			HATTACHMENT hAttachment;
+    LTVector attachmentOffset(0,0,0);
+    LTRotation attachmentRotation(0,0,0,1);
             if ( LT_OK == g_pLTServer->FindAttachment(m_hObject, hModel, &hAttachment) )
 			{
                 g_pLTServer->RemoveAttachment(hAttachment);
@@ -912,7 +926,7 @@ void CAttachments::Update()
             g_pLTServer->SetObjectRotation(hModel, &rRotModel);
 
             LTRESULT dRes = g_pLTServer->CreateAttachment(m_hObject, hModel, (char*)pAttachmentPosition->GetName(),
-													   &LTVector(0,0,0), &rRotModel, &hAttachment);
+													   &attachmentOffset, &rRotModel, &hAttachment);
 		}
 	}}
 */}
@@ -979,7 +993,8 @@ void CAttachments::HandleDeath()
 
 void CAttachments::HandleTrigger(LPBASECLASS pObject, HOBJECT hSender, HMESSAGEREAD hRead)
 {
-	const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+	const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+	const char* szMsg = szMsgStorage.c_str();
 }
 
 
@@ -1338,7 +1353,7 @@ LTBOOL CAttachmentProp::HandleProjectileImpact(CProjectile* pProjectile, CAttach
 void CAttachmentProp::CreateSpawnString(char* szSpawn)
 {
 	sprintf(szSpawn, "Prop Filename %s; Skin %s; Gravity 0",
-		g_pAttachButeMgr->GetAttachmentModel(m_nAttachmentID), g_pAttachButeMgr->GetAttachmentSkin(m_nAttachmentID));
+		static_cast<const char*>(g_pAttachButeMgr->GetAttachmentModel(m_nAttachmentID)), static_cast<const char*>(g_pAttachButeMgr->GetAttachmentSkin(m_nAttachmentID)));
 }
 
 // ----------------------------------------------------------------------- //
@@ -1402,7 +1417,7 @@ LTBOOL CAttachmentObject::HandleProjectileImpact(CProjectile* pProjectile, CAtta
 void CAttachmentObject::CreateSpawnString(char* szSpawn)
 {
 	sprintf(szSpawn, "Prop Filename %s; Skin %s; Gravity 0",
-		g_pAttachButeMgr->GetAttachmentModel(m_nAttachmentID), g_pAttachButeMgr->GetAttachmentSkin(m_nAttachmentID));
+		static_cast<const char*>(g_pAttachButeMgr->GetAttachmentModel(m_nAttachmentID)), static_cast<const char*>(g_pAttachButeMgr->GetAttachmentSkin(m_nAttachmentID)));
 }
 
 // ----------------------------------------------------------------------- //
@@ -1615,7 +1630,7 @@ void CAttachmentPosition::Load(HMESSAGEREAD hRead)
 
 		m_pAttachment = CAttachment::Create(dwAttachmentType);
 
-		_ASSERT(m_pAttachment);
+		GAME_ASSERT(m_pAttachment);
 
 		m_pAttachment->Load(hRead);
 	}
@@ -1686,7 +1701,7 @@ void CAttachmentsPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings
 {
 	// TODO: make sure we don't overflow cMaxStringLength or cMaxStrings
     uint32 cAttachments = sm_AttachButeMgr.GetNumAttachments();
-	_ASSERT(cMaxStrings >= cAttachments);
+	GAME_ASSERT(cMaxStrings >= cAttachments);
 	strcpy(aszStrings[(*pcStrings)++], c_szNoAttachment);
     for ( uint32 iAttachment = 0 ; iAttachment < cAttachments ; iAttachment++ )
 	{
@@ -1710,17 +1725,17 @@ LTRESULT CHumanAttachmentsPlugin::PreHook_EditStringList(const char* szRezPath, 
 		return LT_OK;
 	}
 
-    if ( !_stricmp("LeftHand",      szPropName) ||
-         !_stricmp("RightHand",     szPropName) ||
-         !_stricmp("LeftFoot",      szPropName) ||
-         !_stricmp("RightFoot",     szPropName) ||
-         !_stricmp("Motorcycle",    szPropName) ||
-         !_stricmp("Snowmobile",    szPropName) ||
-         !_stricmp("Head",          szPropName) ||
-         !_stricmp("Eyes",          szPropName) ||
-         !_stricmp("Nose",          szPropName) ||
-         !_stricmp("Chin",          szPropName) ||
-         !_stricmp("Back",          szPropName) )
+    if ( !nolf::ascii_compare("LeftHand",      szPropName) ||
+         !nolf::ascii_compare("RightHand",     szPropName) ||
+         !nolf::ascii_compare("LeftFoot",      szPropName) ||
+         !nolf::ascii_compare("RightFoot",     szPropName) ||
+         !nolf::ascii_compare("Motorcycle",    szPropName) ||
+         !nolf::ascii_compare("Snowmobile",    szPropName) ||
+         !nolf::ascii_compare("Head",          szPropName) ||
+         !nolf::ascii_compare("Eyes",          szPropName) ||
+         !nolf::ascii_compare("Nose",          szPropName) ||
+         !nolf::ascii_compare("Chin",          szPropName) ||
+         !nolf::ascii_compare("Back",          szPropName) )
 	{
 		PopulateStringList(aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
 		return LT_OK;
@@ -1746,7 +1761,7 @@ LTRESULT CVehicleAttachmentsPlugin::PreHook_EditStringList(const char* szRezPath
 		return LT_OK;
 	}
 
-    if ( !_stricmp("Driver",    szPropName) )
+    if ( !nolf::ascii_compare("Driver",    szPropName) )
 	{
 		PopulateStringList(aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
 		return LT_OK;
@@ -1772,13 +1787,13 @@ LTRESULT CHelicopterAttachmentsPlugin::PreHook_EditStringList(const char* szRezP
 		return LT_OK;
 	}
 
-    if ( !_stricmp("FrontBelly", szPropName) ||
-         !_stricmp("RearBelly", szPropName) ||
-         !_stricmp("LeftSkid", szPropName) ||
-         !_stricmp("RightSkid", szPropName) ||
-         !_stricmp("TopRotor", szPropName) ||
-         !_stricmp("BackRotor", szPropName) ||
-         !_stricmp("RightGunner", szPropName) )
+    if ( !nolf::ascii_compare("FrontBelly", szPropName) ||
+         !nolf::ascii_compare("RearBelly", szPropName) ||
+         !nolf::ascii_compare("LeftSkid", szPropName) ||
+         !nolf::ascii_compare("RightSkid", szPropName) ||
+         !nolf::ascii_compare("TopRotor", szPropName) ||
+         !nolf::ascii_compare("BackRotor", szPropName) ||
+         !nolf::ascii_compare("RightGunner", szPropName) )
 	{
 		PopulateStringList(aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
 		return LT_OK;
@@ -1830,7 +1845,7 @@ LTRESULT CSharkAttachmentsPlugin::PreHook_EditStringList(const char* szRezPath, 
 		return LT_OK;
 	}
 
-    if ( !_stricmp("Mouth", szPropName) )
+    if ( !nolf::ascii_compare("Mouth", szPropName) )
 	{
 		PopulateStringList(aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
 		return LT_OK;

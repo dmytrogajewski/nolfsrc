@@ -71,24 +71,14 @@ BOOL CRect::IntersectRect(const RECT *lpRect1, const RECT *lpRect2)
 	return TRUE;
 }
 
-CPoint& CRect::TopLeft()
+CPoint CRect::TopLeft() const
 {
-	return *((CPoint *)(&left));
+	return CPoint(left, top);
 }
 
-CPoint& CRect::BottomRight()
+CPoint CRect::BottomRight() const
 {
-	return *((CPoint *)(&right));
-}
-
-const CPoint& CRect::TopLeft() const
-{
-	return *((const CPoint *)(&left));
-}
-
-const CPoint& CRect::BottomRight() const
-{
-	return *((const CPoint *)(&right));
+	return CPoint(right, bottom);
 }
 
 void CRect::NormalizeRect()

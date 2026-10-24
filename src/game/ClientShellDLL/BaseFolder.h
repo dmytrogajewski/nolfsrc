@@ -5,17 +5,14 @@
 #if !defined(AFX_BASEFOLDER_H__88EE6E21_1515_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_BASEFOLDER_H__88EE6E21_1515_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
-#include "LTGUIMgr.h"
+#include "ltguimgr.h"
 #include "BitmapCtrl.h"
 #include "GroupCtrl.h"
 #include "ListCtrl.h"
 #include "SliderCtrl.h"
 #include "CycleCtrl.h"
-#include "stdlith.h"
+#include "dynarray.h"
 #include "BaseScaleFX.h"
 #include "StaticTextCtrl.h"
 #ifdef NOLFSRC_MODERN

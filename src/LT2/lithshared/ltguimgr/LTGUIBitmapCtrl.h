@@ -5,12 +5,9 @@
 #if !defined(AFX_BITMAPCTRL_H__639D44A0_1A85_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_BITMAPCTRL_H__639D44A0_1A85_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
-#include "LTGUIMgr.h"
-#include "stdlith.h"
+#include "ltguimgr.h"
+#include "dynarray.h"
 
 
 class CLTGUIBitmapCtrl : public CLTGUIFadeColorCtrl

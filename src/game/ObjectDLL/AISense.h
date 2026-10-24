@@ -201,10 +201,10 @@ class CAISense
 // All the senses are defined with these here macros
 
 #define BEGIN_DELAY_SENSE_DEFINITION(sense) \
-class CAISense##sense## : public CAISense { \
+class CAISense##sense : public CAISense { \
 	public : \
  		virtual const char* GetName() { return #sense""; } \
- 		virtual SenseType GetType() { return (st##sense##); } \
+		virtual SenseType GetType() { return (st##sense); } \
 		virtual SenseClass GetClass() { return (scDelay); } \
 	protected : \
 		friend class CAISenseMgr; \
@@ -212,7 +212,7 @@ class CAISense##sense## : public CAISense { \
 		virtual const char* GetPropertiesDistanceString() { return #sense"Distance"; } \
 		virtual void GetAttributes(int nTemplateID) \
 		{ \
- 			m_bEnabled = g_pAIButeMgr->GetTemplate(nTemplateID)->bCan##sense##; \
+			m_bEnabled = g_pAIButeMgr->GetTemplate(nTemplateID)->bCan##sense; \
 			m_fDistance = g_pAIButeMgr->GetTemplate(nTemplateID)->f##sense##Distance; \
 			m_fReactionDelay = g_pAIButeMgr->GetSenses()->f##sense##ReactionDelay; \
 		} \
@@ -221,10 +221,10 @@ class CAISense##sense## : public CAISense { \
 #define END_DELAY_SENSE_DEFINITION() };
 
 #define BEGIN_STIMULATION_SENSE_DEFINITION(sense) \
-class CAISense##sense## : public CAISense { \
+class CAISense##sense : public CAISense { \
 	public : \
  		virtual const char* GetName() { return #sense""; } \
- 		virtual SenseType GetType() { return (st##sense##); } \
+		virtual SenseType GetType() { return (st##sense); } \
 		virtual SenseClass GetClass() { return (scStimulation); } \
 	protected : \
 		friend class CAISenseMgr; \
@@ -232,7 +232,7 @@ class CAISense##sense## : public CAISense { \
 		virtual const char* GetPropertiesDistanceString() { return #sense"Distance"; } \
 		virtual void GetAttributes(int nTemplateID) \
 		{ \
- 			m_bEnabled = g_pAIButeMgr->GetTemplate(nTemplateID)->bCan##sense##; \
+			m_bEnabled = g_pAIButeMgr->GetTemplate(nTemplateID)->bCan##sense; \
 			m_fDistance = g_pAIButeMgr->GetTemplate(nTemplateID)->f##sense##Distance; \
 			m_fStimulationIncreaseRateAlert = g_pAIButeMgr->GetSenses()->f##sense##StimulationIncreaseRateAlert; \
 			m_fStimulationDecreaseRateAlert = g_pAIButeMgr->GetSenses()->f##sense##StimulationDecreaseRateAlert; \

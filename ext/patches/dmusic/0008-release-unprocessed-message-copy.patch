@@ -1,0 +1,14 @@
+diff --git a/src/Performance.c b/src/Performance.c
+index 767f798..29f9abe 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -963,7 +963,8 @@ DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t len, DmRe
+ 
+ 		if (offset_samples > len - sample) {
+ 			// The next message does not fall into this render call (i.e. it happens after the number of
+-			// samples left to process)
++			// samples left to process). It stays queued; release the reference this copy took.
++			DmMessage_free(&msg);
+ 			break;
+ 		}
+ 

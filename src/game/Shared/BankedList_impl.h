@@ -625,12 +625,13 @@ uint32 CBankedList<T>::GetFootprint()
 	}
 
 	// Add in the empty banks
-	t_Bank *pFinger = m_pEmptyHead;
+	pFinger = m_pEmptyHead;
 	while (pFinger)
 	{
 		nSize += sizeof(*pFinger);
 		pFinger = pFinger->GetNext();
 	}
+	return nSize;
 }
 
 template <typename T>

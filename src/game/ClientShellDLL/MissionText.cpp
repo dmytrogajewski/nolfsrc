@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "MissionText.h"
 #include "InterfaceResMgr.h"
 #include "LayoutMgr.h"

@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "SoundFX.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -38,7 +40,7 @@ LTRESULT CSoundFXPlugin::PreHook_EditStringList(
     const uint32 cMaxStrings,
     const uint32 cMaxStringLength)
 {
-	if (_strcmpi("Filter", szPropName) == 0)
+	if (nolf::ascii_compare("Filter", szPropName) == 0)
 	{
 		m_SoundFilterMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);
@@ -182,7 +184,8 @@ uint32 SoundFX::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD 
 	{
  		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleTrigger(hSender, szMsg);
 			break;
 		}
@@ -209,7 +212,7 @@ void SoundFX::HandleTrigger(HOBJECT hSender, const char* szMsg)
 		return;
 	}
 
-    if (stricmp(szMsg, "TOGGLE") == 0)
+    if (nolf::ascii_compare(szMsg, "TOGGLE") == 0)
     {
 		if (m_hsndSound)
 		{
@@ -229,11 +232,11 @@ void SoundFX::HandleTrigger(HOBJECT hSender, const char* szMsg)
 			PlaySound( );
 		}
     }
-    else if (stricmp(szMsg, "ON") == 0 || stricmp(szMsg, "TRIGGER") == 0)
+    else if (nolf::ascii_compare(szMsg, "ON") == 0 || nolf::ascii_compare(szMsg, "TRIGGER") == 0)
     {
 		PlaySound();
     }
-    else if (stricmp(szMsg, "OFF") == 0)
+    else if (nolf::ascii_compare(szMsg, "OFF") == 0)
     {
 		if (m_hsndSound)
 		{
@@ -249,7 +252,7 @@ void SoundFX::HandleTrigger(HOBJECT hSender, const char* szMsg)
 			m_hsndSound = NULL;
 		}
     }
-    else if (stricmp(szMsg, "KILL") == 0)
+    else if (nolf::ascii_compare(szMsg, "KILL") == 0)
     {
 		if (m_hsndSound)
 		{

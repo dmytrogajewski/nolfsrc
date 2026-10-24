@@ -10,7 +10,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "WeaponMgr.h"
 #include "ClientWeaponSFX.h"
 #include "SFXMsgIds.h"
@@ -58,7 +58,7 @@ void CreateClientWeaponFX(CLIENTWEAPONFX & theStruct)
 				{
 					if (WFX_MARK & pAmmo->pImpactFX->nFlags)
 					{
-                        CreateServerMark((CLIENTWEAPONFX)theStruct);
+                        CreateServerMark(theStruct);
 					}
 				}
 
@@ -68,7 +68,7 @@ void CreateClientWeaponFX(CLIENTWEAPONFX & theStruct)
 				{
 					if (WFX_EXITMARK & pAmmo->pFireFX->nFlags)
 					{
-						CreateServerExitMark((const CLIENTWEAPONFX)theStruct);
+						CreateServerExitMark(theStruct);
 					}
 				}
 			}
@@ -212,7 +212,7 @@ static void CreateServerMark(CLIENTWEAPONFX & theStruct)
             g_pLTServer->RemoveAttachment(hAttachment);
 		}
 
-        pMoveMark->Setup((CLIENTWEAPONFX)theStruct);
+        pMoveMark->Setup(theStruct);
 		return;
 	}
 
@@ -233,7 +233,7 @@ static void CreateServerMark(CLIENTWEAPONFX & theStruct)
 	createStruct.m_Flags = FLAG_VISIBLE | FLAG_NOLIGHT | FLAG_ROTATEABLESPRITE;
 	createStruct.m_Pos = theStruct.vPos;
 
-    g_pLTServer->AlignRotation(&(createStruct.m_Rotation), &((LTVector)theStruct.vSurfaceNormal), LTNULL);
+    g_pLTServer->AlignRotation(&(createStruct.m_Rotation), &theStruct.vSurfaceNormal, LTNULL);
 
 
     HCLASS hClass = g_pLTServer->GetClass("CServerMark");
@@ -256,7 +256,7 @@ static void CreateServerMark(CLIENTWEAPONFX & theStruct)
         g_pLTServer->ScaleObject(pMark->m_hObject, &vScale);
 	}
 
-	pMark->Setup((CLIENTWEAPONFX)theStruct);
+	pMark->Setup(theStruct);
 }
 
 

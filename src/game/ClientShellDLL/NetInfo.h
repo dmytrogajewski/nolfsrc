@@ -18,7 +18,7 @@
 // Includes...
 
 #include "iltclient.h"
-#include "..\Shared\NetDefs.h"
+#include "../Shared/NetDefs.h"
 
 
 // Classes...

@@ -1,7 +1,7 @@
 // FolderGame.cpp: implementation of the CFolderGame class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderGame.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

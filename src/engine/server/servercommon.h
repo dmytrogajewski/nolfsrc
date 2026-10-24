@@ -34,17 +34,6 @@ void world_PointInsideCB(class LTObject* pObj, CPointQuery* pQuery);
 // The container at CServerMgr+0x210 is polymorphic, which servermgr.h's
 // CUnknown210 does not model; only slot 3 is reached from here, so the
 // interface is declared locally and the pointer cast (names ours).
-class IPointQueryWorld
-{
-public:
-	virtual void _v00()=0;
-	virtual void _v04()=0;
-	virtual void _v08()=0;
-	virtual void FindObjectsAtPoint(LTVector* pPoint, PointQueryFn pfn,
-	                                CPointQuery* pQuery, int nFlag)=0;  // 0x0c
-};
-
-
 class ServerCommonLT : public SharedCommonLT
 {
 public:
@@ -89,35 +78,10 @@ public:
 // which is what you get from members declared in the class and defined out of
 // line, so that is how they are written. Names ours; the fields are
 // AnimTimeRef's, and every offset the reset touches lands on one.
-class CAnimTimeRef
-{
-public:
-	CAnimTimeRef();                          // 0x1002da31
-	void Clear();                            // 0x100175fd
-
-	class Model* m_pModel;                   // 0x00
-	uint16       m_PrevAnim;                 // 0x04  m_Prev (FrameLocator)
-	uint16       m_PrevFrame;                // 0x06
-	uint32       m_PrevTime;                 // 0x08
-	uint16       m_CurAnim;                  // 0x0c  m_Cur
-	uint16       m_CurFrame;                 // 0x0e
-	uint32       m_CurTime;                  // 0x10
-	float        m_Percent;                  // 0x14
-	uint32       m_iWeightSet;               // 0x18  INVALID_MODEL_WEIGHTSET
-};
-
-class CSavedTracker
-{
-public:
-	uint8        m_pad_00[0x1c];             // m_Link, callback, user, key, flags
-	CAnimTimeRef m_TimeRef;                  // +0x1c
-};
-
-struct CSavedFileState
-{
-	CSavedTracker m_Tracker;                 // 0x00  0x38 bytes
-	void*         m_pModelFile;              // 0x38  SObjData +0x30
-	void*         m_pSkinFile;               // 0x3c  SObjData +0x34
+struct CSavedFileState {
+    LTAnimTracker m_Tracker{};
+    void* m_pModelFile = nullptr;
+    void* m_SkinFiles[MAX_MODEL_TEXTURES]{};
 };
 
 // The world-side file swap: save the object's file state, pull it from the
@@ -137,11 +101,6 @@ void     sm_WriteObjectFiles(class LTObject* pObj, class ServerMessage* pMsg);  
 // m_pSkinFile 0x34) and stops, but the writer's loop runs 0x30, 0x34, 0x38.
 // Name ours; the cast is what keeps the two-level load the shipped loop
 // repeats every iteration.
-class CObjFiles
-{
-public:
-	uint8                  m_pad_00[0x30];
-	class CFileIdentifier* m_pFiles[3];      // +0x30
-};
+
 
 #endif

@@ -1,7 +1,7 @@
 // FolderDifficulty.cpp: implementation of the CFolderDifficulty class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderDifficulty.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

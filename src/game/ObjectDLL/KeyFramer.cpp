@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "KeyFramer.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -249,7 +251,7 @@ void KeyframerPreprocessorCB(HPREOBJECT hObject, ILTPreLight *pInterface)
 			if(cParse.m_nArgs != 1 ||
 				pInterface->FindObject(cParse.m_Args[0], hTestObj) != LT_OK ||
 				pInterface->GetClassName(hTestObj, className, sizeof(className)) != LT_OK ||
-				stricmp(className, KEYFRAMERLIGHT_CLASSNAME) != 0)
+				nolf::ascii_compare(className, KEYFRAMERLIGHT_CLASSNAME) != 0)
 			{
 				continue;
 			}
@@ -306,7 +308,7 @@ void KeyframerPreprocessorCB(HPREOBJECT hObject, ILTPreLight *pInterface)
 		}
 
 		/* Are we a keyframer light? */
-		if (stricmp(className, KEYFRAMERLIGHT_CLASSNAME) == 0)
+		if (nolf::ascii_compare(className, KEYFRAMERLIGHT_CLASSNAME) == 0)
 		{
 			// Get light properties.
 			ReadKLProps(pInterface, hTestObj, &props);
@@ -1150,7 +1152,8 @@ uint32 KeyFramer::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREA
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -1246,15 +1249,15 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], "ON") == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], "ON") == 0)
 			{
 				On();
 			}
-			else if (_stricmp(parse.m_Args[0], "OFF") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "OFF") == 0)
 			{
 				Off();
 			}
-			else if (_stricmp(parse.m_Args[0], "PAUSE") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "PAUSE") == 0)
 			{
 				if (m_bFirstUpdate)
 				{
@@ -1265,24 +1268,24 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					Pause();
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "RESUME") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "RESUME") == 0)
 			{
 				Resume();
 			}
-			else if (_stricmp(parse.m_Args[0], "FORWARD") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "FORWARD") == 0)
 			{
 				Forward();
 			}
-			else if ((_stricmp(parse.m_Args[0], "BACKWARD") == 0) ||
-					 (_stricmp(parse.m_Args[0], "REVERSE") == 0))
+			else if ((nolf::ascii_compare(parse.m_Args[0], "BACKWARD") == 0) ||
+					 (nolf::ascii_compare(parse.m_Args[0], "REVERSE") == 0))
 			{
 				Backward();
 			}
-			else if (_stricmp(parse.m_Args[0], "TOGGLEDIR") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "TOGGLEDIR") == 0)
 			{
 				ToggleDir();
 			}
-			else if (_stricmp(parse.m_Args[0], "GOTO") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "GOTO") == 0)
 			{
 				if (m_bFirstUpdate)
 				{
@@ -1296,7 +1299,7 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					}
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "MOVETO") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "MOVETO") == 0)
 			{
 				if (m_bFirstUpdate)
 				{
@@ -1307,7 +1310,7 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					MoveToKey(parse);
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "TARGET") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "TARGET") == 0)
 			{
 				if (m_bFirstUpdate)
 				{
@@ -1321,7 +1324,7 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					}
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "CLEARTARGET") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "CLEARTARGET") == 0)
 			{
 				if (m_bFirstUpdate)
 				{
@@ -1332,7 +1335,7 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 					SetTarget(LTNULL);
 				}
 			}
-			else if (_stricmp(parse.m_Args[0], "TARGETOFFSET") == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], "TARGETOFFSET") == 0)
 			{
 				if (m_bFirstUpdate)
 				{
@@ -2381,7 +2384,7 @@ KEYNODE* KeyFramer::FindKey(char* pKeyName, KEYNODE* pTest, LTBOOL* pbAtOrBefore
 		if (pCurKey->keyData.m_hstrName)
 		{
             char* pCurKeyName = g_pLTServer->GetStringData(pCurKey->keyData.m_hstrName);
-			if (pCurKeyName && _stricmp(pKeyName, pCurKeyName) == 0)
+			if (pCurKeyName && nolf::ascii_compare(pKeyName, pCurKeyName) == 0)
 			{
 				break;
 			}

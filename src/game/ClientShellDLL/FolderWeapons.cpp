@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderWeapons.h"
 #include "FolderCommands.h"
 #include "MissionData.h"
@@ -119,7 +119,7 @@ void	CFolderWeapons::BuildWeaponsList()
 		pWeapon = g_pWeaponMgr->GetWeapon(nWID);
 		AddToSlot(nWID,pWeapon->nNameId,LTTRUE);
 	}
-	for (i=0; i< pMission->nNumOneTimeWeapons; i++)
+	for (int i=0; i< pMission->nNumOneTimeWeapons; i++)
 	{
 		nWID = pMission->aOneTimeWeapons[i];
 		pWeapon = g_pWeaponMgr->GetWeapon(nWID);
@@ -134,7 +134,7 @@ void	CFolderWeapons::BuildWeaponsList()
 		WEAPON* pWeapon = LTNULL;
 
 		numCurrWeapons = pData->GetWeapons(currWeapons,255);
-		for (i=0; i< numCurrWeapons; i++)
+		for (int i=0; i< numCurrWeapons; i++)
 		{
 			nWID = currWeapons[i]->m_nID;
 			pWeapon = g_pWeaponMgr->GetWeapon(nWID);
@@ -144,7 +144,7 @@ void	CFolderWeapons::BuildWeaponsList()
 	}
 	else
 	{
-		for (i=0; i< pMission->nNumDefaultWeapons; i++)
+		for (int i=0; i< pMission->nNumDefaultWeapons; i++)
 		{
 			nWID = pMission->aDefaultWeapons[i];
 			pWeapon = g_pWeaponMgr->GetWeapon(nWID);
@@ -153,7 +153,7 @@ void	CFolderWeapons::BuildWeaponsList()
 	}
 
 
-	for (i=0; i< pMission->nNumAllowedWeapons; i++)
+	for (int i=0; i< pMission->nNumAllowedWeapons; i++)
 	{
 		nWID = pMission->aAllowedWeapons[i];
 		pWeapon = g_pWeaponMgr->GetWeapon(nWID);
@@ -161,7 +161,7 @@ void	CFolderWeapons::BuildWeaponsList()
 	}
 
 	int numWeapons = g_pWeaponMgr->GetNumWeapons();
-	for (i=0; i < numWeapons; i++)
+	for (int i=0; i < numWeapons; i++)
 	{
 		pWeapon = g_pWeaponMgr->GetWeapon(i);
 		AMMO *pAmmo = g_pWeaponMgr->GetAmmo(pWeapon->nDefaultAmmoType);
@@ -172,7 +172,7 @@ void	CFolderWeapons::BuildWeaponsList()
 	}
 
 
-	for (i=0; i< pMission->nNumDeniedWeapons; i++)
+	for (int i=0; i< pMission->nNumDeniedWeapons; i++)
 	{
 		nWID = pMission->aDeniedWeapons[i];
 		RemoveFromSlot(nWID);
@@ -200,7 +200,7 @@ void	CFolderWeapons::BuildWeaponsList()
 
 	}
 
-	for (i=0;i < nNumFree;i++)
+	for (int i=0;i < nNumFree;i++)
 	{
 		AddEmptySlot();
 	}
@@ -510,14 +510,14 @@ void CFolderWeapons::SkipOutfitting()
 		pWeapon = g_pWeaponMgr->GetWeapon(nWID);
 		pData->AddWeapon(nWID);
 	}
-	for (i=0; i< pMission->nNumOneTimeWeapons; i++)
+	for (int i=0; i< pMission->nNumOneTimeWeapons; i++)
 	{
 		nWID = pMission->aOneTimeWeapons[i];
 		pWeapon = g_pWeaponMgr->GetWeapon(nWID);
 		pData->AddWeapon(nWID);
 	}
 
-	for (i=0; i< pMission->nNumDefaultWeapons; i++)
+	for (int i=0; i< pMission->nNumDefaultWeapons; i++)
 	{
 		nWID = pMission->aDefaultWeapons[i];
 		pWeapon = g_pWeaponMgr->GetWeapon(nWID);

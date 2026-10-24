@@ -10,7 +10,7 @@
 
 // Includes....
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "ShellCasingFX.h"
 #include "iltclient.h"
 #include "ltlink.h"

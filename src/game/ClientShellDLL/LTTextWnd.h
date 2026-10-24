@@ -13,8 +13,8 @@
 #define _LTTEXTWND_H_
 
 // Includes
-#include "LTWnd.h"
-#include "LithFontDefs.h"
+#include "LtWnd.h"
+#include "lithfontdefs.h"
 
 class CLTGUIFont;
 

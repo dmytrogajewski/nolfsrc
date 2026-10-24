@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <limits>
 #include <random>
+#include <span>
 
 namespace {
 std::function<void(BaseClass*,uint32,void*,float)> engine_hook;
@@ -332,6 +333,53 @@ void actors(const char* module_path) {
     server.Term();
     require(alive() == 0 && server.m_Unknown390.m_Allocated.empty(),"server teardown removes live SDK actors");
 }
+// m01s04's opening hill. Terrain sections share the polygons on their
+// borders, so one slope reaches a move through several world models, and the
+// push loop retries each of them: a lift or a shove that is not measured from
+// the destination is applied again by every one of them.
+void terrain_walk(CServerMgr& server,HCLASS klass) {
+    std::size_t sections = 0;
+    for (auto* record : std::span(server.m_World.m_Worlds.GetArray(),server.m_World.m_Worlds.GetSize())) {
+        if (!(record->m_pWorldBsp->m_nUnknown48 & 8)) continue;
+        for (uint32 section = 0; section < record->m_pWorldBsp->m_Array138.GetSize(); ++section) {
+            ObjectCreateStruct create; create.m_ObjectType = OT_WORLDMODEL; create.m_Flags = FLAG_SOLID | FLAG_RAYHIT;
+            std::snprintf(create.m_Filename,sizeof(create.m_Filename),"#$#%u %s",unsigned(section),record->m_pWorldBsp->m_Name);
+            require(server.CreateObject(klass,&create),"original terrain section becomes a world model");
+            ++sections;
+        }
+    }
+    require(sections > 1,"original level has several terrain sections");
+    ObjectCreateStruct create; create.m_Pos.Init(-13484.2f,564.8f,-23449.2f);
+    create.m_Flags = FLAG_SOLID | FLAG_STAIRSTEP; create.m_Flags2 = FLAG2_PLAYERCOLLIDE;
+    auto* game = server.CreateObject(klass,&create);
+    require(game,"terrain walker is created");
+    auto* walker = game->m_hObject;
+    LTVector dimensions(24,53,24);
+    require(server.m_pUnknown928->Physics()->SetObjectDims(walker,&dimensions,0) == LT_OK,"terrain walker has a player's dimensions");
+    // Up the 36-degree slope across the section border and back down it. The
+    // fall per frame outruns the slope, so a walker that is not lifted onto it
+    // or put down on it shows up as a frame without a floor. Where the slope
+    // eases off, the cylinder rests on the crease between two faces for one
+    // frame, which is not a lost floor.
+    for (float direction : {1.f,-1.f}) {
+        int airborne = 0;
+        for (int frame = 0; frame != 55; ++frame) {
+            const auto before = walker->m_Pos;
+            auto destination = before + LTVector(0,-6,5*direction);
+            require(server.m_pUnknown928->Physics()->MoveObject(walker,&destination,0) == LT_OK,"terrain walker moves");
+            const float rise = walker->m_Pos.y-before.y;
+            airborne = walker->m_pStandingOnPoly ? 0 : airborne+1;
+            if (airborne > 1 || rise > 4.5f || rise < -4.5f || std::fabs(walker->m_Pos.z-before.z) < 4.9f) {
+                std::cerr << "terrain walk frame " << frame << " direction " << direction << " from " << before.x << ',' << before.y << ',' << before.z
+                    << " to " << walker->m_Pos.x << ',' << walker->m_Pos.y << ',' << walker->m_Pos.z << " standing " << bool(walker->m_pStandingOnPoly) << '\n';
+                throw std::runtime_error("terrain walker left the slope across shared section polygons");
+            }
+        }
+        require(walker->m_pStandingOnPoly,"terrain walker ends each walk standing");
+    }
+    require(walker->m_Pos.DistSqr(create.m_Pos) < 1,"terrain walker retraces the slope back to where it started");
+    require(sm_RemoveObjectFromWorld(&server,game) == LT_OK,"terrain walker removes cleanly");
+}
 void original_worlds(const char* module_path,const std::filesystem::path& data_path) {
     nolf::Assets assets; assets.mount_game(data_path);
     CServerMgr server; require(server.Init(),"original-world physics server initializes");
@@ -422,6 +470,7 @@ void original_worlds(const char* module_path,const std::filesystem::path& data_p
             }
         }
         world_hits += level_hits != 0;
+        if (name == "worlds/m01s04.dat") terrain_walk(server,klass);
         server.EndWorld(0); ++worlds;
         require(server.m_Unknown390.m_Allocated.empty() && !server.m_pChangedObjects && !g_WorldBytes,"original-level server releases actors and native geometry between worlds");
     }

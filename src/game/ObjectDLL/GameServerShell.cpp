@@ -2556,7 +2556,7 @@ void CGameServerShell::UpdateTimeOfDay(LTFLOAT timeElapsed)
     unsigned char newSunVec[3];
 	float testHours, t;
 	TimeRamp *pRamp, *pNextRamp;
-    uint32 i, iCurRamp;
+    uint32 i, iCurRamp = m_iPrevRamp;	// No ramp matched: no change.
 
 
 	LTVector day, night, theColor;

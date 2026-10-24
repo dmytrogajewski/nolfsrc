@@ -1440,6 +1440,9 @@ HOBJECT CinematicTrigger::FindWhoPlaysDecision(uint8 byDecision)
 {
 	char* pCharName = DEFAULT_PLAYERNAME;
 
+	// The name found points into the parser: it outlives the search below.
+	ConParse parse;
+
 	if (byDecision > 0)
 	{
 		char* pMsg = g_pLTServer->GetStringData(m_hstrWhoPlaysDecisions[m_nCurMessage]);

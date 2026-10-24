@@ -348,7 +348,8 @@ LTBOOL CFolderSave::HandleKeyDown(int key, int rep)
 
 void CFolderSave::NameSaveGame(uint32 slot, int index)
 {
-	sprintf(m_szSaveName,"%s", g_pGameClientShell->GetCurrentWorldName());
+	// Bounded: custom worlds have paths longer than the name.
+	snprintf(m_szSaveName,sizeof(m_szSaveName),"%s", g_pGameClientShell->GetCurrentWorldName());
 
 	if (!g_pGameClientShell->IsCustomLevel())
 	{
@@ -361,12 +362,12 @@ void CFolderSave::NameSaveGame(uint32 slot, int index)
 			HSTRING hTxt=g_pLTClient->FormatString(missionId);
 			if (sceneNum <= 0)
 			{
-				sprintf(m_szSaveName,"%s",g_pLTClient->GetStringData(hTxt));
+				snprintf(m_szSaveName,sizeof(m_szSaveName),"%s",g_pLTClient->GetStringData(hTxt));
 			}
 			else
 			{
 				HSTRING hTxt2=g_pLTClient->FormatString(IDS_SCENENUMBER,sceneNum + 1);
-				sprintf(m_szSaveName,"%s, %s",g_pLTClient->GetStringData(hTxt),g_pLTClient->GetStringData(hTxt2));
+				snprintf(m_szSaveName,sizeof(m_szSaveName),"%s, %s",g_pLTClient->GetStringData(hTxt),g_pLTClient->GetStringData(hTxt2));
 				g_pLTClient->FreeString(hTxt2);
 			}
 			g_pLTClient->FreeString(hTxt);

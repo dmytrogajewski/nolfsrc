@@ -69,7 +69,7 @@ LTBOOL CFolderHostOptions::Build()
 	if (!m_anValues)
 	{
 		m_anValues = debug_newa(int, g_pServerOptionMgr->GetNumOptions());
-		memset(m_anValues,0,sizeof(m_anValues));
+		memset(m_anValues,0,sizeof(*m_anValues)*g_pServerOptionMgr->GetNumOptions());
 	}
 
  	// Make sure to call the base class

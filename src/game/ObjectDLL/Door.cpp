@@ -99,7 +99,7 @@ LTFLOAT GetDoorWaveValue(LTFLOAT fSpeed, LTFLOAT fPercent, uint32 nWaveType)
 {
 	if (nWaveType == DOORWAVE_LINEAR) return fSpeed;
 
-    LTFLOAT fNewSpeed;
+    LTFLOAT fNewSpeed = fSpeed;
     LTFLOAT f10Percent = fSpeed * 0.1f;
 
 	switch (nWaveType)

@@ -9,6 +9,7 @@
 #include "AISense.h"
 #include "AIState.h"
 #include "DeathScene.h"
+#include "CharacterMgr.h"
 #include "AINodeMgr.h"
 #include "PlayerObj.h"
   
@@ -36,8 +37,10 @@ HOBJECT GetEnemyTargetObject(CAISense* pAISense)
 		case stSeeAllyDeath:
 		case stHearAllyDeath:
 		{
-			CDeathScene* pDeathScene = (CDeathScene*)g_pLTServer->HandleToObject(pAISense->GetStimulus());
-			if ( pDeathScene->GetObject() )
+			// The stimulus is the body, not its death scene: look the scene
+			// up as the sense does (the cast read a Body as a CDeathScene).
+			CDeathScene* pDeathScene = g_pCharacterMgr->GetDeathScene(pAISense->GetStimulus());
+			if ( pDeathScene && pDeathScene->GetObject() )
 			{
 				Body* pBody = (Body*)g_pLTServer->HandleToObject(pDeathScene->GetObject());
 				hTarget = pBody->GetLastDamager();
@@ -94,8 +97,10 @@ const char* GetEnemyTargetName(CAISense* pAISense)
 		case stSeeAllyDeath:
 		case stHearAllyDeath:
 		{
-			CDeathScene* pDeathScene = (CDeathScene*)g_pLTServer->HandleToObject(pAISense->GetStimulus());
-			if ( pDeathScene->GetObject() )
+			// The stimulus is the body, not its death scene: look the scene
+			// up as the sense does (the cast read a Body as a CDeathScene).
+			CDeathScene* pDeathScene = g_pCharacterMgr->GetDeathScene(pAISense->GetStimulus());
+			if ( pDeathScene && pDeathScene->GetObject() )
 			{
 				Body* pBody = (Body*)g_pLTServer->HandleToObject(pDeathScene->GetObject());
 				hTarget = pBody->GetLastDamager();
@@ -227,7 +232,7 @@ void CAIHuman::HitSwitch(CAISense* pAISense, LTBOOL bIndividual)
 			CAINode* pAINode = g_pAINodeMgr->FindNearestUseObject(m_vPos, "Switch");
 			if ( !pAINode )
 			{
-				sprintf(s_szTrigger, "TARGET (%s);ATTACK %s", ::GetEnemyTargetName(pAISense));
+				sprintf(s_szTrigger, "TARGET (%s);ATTACK FIRSTSOUND=%s", ::GetEnemyTargetName(pAISense), bIndividual ? "TRUE" : "FALSE");
 			}
 			else
 			{
@@ -1120,7 +1125,7 @@ void CAIHuman::DoReaction(HSTRING hstrReaction, CAISense* pAISense, LTBOOL bIndi
 	{
 		// If it doesn't match one of these, it must be a command
 
-        sprintf(s_szTrigger, g_pLTServer->GetStringData(hstrReaction));
+        sprintf(s_szTrigger, "%s", g_pLTServer->GetStringData(hstrReaction));
 	}
 
 	DidReaction(pAISense, bIndividual);

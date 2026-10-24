@@ -545,6 +545,19 @@ LTRESULT ClientScene::State::load_world(std::string_view name) {
     const auto result=this->create(create,object,ClientObjectLifetime::World,loaded); if (result!=LT_OK) return result;
     try { check(index.BindVisibility(loaded->FindFlagged20()),LT_INVALIDWORLDFILE,"invalid client world visibility"); }
     catch (...) { remove(object,false); index.BindVisibility(nullptr); throw; }
+    // Terrain sections are world models the server never sends (its update
+    // skips simple BSPs): the client makes its own, as the server's
+    // PrecacheModels does, so the player stands on them.
+    for (auto* record : std::span(loaded->m_Worlds.GetArray(),loaded->m_Worlds.GetSize())) {
+        if (!(record->m_pWorldBsp->m_nUnknown48&8)) continue;
+        for (uint32 section=0;section<record->m_pWorldBsp->m_Array138.GetSize();++section) {
+            ObjectCreateStruct terrain; terrain.m_ObjectType=OT_WORLDMODEL; terrain.m_Flags=FLAG_SOLID|FLAG_RAYHIT;
+            // The server's fs_GetTableName spelling, which AttachWorldModel reads.
+            const auto written=std::snprintf(terrain.m_Filename,sizeof(terrain.m_Filename),"#$#%u %s",unsigned(section),record->m_pWorldBsp->m_Name);
+            check(written>0 && std::size_t(written)<sizeof(terrain.m_Filename),LT_INVALIDWORLDFILE,"oversized terrain name");
+            HOBJECT piece=nullptr; const auto made=this->create(terrain,piece,ClientObjectLifetime::World,loaded); if (made!=LT_OK) return made;
+        }
+    }
     world=std::move(loaded); world_object=object; records.at(object).info.main_world=true; world_path=std::move(filename); return LT_OK;
 }
 void ClientScene::State::unload_world() {

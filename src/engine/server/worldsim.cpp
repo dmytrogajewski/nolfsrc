@@ -2584,7 +2584,6 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 	LTVector       vMin;
 	LTVector       vSave;
 	LTVector       vAny;
-	LTVector       vPoint;
 	LTVector       vOrigNormal;
 	LTVector       vPointA;
 	LTVector       vVel;
@@ -2618,6 +2617,15 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 
 	pRecs = g_pMoveState->m_pWorldBsp->GetPolyRefs();
 
+	// Two walks over the same candidates: the faces too steep to stand on
+	// first, which can only shove the mover sideways, and then the ones it
+	// can stand on, so each lift is measured where the mover will be. Lifted
+	// first and shoved afterwards, it hung in the air beside a steep hillside
+	// as far above the slope as the shove had carried it, every frame.
+	const uint16 nRoot = nBlock;
+	for (int nPass = 0; nPass < 2; ++nPass)
+	{
+	nBlock = nRoot;
 	nStack.clear();
 	std::size_t candidate_index = 0;
 
@@ -2672,7 +2680,8 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 		}
 		else
 		{
-			if (pOwner && pPlane->m_Normal.y > g_fStepMinNormalY)
+			if (pOwner && pPlane->m_Normal.y > g_fStepMinNormalY &&
+			    (pPlane->m_Normal.y >= g_fStepSlopeLimit) == (nPass == 1))
 			{
 				vVel = g_pMoveResult->m_vVelocityAdd;
 
@@ -2705,18 +2714,18 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 						          vOrigNormal.y * pInfo->m_Plane.m_Normal.y +
 						          vOrigNormal.x * pInfo->m_Plane.m_Normal.x);
 
-						for (nPoint = 0; nPoint < 4; nPoint++)
-						{
-							vPoint = g_SweepPoints[1][nPoint];
+						// How far the destination itself is in, by the
+						// mover's own shape. Measured from the sweep's corners,
+						// the start's were in it as well, and every world
+						// model holding this face shoved the destination
+						// out again by that much.
+						const LTVector vEndCentre = g_vMoveEnd + g_vMoveBase;
+						fDist = (pPlane->DistTo(vEndCentre) -
+						         phys_SupportRadius(g_pMoveState->m_vDims, pObj->m_Flags,
+						                            pObj->m_Flags2, pPlane->m_Normal)) * -fScale;
 
-							fDist = (pInfo->m_Plane.m_Dist -
-							         (vPoint.y * pPlane->m_Normal.y +
-							          vPoint.z * pPlane->m_Normal.z +
-							          vPoint.x * pPlane->m_Normal.x)) * fScale;
-
-							if (fDist < fBest)
-								fBest = fDist;
-						}
+						if (fDist < fBest)
+							fBest = fDist;
 					}
 					else
 					{
@@ -2751,19 +2760,40 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 					// along the slope's normal, that is backwards, off it.
 					// Over the polygon throughout, this is retail's lift,
 					// straight up.
+					//
+					// The lift is what the destination's own feet still need.
+					// Measured from the lower end of the sweep, a slope going
+					// down raised the destination to where the move began, so
+					// the mover floated off every downhill step with nothing
+					// under it; and going up, a destination already lifted
+					// was lifted again by the next world model holding the
+					// same polygon -- terrain sections share the ones on their
+					// borders -- and by every retry of the push loop. Nor is
+					// the lift more than the mover's own shape needs to clear
+					// the plane: a cylinder on a slope rests lower than the
+					// corner of its square footprint, and lifted to that
+					// corner it never touched the floor it was put on.
 					vPush.Init(0.0f, 0.0f, 0.0f);
 					if (pPlane->m_Normal.y >= g_fStepSlopeLimit)
 					{
+						const LTVector vFoot = g_vMoveEnd + g_vMoveBase;
+						const LTVector& vHalf = g_pMoveState->m_vDims;
+						const float fFoot = vFoot.y - vHalf.y;
 						float fTop;
 						int   nOver = ws_PolyTopOver(pOwner,
-						                            g_SweepPoints[1][0].x, g_SweepPoints[1][2].x,
-						                            g_SweepPoints[1][0].z, g_SweepPoints[1][2].z,
+						                            vFoot.x - vHalf.x, vFoot.x + vHalf.x,
+						                            vFoot.z - vHalf.z, vFoot.z + vHalf.z,
 						                            &fTop);
+						if (nOver > 0)
+						{
+							const float fGap = pPlane->DistTo(vFoot) -
+							    phys_SupportRadius(vHalf, pObj->m_Flags, pObj->m_Flags2, pPlane->m_Normal);
+							fTop = std::min(fTop, fFoot - fGap / pPlane->m_Normal.y);
+						}
 
 						if (nOver >= 0)
 						{
-							fBest = (nOver && fTop > g_SweepPoints[1][0].y) ?
-							        g_SweepPoints[1][0].y - fTop : 0.0f;
+							fBest = (nOver && fTop > fFoot) ? fFoot - fTop : 0.0f;
 							vPush.y = -fBest;
 						}
 					}
@@ -2843,6 +2873,7 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 
 			nBlock = pNode->m_nChild[1];
 		}
+	}
 	}
 
 	return nResult;

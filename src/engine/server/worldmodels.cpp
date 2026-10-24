@@ -1,5 +1,6 @@
 #include "worldmodels.h"
 #include "ltobject_internal.h"
+#include <algorithm>
 #include <charconv>
 #include <string_view>
 
@@ -24,6 +25,14 @@ int CServerWorld::AttachWorldModel(LTObject* object, char* name) {
     const auto* geometry = Geometry();
     const auto* bounds = geometry ? w_FindLayoutNode(geometry->layout, terrain.m_Header48) : nullptr;
     if (!bounds) return 0;
-    const auto dims = (bounds->max - bounds->min) * .5f;
-    object->SetWorldBsp(&terrain, nullptr); object->SetDims(dims); object->SetPos(bounds->min + dims); return 1;
+    // The layout cell places the section; its polygons reach past the cell,
+    // and the object's box is what collision tests first, so it spans both.
+    auto minimum = bounds->min, maximum = bounds->max;
+    if (terrain.m_vBoxMin.x <= terrain.m_vBoxMax.x && terrain.m_vBoxMin.y <= terrain.m_vBoxMax.y && terrain.m_vBoxMin.z <= terrain.m_vBoxMax.z)
+        for (uint32 axis = 0; axis < 3; ++axis) {
+            minimum[axis] = std::min(minimum[axis], terrain.m_vBoxMin[axis]);
+            maximum[axis] = std::max(maximum[axis], terrain.m_vBoxMax[axis]);
+        }
+    const auto dims = (maximum - minimum) * .5f;
+    object->SetWorldBsp(&terrain, nullptr); object->SetDims(dims); object->SetPos(minimum + dims); return 1;
 }

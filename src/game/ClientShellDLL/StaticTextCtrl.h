@@ -5,9 +5,6 @@
 #if !defined(_STATICTEXTCTRL_H_)
 #define _STATICTEXTCTRL_H_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
 #include "ltguimgr.h"
 

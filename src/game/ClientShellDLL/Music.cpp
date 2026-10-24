@@ -8,7 +8,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "iltdirectmusic.h"
 #include "iltclient.h"
 #include "ClientServerShared.h"
@@ -226,8 +227,8 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 			if (parse.m_Args[1] != NULL)
 			{
 				// change intensity command
-				if ((_stricmp(parse.m_Args[1], "intensity") == 0) ||
-					(_stricmp(parse.m_Args[1], "i") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "intensity") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "i") == 0))
 				{
 					if (parse.m_nArgs > 2)
 					{
@@ -246,8 +247,8 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 					}
 				}
 				// play secondary segment command
-				if ((_stricmp(parse.m_Args[1], "secondary") == 0) ||
-					(_stricmp(parse.m_Args[1], "ps") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "secondary") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "ps") == 0))
 
 				{
 					if (parse.m_nArgs > 2)
@@ -266,8 +267,8 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 					}
 				}
 				// play motif command
-				if ((_stricmp(parse.m_Args[1], "motif") == 0) ||
-					(_stricmp(parse.m_Args[1], "pm") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "motif") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "pm") == 0))
 				{
 					if (parse.m_nArgs > 3)
 					{
@@ -284,7 +285,7 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 							}
 
 							// play a motif
-							if ((stricmp(m_State.szMotifStyle,"*") == 0))
+							if ((nolf::ascii_compare(m_State.szMotifStyle,"*") == 0))
 							{
 								m_pMusicMgr->PlayMotif(NULL, m_State.szMotifName, m_State.nMotifEnact);
 							}
@@ -296,8 +297,8 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 					}
 				}
 				// set volume command
-				if ((_stricmp(parse.m_Args[1], "volume") == 0) ||
-					(_stricmp(parse.m_Args[1], "v") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "volume") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "v") == 0))
 				{
 					if (parse.m_nArgs > 2)
 					{
@@ -309,8 +310,8 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 					}
 				}
 				// stop secondary segment command
-				if ((_stricmp(parse.m_Args[1], "stopsecondary") == 0) ||
-					(_stricmp(parse.m_Args[1], "ss") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "stopsecondary") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "ss") == 0))
 
 				{
 					if (parse.m_nArgs > 2)
@@ -325,14 +326,14 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 							if (parse.m_nArgs > 3) nEnact = StringToEnactType(parse.m_Args[3]);
 
 							// stop a secondary segment if name is * stop all
-							if ((stricmp(parse.m_Args[2],"*") == 0)) m_pMusicMgr->StopSecondary(NULL, nEnact);
+							if ((nolf::ascii_compare(parse.m_Args[2],"*") == 0)) m_pMusicMgr->StopSecondary(NULL, nEnact);
 							else m_pMusicMgr->StopSecondary(parse.m_Args[2], nEnact);
 						}
 					}
 				}
 				// stop motif command
-				if ((_stricmp(parse.m_Args[1], "stopmotif") == 0) ||
-					(_stricmp(parse.m_Args[1], "sm") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "stopmotif") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "sm") == 0))
 				{
 					if (parse.m_nArgs > 3)
 					{
@@ -347,30 +348,30 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 							if (parse.m_nArgs > 4) nEnact = StringToEnactType(parse.m_Args[4]);
 
 							// if name or style are * pass in NULL for all/any
-							if ((stricmp(parse.m_Args[2],"*") == 0))
+							if ((nolf::ascii_compare(parse.m_Args[2],"*") == 0))
 							{
-								if ((stricmp(parse.m_Args[3],"*") == 0)) m_pMusicMgr->StopMotif(NULL, NULL, nEnact);
+								if ((nolf::ascii_compare(parse.m_Args[3],"*") == 0)) m_pMusicMgr->StopMotif(NULL, NULL, nEnact);
 								else m_pMusicMgr->StopMotif(NULL, parse.m_Args[3], nEnact);
 							}
 							else
 							{
-								if ((stricmp(parse.m_Args[3],"*") == 0)) m_pMusicMgr->StopMotif(parse.m_Args[2], NULL, nEnact);
+								if ((nolf::ascii_compare(parse.m_Args[3],"*") == 0)) m_pMusicMgr->StopMotif(parse.m_Args[2], NULL, nEnact);
 								else m_pMusicMgr->StopMotif(parse.m_Args[2], parse.m_Args[3], nEnact);
 							}
 						}
 					}
 				}
 				// play command
-				if ((_stricmp(parse.m_Args[1], "play") == 0) ||
-					(_stricmp(parse.m_Args[1], "p") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "play") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "p") == 0))
 
 				{
 					// begin playing music
 					Play();
 				}
 				// stop command
-				if ((_stricmp(parse.m_Args[1], "stop") == 0) ||
-					(_stricmp(parse.m_Args[1], "s") == 0))
+				if ((nolf::ascii_compare(parse.m_Args[1], "stop") == 0) ||
+					(nolf::ascii_compare(parse.m_Args[1], "s") == 0))
 
 				{
 					// enact time to stop at
@@ -406,18 +407,18 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 LTDMEnactTypes CMusic::StringToEnactType(const char* sName)
 {
 	if (sName == NULL) return LTDMEnactDefault;
-	if (stricmp(sName, "Invalid") == 0) return LTDMEnactInvalid;
-	if (stricmp(sName, "Default") == 0) return LTDMEnactDefault;
-	if (stricmp(sName, "Immediatly") == 0) return LTDMEnactImmediatly;
-	if (stricmp(sName, "Immediate") == 0) return LTDMEnactImmediatly;
-	if (stricmp(sName, "NextBeat") == 0) return LTDMEnactNextBeat;
-	if (stricmp(sName, "NextMeasure") == 0) return LTDMEnactNextMeasure;
-	if (stricmp(sName, "NextGrid") == 0) return LTDMEnactNextGrid;
-	if (stricmp(sName, "NextSegment") == 0) return LTDMEnactNextSegment;
-	if (stricmp(sName, "Beat") == 0) return LTDMEnactNextBeat;
-	if (stricmp(sName, "Measure") == 0) return LTDMEnactNextMeasure;
-	if (stricmp(sName, "Grid") == 0) return LTDMEnactNextGrid;
-	if (stricmp(sName, "Segment") == 0) return LTDMEnactNextSegment;
+	if (nolf::ascii_compare(sName, "Invalid") == 0) return LTDMEnactInvalid;
+	if (nolf::ascii_compare(sName, "Default") == 0) return LTDMEnactDefault;
+	if (nolf::ascii_compare(sName, "Immediatly") == 0) return LTDMEnactImmediatly;
+	if (nolf::ascii_compare(sName, "Immediate") == 0) return LTDMEnactImmediatly;
+	if (nolf::ascii_compare(sName, "NextBeat") == 0) return LTDMEnactNextBeat;
+	if (nolf::ascii_compare(sName, "NextMeasure") == 0) return LTDMEnactNextMeasure;
+	if (nolf::ascii_compare(sName, "NextGrid") == 0) return LTDMEnactNextGrid;
+	if (nolf::ascii_compare(sName, "NextSegment") == 0) return LTDMEnactNextSegment;
+	if (nolf::ascii_compare(sName, "Beat") == 0) return LTDMEnactNextBeat;
+	if (nolf::ascii_compare(sName, "Measure") == 0) return LTDMEnactNextMeasure;
+	if (nolf::ascii_compare(sName, "Grid") == 0) return LTDMEnactNextGrid;
+	if (nolf::ascii_compare(sName, "Segment") == 0) return LTDMEnactNextSegment;
 	return LTDMEnactDefault;
 }
 
@@ -604,8 +605,8 @@ LTBOOL CMusic::RestoreMusicState(const CMusicState & newState)
 
 	// See if anything has changed...
 
-	if ((stricmp(m_State.szDirectory, newState.szDirectory) != 0) ||
-		(stricmp(m_State.szControlFile, newState.szControlFile) != 0))
+	if ((nolf::ascii_compare(m_State.szDirectory, newState.szDirectory) != 0) ||
+		(nolf::ascii_compare(m_State.szControlFile, newState.szControlFile) != 0))
 	{
 		if (!InitLevel((char*)newState.szDirectory, (char*)newState.szControlFile))
 		{

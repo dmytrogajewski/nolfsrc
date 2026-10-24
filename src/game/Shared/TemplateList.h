@@ -19,7 +19,9 @@
 #define __TEMPLATE_LIST_H__
 
 #include "ltlink.h"
-#include "globals.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "Globals.h"
 #include "BankedList.h"
 
 enum TListItemType { TLIT_FIRST=0, TLIT_NEXT, TLIT_CURRENT, TLIT_LAST };
@@ -56,7 +58,7 @@ class CTList
 		// Note : The banked list is stored per list type so it doesn't get huge
 		CBankedList<LTLink> *GetBank()
 		{
-			_ASSERT(!!s_pLTLinkBank);
+			GAME_ASSERT(!!s_pLTLinkBank);
 			return s_pLTLinkBank;
 		}
 

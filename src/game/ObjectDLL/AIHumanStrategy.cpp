@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIHumanStrategy.h"
 #include "CharacterMgr.h"
 #include "AIHuman.h"
@@ -172,7 +175,7 @@ void CAIHumanStrategyFollowPath::HandleModelString(ArgList* pArgList)
 	char* szKey = pArgList->argv[0];
 	if ( !szKey ) return;
 
-	if ( !_stricmp(szKey, "DOOR") )
+	if ( !nolf::ascii_compare(szKey, "DOOR") )
 	{
 		m_eDoorState = eDoorStateWaitingForAnimationToFinish;
 	}
@@ -192,7 +195,7 @@ void CAIHumanStrategyFollowPath::Update()
 {
 	CAIHumanStrategy::Update();
 
-	_ASSERT(m_eState == eStateSet);
+	GAME_ASSERT(m_eState == eStateSet);
 
 	CAIPathWaypoint* pWaypointPrev = LTNULL;
 	CAIPathWaypoint* pWaypoint;
@@ -231,7 +234,7 @@ void CAIHumanStrategyFollowPath::Update()
 			default:
 			{
                 g_pLTServer->CPrint("CAIHumanStrategyFollowPath::Update - unrecognized waypoint instruction");
-				_ASSERT(!"CAIHumanStrategyFollowPath::Update - unrecognized waypoint instruction");
+				GAME_ASSERT(!"CAIHumanStrategyFollowPath::Update - unrecognized waypoint instruction");
 			}
 			break;
 		}
@@ -293,7 +296,7 @@ void CAIHumanStrategyFollowPath::UpdateAnimation()
 
 				case CAIPathWaypoint::eInstructionWaitForDoors:
 				{
-					_ASSERT(eDoorStateWaitingForDoorToOpen == m_eDoorState);
+					GAME_ASSERT(eDoorStateWaitingForDoorToOpen == m_eDoorState);
 				}
 				break;
 
@@ -356,7 +359,7 @@ void CAIHumanStrategyFollowPath::UpdateAnimation()
 		break;
 
 		default:
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 			break;
 	}
 }
@@ -749,7 +752,7 @@ void CAIHumanStrategyOneShotAni::Update()
 	{
 		case eUnset:
 		{
-			//_ASSERT(LTFALSE);
+			//GAME_ASSERT(LTFALSE);
 		}
 		break;
 
@@ -1230,7 +1233,7 @@ void CAIHumanStrategyDodge::Check()
 
 void CAIHumanStrategyDodge::Dodge()
 {
-	_ASSERT(m_eState == eStateChecking && (m_eDodgeStatus != eDodgeStatusOk));
+	GAME_ASSERT(m_eState == eStateChecking && (m_eDodgeStatus != eDodgeStatusOk));
 
 	if ( m_eState == eStateChecking && (m_eDodgeStatus != eDodgeStatusOk) )
 	{
@@ -2449,7 +2452,7 @@ void CAIHumanStrategyGrenadeThrow::HandleModelString(ArgList* pArgList)
 
 	if ( !pArgList || !pArgList->argv || pArgList->argc == 0 || !pArgList->argv[0] ) return;
 
-	if ( !_stricmp(pArgList->argv[0], "THROW") )
+	if ( !nolf::ascii_compare(pArgList->argv[0], "THROW") )
 	{
 		if ( eStateThrowing == m_eState )
 		{
@@ -2457,7 +2460,7 @@ void CAIHumanStrategyGrenadeThrow::HandleModelString(ArgList* pArgList)
 		}
 		else
 		{
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 		}
 	}
 }
@@ -2479,7 +2482,7 @@ void CAIHumanStrategyGrenadeThrow::Update()
 	switch ( m_eState )
 	{
 		case eStateNone:
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 			return;
 			break;
 		case eStateThrowing:
@@ -2687,7 +2690,7 @@ void CAIHumanStrategyShoot::HandleModelString(ArgList* pArgList)
 	char* szKey = pArgList->argv[0];
 	if ( !szKey ) return;
 
-	if ( !_stricmp(szKey, c_szKeyFireWeapon) )
+	if ( !nolf::ascii_compare(szKey, c_szKeyFireWeapon) )
 	{
 		HandleFired();
 	}
@@ -2841,7 +2844,7 @@ void CAIHumanStrategyShoot::UpdateAnimation()
 
 		default:
 		{
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 		}
 		break;
 	}
@@ -2999,7 +3002,7 @@ void CAIHumanStrategyShootBurst::Destructor()
 
 LTBOOL CAIHumanStrategyShootBurst::Init(CAIHuman* pAIHuman)
 {
-	_ASSERT(pAIHuman);
+	GAME_ASSERT(pAIHuman);
 	if ( !pAIHuman ) return LTFALSE;
 
 	if ( !CAIHumanStrategyShoot::Init(pAIHuman) )
@@ -3317,7 +3320,9 @@ void CAIHumanStrategyFlashlight::FlashlightCreate()
 		GetAI()->Link(m_hFlashlightModel);
 
 		HATTACHMENT hAttachment;
-		if ( LT_OK == g_pLTServer->CreateAttachment(GetAI()->GetObject(), m_hFlashlightModel, "LeftHand", &LTVector(0,0,0), &LTRotation(0,0,0,1), &hAttachment) )
+		LTVector offset(0,0,0);
+		LTRotation rotation(0,0,0,1);
+		if ( LT_OK == g_pLTServer->CreateAttachment(GetAI()->GetObject(), m_hFlashlightModel, "LeftHand", &offset, &rotation, &hAttachment) )
 		{
 
 		}
@@ -3389,7 +3394,7 @@ void CAIHumanStrategyFlashlight::HandleModelString(ArgList* pArgList)
 	char* szKey = pArgList->argv[0];
 	if ( !szKey ) return;
 
-	if ( !_stricmp(szKey, "FL_SHOW") )
+	if ( !nolf::ascii_compare(szKey, "FL_SHOW") )
 	{
 		if ( !m_hFlashlightModel ) 
 		{
@@ -3398,11 +3403,11 @@ void CAIHumanStrategyFlashlight::HandleModelString(ArgList* pArgList)
 
 		FlashlightShow();
 	}
-	else if ( !_stricmp(szKey, "FL_HIDE") )
+	else if ( !nolf::ascii_compare(szKey, "FL_HIDE") )
 	{
 		FlashlightHide();
 	}
-	else if ( !_stricmp(szKey, "FL_ON") )
+	else if ( !nolf::ascii_compare(szKey, "FL_ON") )
 	{
 		if ( !m_hFlashlightModel ) 
 		{
@@ -3411,7 +3416,7 @@ void CAIHumanStrategyFlashlight::HandleModelString(ArgList* pArgList)
 
 		FlashlightOn();
 	}
-	else if ( !_stricmp(szKey, "FL_OFF") )
+	else if ( !nolf::ascii_compare(szKey, "FL_OFF") )
 	{
 		FlashlightOff();
 	}

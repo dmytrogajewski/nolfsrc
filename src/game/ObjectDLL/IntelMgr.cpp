@@ -10,7 +10,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "IntelMgr.h"
 #include "CommonUtilities.h"
 #include "DebrisMgr.h"
@@ -152,7 +155,7 @@ INTEL* CIntelMgr::GetIntel(char* pName)
 
 	while (pCur)
 	{
-		if (*pCur && (*pCur)->szName[0] && (_stricmp((*pCur)->szName, pName) == 0))
+		if (*pCur && (*pCur)->szName[0] && (nolf::ascii_compare((*pCur)->szName, pName) == 0))
 		{
 			return *pCur;
 		}
@@ -381,18 +384,18 @@ LTBOOL CIntelMgrPlugin::PopulateStringList(char** aszStrings, uint32* pcStrings,
     const uint32 cMaxStrings, const uint32 cMaxStringLength)
 {
     if (!aszStrings || !pcStrings) return LTFALSE;
-	_ASSERT(aszStrings && pcStrings);
+	GAME_ASSERT(aszStrings && pcStrings);
 
 	// Add an entry for each Intel type
 
 	int nNumIntel = g_pIntelMgr->GetNumIntels();
-	_ASSERT(nNumIntel > 0);
+	GAME_ASSERT(nNumIntel > 0);
 
     INTEL* pIntel = LTNULL;
 
 	for (int i=0; i < nNumIntel; i++)
 	{
-		_ASSERT(cMaxStrings > (*pcStrings) + 1);
+		GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 		pIntel = g_pIntelMgr->GetIntel(i);
 		if (pIntel && pIntel->szName[0])

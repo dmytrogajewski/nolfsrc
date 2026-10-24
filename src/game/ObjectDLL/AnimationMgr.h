@@ -5,6 +5,8 @@
 
 #include "AnimationParser.h"
 
+class CAnimationMgr;
+
 // CAnimationProp
 
 class CAnimationProp

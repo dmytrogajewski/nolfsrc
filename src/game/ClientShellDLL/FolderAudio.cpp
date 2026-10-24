@@ -1,7 +1,7 @@
 // FolderAudio.cpp: implementation of the CFolderAudio class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderAudio.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

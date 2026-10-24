@@ -12,7 +12,7 @@
 //
 //------------------------------------------------------------------------
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "GameClientShell.h"
 #include "MessageMgr.h"
 #include "VKDefs.h"

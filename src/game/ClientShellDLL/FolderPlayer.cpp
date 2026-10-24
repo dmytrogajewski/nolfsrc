@@ -1,14 +1,19 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // FolderPlayer.cpp: implementation of the CFolderPlayer class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "FolderPlayer.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
 #include "ClientRes.h"
 #include "VarTrack.h"
 #include "NetDefs.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 
 #include "GameClientShell.h"
 #ifdef NOLFSRC_MODERN
@@ -315,7 +320,7 @@ void    CFolderPlayer::OnFocus(LTBOOL bFocus)
 			if ( strchr(szTemp, ',') )
 			{
 				*strchr(szTemp, ',') = '_';
-				_strlwr(szTemp);
+				nolf::ascii_lowercase(szTemp);
 				strcpy(m_szPlayerSkin, g_pModelButeMgr->GetButeMgr()->GetString(szTemp, "Skin0"));
 				strcpy(m_szPlayerHead, g_pModelButeMgr->GetButeMgr()->GetString(szTemp, "Head0"));
 			} 
@@ -490,7 +495,7 @@ LTBOOL   CFolderPlayer::CreatePlayerModel(LTBOOL bNewSkin /* = LTTRUE */)
 		char szTag[128];
 		char szValue[128];
 		sprintf(szTag, "%s_%s", temp, m_szStyleName);
-		_strlwr(szTag);
+		nolf::ascii_lowercase(szTag);
 
 		m_pSkinCtrl->RemoveAll();
 		m_pHeadCtrl->RemoveAll();
@@ -660,7 +665,7 @@ LTBOOL   CFolderPlayer::CreatePlayerModel(LTBOOL bNewSkin /* = LTTRUE */)
 				CreateAttachFX(&acs);
 			}
 			int numAtt = g_pLayoutMgr->GetFolderNumAttachments((eFolderID)m_nFolderID);
-			for (i = 0; i < numAtt; i++)
+			for (int i = 0; i < numAtt; i++)
 			{
 				char szTemp[128];
 				char *pName = LTNULL;
@@ -712,7 +717,7 @@ void CFolderPlayer::BuildModelList()
 		{
 			char szTemp[128];
 			strcpy(szTemp,ptr->m_pBaseFilename);
-			strupr(szTemp);
+			nolf::ascii_uppercase(szTemp);
 			if (strstr(szTemp,"_MULTI.ABC"))
 			{
 				int len =  strlen(szTemp);
@@ -720,7 +725,7 @@ void CFolderPlayer::BuildModelList()
 					szTemp[len-10] = NULL;
 				char szTag[1024];
 				strcpy(szTag, szTemp);
-				_strlwr(szTag);
+				nolf::ascii_lowercase(szTag);
 				char *pTemp = strchr(szTemp,'_');
 				*pTemp = ',';
 
@@ -750,7 +755,7 @@ void CFolderPlayer::BuildModelList()
 		}
 
         HSTRING hStr = g_pLTClient->CreateString((char *)(LPCSTR)stringList[nLowest]);
-		if (stricmp(m_szPlayerModel,stringList[nLowest]) == 0)
+		if (nolf::ascii_compare(m_szPlayerModel,stringList[nLowest]) == 0)
 			m_nModNum = num;
 		m_pModelCtrl->AddString(hStr);
         g_pLTClient->FreeString(hStr);

@@ -1,9 +1,9 @@
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "GameClientShell.h"
 #include "iltclient.h"
 #include "GameSettings.h"
 #include "stdio.h"
-#include "windows.h"
 #include "ClientRes.h"
 #include "GameClientShell.h"
 
@@ -32,7 +32,7 @@ LTBOOL CGameSettings::Init (ILTClient* pClientDE, CGameClientShell* pClientShell
 	// check if gore is allowed
 
 	HSTRING hStr = g_pLTClient->FormatString(IDS_ALLOW_NO_GORE);
-	m_bAllowGore = (stricmp(g_pLTClient->GetStringData(hStr),"TRUE") != 0);
+	m_bAllowGore = (nolf::ascii_compare(g_pLTClient->GetStringData(hStr),"TRUE") != 0);
 	g_pLTClient->FreeString(hStr);
 
 	if (!m_bAllowGore)
@@ -145,8 +145,8 @@ LTBOOL CGameSettings::ImplementRendererSetting()
 	}
 
 	m_pClientDE->GetRenderMode (&current);
-	if (stricmp (CurrentRenderer.m_Description, current.m_Description) != 0 ||
-		stricmp (CurrentRenderer.m_RenderDLL, current.m_RenderDLL) != 0 ||
+	if (nolf::ascii_compare (CurrentRenderer.m_Description, current.m_Description) != 0 ||
+		nolf::ascii_compare (CurrentRenderer.m_RenderDLL, current.m_RenderDLL) != 0 ||
 		CurrentRenderer.m_Width != current.m_Width || CurrentRenderer.m_Height != current.m_Height)
 	{
 		// SetRenderMode() returned success, but it really didn't work

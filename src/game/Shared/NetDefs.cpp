@@ -10,9 +10,9 @@
 ;
 ****************************************************************************/
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "NetDefs.h"
-#include "ButeMgr.h"
+#include "butemgr.h"
 
 #include "ltbasedefs.h"
 
@@ -23,9 +23,7 @@ LTGUID NOLFGUID = {  // {8AFA62A2-01AE-11d5-B95C-00609709830E}
 	0x8afa62a2, 0x1ae, 0x11d5, 0xb9, 0x5c, 0x0, 0x60, 0x97, 0x9, 0x83, 0xe 
 };
 #else
-LTGUID NOLFGUID = { // {1DFB2BC1-EB40-11d2-B7D2-0060971766C1}
-	0x8afa62a1, 0x1ae, 0x11d5, 0xb9, 0x5c, 0x0, 0x60, 0x97, 0x9, 0x83, 0xe 
-};
+LTGUID NOLFGUID = kNolfApplicationGuid;
 #endif
 
 

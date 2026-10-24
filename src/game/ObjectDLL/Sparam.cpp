@@ -13,7 +13,9 @@
 
 // Includes...
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "Sparam.h"
 
 
@@ -31,16 +33,16 @@ bool Sparam_Get(char* sDest, const char* sSource, const char* sId)
 {
 	// Sanity checks...
 
-	_ASSERT(sSource);
-	_ASSERT(sId);
+	GAME_ASSERT(sSource);
+	GAME_ASSERT(sId);
 
 
 	// Scan for the ID...
 
 	char sRealId[256];
-	wsprintf(sRealId, "[%s:", sId);
+	snprintf(sRealId, sizeof(sRealId), "[%s:", sId);
 
-	char* sStart = strstr(sSource, sRealId);
+	const char* sStart = strstr(sSource, sRealId);
 	if (!sStart) return(false);
 
 
@@ -53,7 +55,7 @@ bool Sparam_Get(char* sDest, const char* sSource, const char* sId)
 
 	// Find the end of the param...
 
-	char* pEnd = strstr(sStart, "]");
+	const char* pEnd = strstr(sStart, "]");
 	if (!pEnd) return(false);
 	if (pEnd <= sStart) return(false);
 
@@ -92,8 +94,8 @@ bool Sparam_Add(char* sSource, const char* sId, const char* sParam)
 {
 	// Sanity checks...
 
-	_ASSERT(sSource);
-	_ASSERT(sId);
+	GAME_ASSERT(sSource);
+	GAME_ASSERT(sId);
 	if (!sParam) return(false);
 
 	
@@ -122,7 +124,7 @@ bool Sparam_Add(char* sSource, const char* sId, const char* sParam)
 bool Sparam_Add(char* sSource, const char* sId, int nParam)
 {
 	char sTmp[256];
-	wsprintf(sTmp, "%i", nParam);
+	snprintf(sTmp, sizeof(sTmp), "%i", nParam);
 
 	return(Sparam_Add(sSource, sId, sTmp));
 }

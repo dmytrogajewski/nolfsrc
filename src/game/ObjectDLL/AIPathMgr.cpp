@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIPathMgr.h"
 #include "AIPath.h"
 #include "AI.h"
@@ -29,15 +31,16 @@ struct CompareVolumeDistance
 
 CAIPathMgr* g_pAIPathMgr = LTNULL;
 
-// Statics
-
-static CAINodeMgr s_AINodeMgr;
-static CAIVolumeMgr s_AIVolumeMgr;
-static CAIRegionMgr s_AIRegionMgr;
-
 // Methods
 
-CAIPathMgr::CAIPathMgr()
+struct CAIPathMgr::Managers
+{
+	CAINodeMgr nodes;
+	CAIVolumeMgr volumes;
+	CAIRegionMgr regions;
+};
+
+CAIPathMgr::CAIPathMgr() : m_Managers(std::make_unique<Managers>())
 {
 	g_pAIPathMgr = this;
 
@@ -47,15 +50,16 @@ CAIPathMgr::CAIPathMgr()
 CAIPathMgr::~CAIPathMgr()
 {
 	Term();
+	if (g_pAIPathMgr == this) g_pAIPathMgr = LTNULL;
 }
 
 void CAIPathMgr::Term()
 {
 	g_lstGrenades.Clear();
 
-	s_AIRegionMgr.Term();
-	s_AIVolumeMgr.Term();
-	s_AINodeMgr.Term();
+	m_Managers->regions.Term();
+	m_Managers->volumes.Term();
+	m_Managers->nodes.Term();
 
     m_bInitialized = LTFALSE;
 }
@@ -66,12 +70,12 @@ void CAIPathMgr::Init()
 
 	g_lstGrenades.Init();
 
-	s_AINodeMgr.Init();
-	s_AIVolumeMgr.Init();
-	s_AIRegionMgr.Init();
+	m_Managers->nodes.Init();
+	m_Managers->volumes.Init();
+	m_Managers->regions.Init();
 
 #ifndef _FINAL
-	s_AINodeMgr.Verify();
+	m_Managers->nodes.Verify();
 #endif
 
     m_bInitialized = LTTRUE;
@@ -79,18 +83,18 @@ void CAIPathMgr::Init()
 
 void CAIPathMgr::Load(HMESSAGEREAD hRead)
 {
-	s_AIRegionMgr.Load(hRead);
-	s_AIVolumeMgr.Load(hRead);
-	s_AINodeMgr.Load(hRead);
+	m_Managers->regions.Load(hRead);
+	m_Managers->volumes.Load(hRead);
+	m_Managers->nodes.Load(hRead);
 
 	LOAD_BOOL(m_bInitialized);
 }
 
 void CAIPathMgr::Save(HMESSAGEWRITE hWrite)
 {
-	s_AIRegionMgr.Save(hWrite);
-	s_AIVolumeMgr.Save(hWrite);
-	s_AINodeMgr.Save(hWrite);
+	m_Managers->regions.Save(hWrite);
+	m_Managers->volumes.Save(hWrite);
+	m_Managers->nodes.Save(hWrite);
 
 	SAVE_BOOL(m_bInitialized);
 }
@@ -315,7 +319,7 @@ void CAIPathMgr::ReversePath(CAIVolume* pVolume, CAIVolume* pVolumeNext /* = LTN
 
 void CAIPathMgr::BuildPath(CAI* pAI, CAIPath* pPath, CAIVolume* pVolume, const LTVector& vPosDest)
 {
-	_ASSERT(pPath->HasAI());
+	GAME_ASSERT(pPath->HasAI());
 
 	if ( !pVolume->GetNextVolume() )
 	{

@@ -7,7 +7,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "GameClientShell.h"
 #include "cshell/p2_client.h"
 #include "cshell/p2_console.h"
@@ -39,7 +39,7 @@ struct P2SpeedRunInfo
 	int32	bLoading;			// 1 while a loading screen is up
 };
 
-extern "C" __declspec(dllexport) P2SpeedRunInfo NolfSpeedRunInfo =
+extern "C" NOLF_EXPORT P2SpeedRunInfo NolfSpeedRunInfo =
 {
 	{ 'N','O','L','F','S','P','E','E','D','R','U','N','I','N','F','O' },
 	1, -1, -1, 0

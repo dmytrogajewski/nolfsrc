@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "ClientSoundMgr.h"
 #include "CommonUtilities.h"
 #include "VarTrack.h"
@@ -97,7 +99,7 @@ HLTSOUND CClientSoundMgr::PlayInterfaceSound(char *pName, uint32 dwFlags)
 	psi.m_dwFlags = PLAYSOUND_LOCAL;
 	psi.m_dwFlags |= dwFlags;
 
-	strncpy(psi.m_szSoundName, pName, _MAX_PATH);
+	strncpy(psi.m_szSoundName, pName, LT_MAX_PATH);
 	psi.m_nPriority	= SOUNDPRIORITY_MISC_MEDIUM;
 
 	// Play interface sounds unfiltered...
@@ -137,7 +139,7 @@ HLTSOUND CClientSoundMgr::PlaySoundLocal(char *pName, SoundPriority ePriority,
 		psi.m_dwFlags |= PLAYSOUND_CTRL_VOL;
 	}
 
-	strncpy(psi.m_szSoundName, pName, _MAX_PATH);
+	strncpy(psi.m_szSoundName, pName, LT_MAX_PATH);
 	psi.m_nPriority		= ePriority;
 	psi.m_nVolume		= nVolume;
 	psi.m_fPitchShift	= fPitchShift;
@@ -186,7 +188,7 @@ HLTSOUND CClientSoundMgr::PlaySound(PlaySoundInfo & psi)
 	}
 	else
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		m_pInterface->CPrint("ERROR in CClientSoundMgr::PlaySound() - Couldn't play sound '%s'", psi.m_szSoundName);
 		return LTNULL;
 	}

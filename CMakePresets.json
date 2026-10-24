@@ -1,0 +1,20 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {"name": "native-debug", "generator": "Ninja", "binaryDir": "${sourceDir}/out/native-debug", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "NOLF_FETCH_SDL": "ON"}},
+    {"name": "native-release", "inherits": "native-debug", "binaryDir": "${sourceDir}/out/native-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
+    {"name": "native-sanitize", "inherits": "native-debug", "binaryDir": "${sourceDir}/out/native-sanitize", "cacheVariables": {"NOLF_SANITIZERS": "ON"}},
+    {"name": "native-headless", "inherits": "native-debug", "binaryDir": "${sourceDir}/out/native-headless", "cacheVariables": {"NOLF_BUILD_DESKTOP": "OFF", "NOLF_FETCH_SDL": "OFF"}}
+  ],
+  "buildPresets": [
+    {"name": "native-debug", "configurePreset": "native-debug"},
+    {"name": "native-release", "configurePreset": "native-release"},
+    {"name": "native-sanitize", "configurePreset": "native-sanitize"},
+    {"name": "native-headless", "configurePreset": "native-headless"}
+  ],
+  "testPresets": [
+    {"name": "native-debug", "configurePreset": "native-debug", "output": {"outputOnFailure": true}},
+    {"name": "native-sanitize", "configurePreset": "native-sanitize", "output": {"outputOnFailure": true}},
+    {"name": "native-headless", "configurePreset": "native-headless", "output": {"outputOnFailure": true}}
+  ]
+}

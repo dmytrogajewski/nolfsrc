@@ -4,6 +4,7 @@
 #define __AI_PATH_MGR_H__
 
 #include "AIPath.h"
+#include <memory>
 
 class CAI;
 class CAIPath;
@@ -48,6 +49,9 @@ class CAIPathMgr
 		void BuildEstimate(CAI* pAI, CAIVolume* pVolume, const LTVector& vPosCurrent, const LTVector& vPosDest, LTFLOAT* pfDistanceEstimate);
 
 	private :
+
+		struct Managers;
+		std::unique_ptr<Managers> m_Managers;
 
         LTBOOL       m_bInitialized;
 };

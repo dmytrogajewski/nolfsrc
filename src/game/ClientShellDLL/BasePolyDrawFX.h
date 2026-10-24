@@ -26,7 +26,12 @@ class CBasePolyDrawFX : public CSpecialFX
 	public :
 
         virtual LTBOOL CreateObject(ILTClient* pClientDE);
+#ifdef NOLFSRC_MODERN
+		// Static: the canvas outlives the effect whose pointer it was given.
+        static void DrawAll(ILTCustomDraw *pDraw);
+#else
         void DrawAll(ILTCustomDraw *pDraw);
+#endif
 
 		~CBasePolyDrawFX()
 		{

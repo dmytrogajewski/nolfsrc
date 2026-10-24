@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "SharedMovement.h"
 
 #if !defined(_CLIENTBUILD)
@@ -39,7 +40,7 @@ PlayerPhysicsModel GetPlayerPhysicsModelFromPropertyName(char* pName)
 
 	for (int i = 0; i < PPM_NUM_MODELS; i++)
 	{
-		if (_stricmp(aPPMStrings[i], pName) == 0)
+		if (nolf::ascii_compare(aPPMStrings[i], pName) == 0)
 		{
 			return (PlayerPhysicsModel)i;
 		}

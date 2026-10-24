@@ -1,6 +1,6 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "AttachButeMgr.h"
 #include "CommonUtilities.h"
 

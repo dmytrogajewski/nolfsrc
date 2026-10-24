@@ -2,11 +2,13 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
-#include <new.h>
+#include <new>
 #include "servermgr.h"
 #include "servermsg.h"
 #include "packet.h"
 #include "de_error.h"
+
+char g_NetNameBuf[1]{};
 
 // 0x10058778 — the net trace's timestamp counter, started at load (mode 1).
 // Its dynamic initialiser is server.dll 0x10021179 (the zero-displacement
@@ -34,6 +36,11 @@ CNetMgr::CNetMgr()
 {
 	m_pMainDriver = LTNULL;
 	m_FrameTime = 0.0f;
+    m_pHandler = nullptr;
+    m_pTraceName = m_Name;
+    m_Name[0] = 0;
+    m_LastTime = 0;
+    m_UnknownD8 = m_UnknownDC = 0;
 	memset(&m_Guid, 0, sizeof(m_Guid));
 	m_Flags = 0;
 }
@@ -42,8 +49,10 @@ LTRESULT CNetMgr::Init()
 {
 	TermDrivers();
 
-	AddDriver("dplay2");
-	AddDriver("internet");
+	if (!AddDriver("local") || !AddDriver("internet")) {
+        TermDrivers();
+        return LT_ERROR;
+    }
 
 	return LT_OK;
 }
@@ -79,7 +88,9 @@ LTBOOL CNetMgr::SetNetName(char* pName)
 	m_UnknownDC = 0;
 	m_pTraceName = g_NetNameBuf;
 
-	strncpy(pDst, pName, 100);
+	if (!pName) return LTFALSE;
+    strncpy(pDst, pName, sizeof(m_Name) - 1);
+    pDst[sizeof(m_Name) - 1] = 0;
 
 	m_LastTime = dsi_GetTime();
 	SetGuid(LTNULL);
@@ -111,32 +122,17 @@ LTRESULT CNetMgr::FreeServiceList(NetService* pListHead)
 	return LT_OK;
 }
 
-LTRESULT CNetMgr::SelectService(HNETSERVICE hNetService)
+LTRESULT CNetMgr::SelectService(HNETSERVICE service)
 {
-	uint32 i = 0;
-	uint32 nIndex = (uint32)-1;
-
-	while (i < m_Drivers.m_nElements)
-	{
-		if (m_Drivers.m_pArray[i] == ((CNetService*)hNetService)->m_pDriver)
-		{
-			nIndex = i;
-			break;
-		}
-
-		i++;
-	}
-
-	if (nIndex == (uint32)-1)
-		return LT_NOTINITIALIZED;
-
-	if (!((CNetService*)hNetService)->m_pDriver->SelectService(hNetService))
-	{
-		m_pMainDriver = ((CNetService*)hNetService)->m_pDriver;
-		return LT_OK;
-	}
-
-	return LT_ERROR;
+    if (!service) return LT_INVALIDPARAMS;
+    for (uint32 i = 0; i < m_Drivers.m_nElements; ++i) {
+        auto* driver = m_Drivers.m_pArray[i];
+        if (driver->SelectService(service) == 0) {
+            m_pMainDriver = driver;
+            return LT_OK;
+        }
+    }
+    return LT_NOTINITIALIZED;
 }
 
 LTRESULT CNetMgr::UpdateSessionName(const char* sName)
@@ -222,12 +218,12 @@ void CNetMgr::Update(char* pTraceName, float fCurTime, int bAllowTimeout)
 		{
 			CNetSentPacket* pRec = pCur;
 			pCur = (pCur->m_pNext == (CNetSentPacket*)pConn->m_SentList.m_pTail) ?
-				LTNULL : pCur->m_pNext;
+				LTNULL : static_cast<decltype(pCur)>(pCur->m_pNext);
 
 			pRec->m_ResendTimer += fDelta;
 			if (pRec->m_ResendTimer >= g_NetResendTime)
 			{
-				SendPacketData(pRec->m_Data0C, pConn);
+				SendPacketData(&pRec->m_Packet, pConn);
 				((LMessageList*)&pConn->m_SentList)->Remove((LThreadMessage*)pRec);
 				m_PacketBank.Free(pRec);
 			}
@@ -366,14 +362,18 @@ LTBOOL CNetMgr::GetPacket(ServerMessage* pMsg)
 		{
 			CNetRecvPacket* pRec = pCur;
 			pCur = (pCur->m_pNext == (CNetRecvPacket*)pConn->m_RecvList.m_pTail) ?
-				LTNULL : pCur->m_pNext;
+				LTNULL : static_cast<decltype(pCur)>(pCur->m_pNext);
 
-			memcpy(pMsg->m_pData, pRec->m_pData, pRec->m_Len);
+            if (!pRec->m_Len || !pMsg->Reserve(pRec->m_Len)) {
+                pConn->m_RecvList.Remove(pRec); FreeRecvPacket(pRec); continue;
+            }
+            memcpy(pMsg->m_pData, pRec->m_pData, pRec->m_Len);
 			pMsg->m_Unknown34 = (uint16)pRec->m_Len;
 			pMsg->m_Unknown38 = 1;
-			pMsg->m_pConnection = pConn;
+            pMsg->m_pConnection = pConn;
+            pMsg->m_Flags = 0;
 
-			pConn->m_RecvList.Remove((LThreadMessage*)pRec);
+            pConn->m_RecvList.Remove((LThreadMessage*)pRec);
 			FreeRecvPacket(pRec);
 
 			if (TranslatePacket(pMsg, pConn, 0))
@@ -392,10 +392,11 @@ LTBOOL CNetMgr::GetPacket(ServerMessage* pMsg)
 			pMsg->m_pConnection = pConn;
 			uint16 nLen = (uint16)pRec->m_Len;
 			pMsg->m_Unknown34 = nLen;
-			uint8** ppData = &pMsg->m_pData;
-			memcpy(*ppData, pRec->m_pData, nLen);
+            if (!nLen || !pMsg->Reserve(nLen)) break;
+            memcpy(pMsg->m_pData, pRec->m_pData, nLen);
+            pMsg->m_Flags = 0;
 
-			DebugPrint(pConn, 1, "Resolving guaranteed packet %d", pConn->m_PacketID);
+            DebugPrint(pConn, 1, "Resolving guaranteed packet %d", pConn->m_PacketID);
 			pMsg->m_Unknown38 = 1;
 
 			bDone = TranslatePacket(pMsg, pConn, 0);
@@ -408,70 +409,11 @@ LTBOOL CNetMgr::GetPacket(ServerMessage* pMsg)
 }
 
 
-// 0x10058798 — how many times the packet bank has been asked for. Signed,
-// because the term below opens with `jle` rather than `je`: a term arriving
-// before any init leaves the counter negative and every later term returns
-// early. Zeroed .bss in the shipped image; the address is masked in
-// verification, so what matters is that it is one dword of its own.
-static int g_nNetBankRefs;
-
-// 0x10058790 (lithtech.exe 0x004b40d8) — the bank's list of live records: a
-// count at +0x00 and the head link at +0x04, ONE file-scope object with a
-// constructor and a destructor. The dynamic-initialiser group it emits is in
-// both images: server.dll 0x10025f92 (the _$E head, call/jmp), 0x10025f9c
-// (constructor body: +0x00 then +0x04 zeroed), 0x10025fab (atexit registrar)
-// and 0x10025fb7 (destructor body: +0x04 then +0x00, the REVERSED order that
-// says it is one object); lithtech.exe 0x0045bfd0, 0x0045bfe0, 0x0045bff0 and
-// 0x0045c000, the same four. The two stores in each are goodlinklist.h's
-// CGLinkedList constructor and RemoveAll, but with no vtable store, so not
-// that class itself (name ours). servermsg.cpp keeps its spare messages on
-// the same object (msg_AllocPacket, ServerMessage::_v0c), so it is not static.
-class CNetBankList
-{
-public:
-	CNetBankList()
-	{
-		m_nCount = 0;
-		m_pHead  = LTNULL;
-	}
-
-	~CNetBankList()
-	{
-		m_pHead  = LTNULL;
-		m_nCount = 0;
-	}
-
-	uint32  m_nCount;                        // +0x00
-	LTLink* m_pHead;                         // +0x04
-};
-
-CNetBankList g_NetBankList;
-
-// 0x1005879c — one more dword the term clears with it; servermsg.cpp's
-// msg_AllocPacket counts into it every message it has to `new` (name ours).
-uint32  g_nUnknown79c;
-
-// What a banked record is destroyed through. The term reaches slot 0 with a
-// flag of one, which is VC6's scalar deleting destructor -- so the record's
-// class has a virtual destructor and this is a plain `delete`. Nothing names
-// the class; only that one slot is established (name ours).
-class INetBankItem
-{
-public:
-	virtual ~INetBankItem();
-};
-
-
 // ---- the constructors and the bank free --------------------------------- //
 
 // A tracker starts at zero with a tenth-of-a-millisecond floor and a two
 // second window (the constants are what they are; the names are ours).
-CRateTracker::CRateTracker()
-{
-	m_Time = 0.0001f;
-	m_Unknown08 = 2.0f;
-	m_Value = 0.0f;
-}
+
 
 // 0x10023fe7 and 0x10024097 are `CMoArray<T, DefaultCache>::CMoArray()`, and
 // the two lists are now servermgr.h's typedefs onto collection.h's template,
@@ -482,119 +424,6 @@ CRateTracker::CRateTracker()
 // because a non-template member declared out-of-class is the one construct
 // /Ob1 never expands -- which is also why lithtech.exe could never match it:
 // there (0x00455310) the whole constructor is expanded into CNetMgr's.
-
-// CNetRecvPacket::Term (servermgr.h declares it, name ours) -- the bank
-// record's teardown, which is an explicit destructor call on the record in
-// its MESSAGE shape: three words of link, then a whole ServerMessage at
-// +0x0c (0x0c + 0x64 = 0x70, the bank's element size). The message's
-// destructor is its payload collection's (CMoArray<uint8, DefaultCache> at
-// +0x50, vtable 0x004a1ab8 in lithtech.exe) and then CAbstractIO's vptr
-// store (0x004a2b44), the pair servermsg.cpp's CNetMsgRecord and
-// netobj.cpp's CNetMsgRecordQ458 carry.
-//
-// It was declared and never defined, so every caller CALLED it. Defined
-// here, inline and above its one caller:
-//   * server.dll /O1: CNetBank::Free (0x10024226) still calls the plain
-//     destructor out of line, and that COMDAT (??1CNetMsgRecordB3) matches
-//     0x100242c1 as servermsg.cpp's CNetMsgRecord does;
-//   * lithtech.exe /O2: the bank's slot-2 wrapper (0x00459dc0) carries the
-//     whole teardown inline and is IDENTICAL; the message's own destructor
-//     comes out standalone and matches 0x00455bc0 as msgterm.cpp's does.
-//
-// The `Destroy()` level between Term and the explicit destructor call is
-// measured, not decoration: without it /O2 has budget left in 0x00459dc0
-// and expands SetSize2 too (73 bytes against 49).
-//
-// NEAR, one instruction: NetConnection::Term (0x004551c0, 252 of 253
-// bytes). There VC6 expands netbank_FreeMessages, Free, Term and Destroy
-// and stops at the record's destructor; shipped emits that stop as
-// `push $0 ; call 0x0045a160` (??_G with a zero flag, VC6's spelling of an
-// explicit destructor call it declines to expand), ours expands the ??_G
-// shell as well and calls the message destructor on +0x0c. The caller's
-// inline budget is spent one step later than shipped's. Not moved by: a
-// flattened record (message fields directly on it -- 1 block here, but
-// shipped CNetMgr::Update, 0x00455925, calls the message destructor on
-// +0x0c, which only this member layout can produce), a template destroy
-// helper, user-declared versus implicit
-// destructors, a polymorphic CAbstractIO view, an extra inline level on the
-// four queue views, a derived packet-data class, or a wrapper around the
-// netbank_FreeMessages call.
-extern void* g_AbstractIOVtblB3;             // 0x1004dea0 / 0x004a2b44
-
-class CTermAbstractIOB3
-{
-public:
-	~CTermAbstractIOB3() { m_pVtbl = &g_AbstractIOVtblB3; }
-
-	void*  m_pVtbl;                          // +0x00
-	uint32 m_nRefCount;                      // +0x04
-};
-
-class CTermMessageB3
-{
-public:
-	CTermAbstractIOB3             m_Base;            // +0x00
-	uint8                         m_pad_08[0x50 - 0x08];
-	CMoArray<uint8, DefaultCache> m_PacketData;      // +0x50
-};
-
-class CNetMsgRecordB3
-{
-public:
-	void Destroy() { this->~CNetMsgRecordB3(); }
-
-	uint32         m_Unknown00;              // +0x00  the bank's free-list next
-	uint32         m_Unknown04;              // +0x04
-	uint32         m_Unknown08;              // +0x08
-	CTermMessageB3 m_Msg;                    // +0x0c
-};
-
-inline void CNetRecvPacket::Term()
-{
-	((CNetMsgRecordB3*)this)->Destroy();
-}
-
-// Returning a packet record tears it down first, then threads it onto the
-// bank's free list — the inline free, not the out-of-line one.
-//
-// WHERE THIS LIVES IN THE TWO IMAGES, because the lithtech side was once
-// recorded wrongly. server.dll 0x10024226 is this function and is what
-// the object matches. lithtech.exe's counterpart is 0x00459dc0, 49 bytes,
-// which is slot 2 of CNetBank's vftable (0x004a2b30) with this body AND the
-// record teardown expanded into it; there is no standalone copy, and now
-// that Free is `inline` this object emits none for lithtech.exe either. The
-// 28-byte lithtech "match" at 0x00412890 that the byte comparison used to report for
-// this symbol was a FALSE POSITIVE and belongs to another translation unit: the
-// scalar deleting destructor at 0x00412ed0 restores vftable 0x004a1cf4 and
-// then 0x004a14c8, and 0x004a14c8 is the abstract CBankBase table (all
-// three slots _purecall, 0x004928e7) shared with clientwin.cpp's Clu banks.
-// The byte agreement is real and meaningless: every bank in the family
-// frees the same way, so a bank whose record has a NON-virtual destructor
-// -- a direct call where the generic 0x00483470 does `call *(eax)` -- comes
-// out byte-identical to this one outside the masked displacement.
-inline void CNetBank::Free(void* pRec)
-{
-	((CNetRecvPacket*)pRec)->Term();
-	sb_Free(&m_Bank, pRec);
-}
-
-// 0x10023fdb — slot 2 of the bank's vftable, which is a forwarder onto the
-// worker above and not the worker itself: `push 0x4(esp) ; call Free ;
-// ret $4`, twelve bytes. servermgr.h carries the vftable evidence.
-//
-// Free above is `inline` now, and this wrapper is where lithtech.exe
-// collects it: 0x00459dc0 (49 bytes) is IDENTICAL, Free and the record
-// teardown expanded down to the `call 0x0040bfe0` SetSize2. server.dll still
-// calls Free out of line from here (0x10023fdf), from Update (0x10021784)
-// and from netbank_FreeMessages (0x1002427f) -- /Os declines it at all three
-// -- so both 0x10024226 and this 12-byte forwarder still match there. The
-// objection this note used to raise (Free expanding at /O1) was measured
-// and does not happen; the dependent it was waiting for, the record
-// teardown, is CNetRecvPacket::Term above.
-void CNetBank::_v08(void* pRec)
-{
-	Free(pRec);
-}
 
 // Removing a driver is expected to shorten the list; if it does not, stop
 // rather than spin.
@@ -674,13 +503,7 @@ LTRESULT CNetMgr::GetSessionName(char* sName, uint32 dwBufferSize)
 
 // The driver pointer is deliberately left alone: whoever builds the
 // connection fills it in before anything reaches it.
-NetConnection::NetConnection()
-	: m_Counter(0)
-{
-	m_Unknown68 = 0;
-	m_Unknown64 = 0;
-	m_Flags = 0;
-}
+
 
 // 0x1002425d — the CNetBank flavour of tm_FreeMessages: walk the list with
 // the cursor-alias trick, hand each record to the bank's Free (a thiscall on
@@ -721,95 +544,27 @@ inline void netbank_FreeMessages(LMessageList* pList, CNetBank* pBank)
 // The rest of the fields are servermgr.h's under servermgr.h's names; they
 // are repeated here so the whole of AddConnection's reset can run through
 // one view instead of alternating between two.
-class NetConnectionResetView
-{
-public:
-	uint8  m_pad_00[0x6c];
-	uint32 m_Unknown6C;                      // 0x6c
-	uint32 m_Flags;                          // 0x70
-	uint32 m_nSent;                          // 0x74
-	uint32 m_nResent;                        // 0x78
-	uint32 m_Unknown7C;                      // 0x7c  (m_PacketID)
-	uint32 m_Unknown80;                      // 0x80
-	float  m_RecvWait;                       // 0x84
-	float  m_SendWait;                       // 0x88
-	uint32 m_nPacketsRecv;                   // 0x8c  bumped once per packet
-	                                         //       accepted, and printed as
-	                                         //       "Got packet %d"
-	uint8  m_pad_90[0x94 - 0x90];
-	float  m_AckTimer;                       // 0x94
-	float  m_Unknown98;                      // 0x98
-	float  m_Ping;                           // 0x9c
-	float  m_UnknownA0[3];                   // 0xa0
-	uint8  m_pad_ac[0xb4 - 0xac];            //       the connection's counter
-	float  m_UnknownB4;                      // 0xb4  counts down; when it goes
-	                                         //       negative WriteAckPacket
-	                                         //       asks for a ping
-	uint16 m_UnknownB8;                      // 0xb8  the ping sequence number,
-	                                         //       one past servermgr.h's
-	                                         //       last modelled field
-};
+
 
 // ServerMessage's dword writer and the room-left query. servermsg.h names
 // the byte, word and block writers but neither of these (names ours — the
 // second from the two places its answer is compared against, a length plus
 // four and the 0x2c an ack packet needs; it is signed, since both compares
 // are `jge`/`jl`).
-class ServerMessageWriteView
-{
-public:
-	void WriteDWord(uint32 nValue);          // 0x1000ecd6
 
-	// IN-CLASS, and that is load-bearing: both images are /Ob1, so only an
-	// in-class (or `inline`-marked) body is an expansion candidate at all.
-	// server.dll's /Os declines it and CALLS 0x1000e845 (0x10022ed5 and
-	// 0x10022f6c inside SendPacketData itself); lithtech.exe's /Ot accepts
-	// it and expands it at both sites (0x004584c3 and 0x00458572). One
-	// spelling, both images -- which is what says it is the right one.
-	//
-	// The (ServerMessage*)this form is copied from the proven CMsgSpaceView
-	// in serverlightanim.cpp rather than padding this view class out.
-	int GetSpaceLeft()                       // 0x1000e845
-	{
-		ServerMessage* pMsg = (ServerMessage*)this;
-		int            nLeft;
-
-		nLeft = pMsg->m_MaxDataLen - pMsg->m_Unknown38 - 7;
-
-		if (nLeft < 0)
-			nLeft = 0;
-
-		return nLeft;
-	}
-};
 
 // A receive record's last field, one dword past where servermgr.h's
 // CNetRecvPacket stops: SendPacketData sets it to 1 on a record it queued
 // but did not send, and the send-queue walk clears it once the record has
 // gone out (name ours).
-class CNetRecvPacketSendView : public CNetRecvPacket
-{
-public:
-	uint32 m_bPending;                       // 0x1c
-};
+using CNetRecvPacketSendView = CNetRecvPacket;
 
 // CBaseDriver's slot 0x60 is the raw send: servermgr.h has it as `_p60` with
 // no arguments because nothing had reached it. It takes the payload, its
 // length, the spare capacity behind it and the connection, and returns
 // whatever the driver made of it — which is SendPacketData's own return value
 // (name ours).
-class CBaseDriverSendView
-{
-public:
-	virtual void _d00()=0; virtual void _d01()=0; virtual void _d02()=0; virtual void _d03()=0;
-	virtual void _d04()=0; virtual void _d05()=0; virtual void _d06()=0; virtual void _d07()=0;
-	virtual void _d08()=0; virtual void _d09()=0; virtual void _d10()=0; virtual void _d11()=0;
-	virtual void _d12()=0; virtual void _d13()=0; virtual void _d14()=0; virtual void _d15()=0;
-	virtual void _d16()=0; virtual void _d17()=0; virtual void _d18()=0; virtual void _d19()=0;
-	virtual void _d20()=0; virtual void _d21()=0; virtual void _d22()=0; virtual void _d23()=0;
-	virtual LTBOOL SendData(void* pData, uint32 nLen, uint32 nSpare,
-	                        NetConnection* pConn)=0;                        // 0x60
-};
+
 
 // 0x100211e2 — a free function of one message: nonzero means the message can
 // take more data as it stands, so the send path does not have to swap in a
@@ -858,12 +613,7 @@ float g_NetAckTime = 1.0f / 3.0f;
 // servermgr.h types the slot as two `void*` because nothing had pinned the
 // arguments down; this view gives it the shape the call site shows, with a
 // placeholder in slot 0 for the destructor.
-class CBaseMgrConnectView
-{
-public:
-	virtual void   _v00();
-	virtual LTBOOL OnNewConnection(NetConnection* pConn, uint32 nFlags);
-};
+
 
 // And the queues' destructors are not empty: each stores its vptr (as any
 // polymorphic destructor does) and then clears m_pTail and m_nMessages, in
@@ -883,39 +633,6 @@ public:
 // trip over), so the vptr is a plain member and the store names the table
 // by address, as CTermAbstractIOB3 above does; link/aliases.rsp binds the
 // two names to the real vtables (names ours).
-extern void* g_LMessageListVtblNM;           // 0x1004dd2c ??_7LMessageList@@6B@
-extern void* g_NetSentQueueVtblNM;           // 0x1004dcfc ??_7CNetSentQueue@@6B@
-
-class LMessageListTermView
-{
-public:
-	~LMessageListTermView()
-	{
-		m_pVtbl = &g_LMessageListVtblNM;
-		m_pTail = LTNULL;
-		m_nMessages = 0;
-	}
-
-	void*           m_pVtbl;                 // +0x00
-	uint32          m_nMessages;             // +0x04
-	LThreadMessage* m_pTail;                 // +0x08
-};
-
-class CNetSentQueueTermView
-{
-public:
-	~CNetSentQueueTermView()
-	{
-		m_pVtbl = &g_NetSentQueueVtblNM;
-		m_pTail = LTNULL;
-		m_nMessages = 0;
-	}
-
-	void*           m_pVtbl;                 // +0x00
-	uint32          m_nMessages;             // +0x04
-	LThreadMessage* m_pTail;                 // +0x08
-};
-
 // g_NetDebugLevel is 0x100584ec, and the console name it is registered
 // under is "TransportDebug" — the variable table at 0x10051f94 pairs that
 // literal with this address. It doubles as the switch on the closing
@@ -946,60 +663,13 @@ public:
 // scheduling — a new fingerprint: **a dead zero store into the high half of
 // an x87 conversion temp, followed by `fidivl` on the low half, is a float
 // divide by an unsigned**.
-void NetConnection::Term()
-{
-	LMessageList*  pGuaranteed;
-	LMessageList*  pSend;
-	LMessageList*  pRecv;
-	CNetSentQueue* pSent;
 
-	pGuaranteed = &m_GuaranteedQueue;
-	m_pDriver->m_pNetMgr->TermQueue(pGuaranteed);
-
-	pSend = &m_SendQueue;
-	m_pDriver->m_pNetMgr->TermQueue(pSend);
-
-	pRecv = &m_RecvList;
-	m_pDriver->m_pNetMgr->TermQueue(pRecv);
-
-	pSent = &m_SentList;
-	netbank_FreeMessages((LMessageList*)pSent, &m_pDriver->m_pNetMgr->m_PacketBank);
-
-	if (g_NetDebugLevel > 0)
-	{
-		dsi_ServerError("Conn %p closing - total sent: %d, resent: %d, ratio: %.2f",
-			this,
-			((NetConnectionResetView*)this)->m_nSent,
-			((NetConnectionResetView*)this)->m_nResent,
-			(float)((NetConnectionResetView*)this)->m_nResent /
-			(float)((NetConnectionResetView*)this)->m_nSent);
-	}
-
-	((LMessageListTermView*)pRecv)->~LMessageListTermView();
-	((CNetSentQueueTermView*)pSent)->~CNetSentQueueTermView();
-	((LMessageListTermView*)pGuaranteed)->~LMessageListTermView();
-	((LMessageListTermView*)pSend)->~LMessageListTermView();
-}
 
 
 // Nothing has been heard for longer than the timeout, and the connection is
 // past the handshake. The message goes out only when the net console
 // variable asks for it.
-LTBOOL NetConnection::CheckAckTimeout()
-{
-	if (m_Flags & 1)
-		return LTFALSE;
 
-	if (m_Unknown98 > g_AckTimeout)
-	{
-		if (g_NetShowTimeouts > 0)
-			dsi_ServerError("Ack timeout (%.3f)", m_Unknown98);
-
-		return LTTRUE;
-	}
-
-	return LTFALSE;
-}
 
 
 // ---- the drivers -------------------------------------------------------- //
@@ -1023,6 +693,7 @@ CBaseDriver* CNetMgr::AddDriver(char* pDriverName)
 	if (pDriver)
 	{
 		pDriver->m_pNetMgr = this;
+        pDriver->set_host(this);
 
 		if (!pDriver->Init())
 		{
@@ -1033,8 +704,10 @@ CBaseDriver* CNetMgr::AddDriver(char* pDriverName)
 		}
 
 		CDriverList* pList = &m_Drivers;
-
-		pList->Insert2(pList->m_nElements, pDriver, &g_DefAlloc);
+		if (!pList->Insert2(pList->m_nElements, pDriver, &g_DefAlloc)) {
+            delete pDriver;
+            return nullptr;
+        }
 	}
 
 	return pDriver;
@@ -1059,22 +732,6 @@ CBaseDriver* CNetMgr::AddDriver(char* pDriverName)
 // this very object (GenRemoveAt has ours, AddConnection's expansion has
 // shipped's), so it is register allocation, not source. server.dll's
 // 0x10021bbc is unchanged by the rewrite.
-template<class T, class C>
-uint32 CMoArray<T, C>::FindElement(const T x) const
-{
-	uint32 i, ret = BAD_INDEX;
-
-	for (i = 0; i < m_nElements; i++)
-	{
-		if (m_pArray[i] == x)
-		{
-			ret = i;
-			break;
-		}
-	}
-
-	return ret;
-}
 
 void CNetMgr::RemoveDriver(CBaseDriver* pDriver)
 {
@@ -1111,10 +768,9 @@ void CNetMgr::CloseConnection(NetConnection* pConn)
 
 	if (iFound != BAD_INDEX)
 	{
+		m_Connections.Remove2(iFound, &g_DefAlloc);
 		if (m_pHandler)
 			m_pHandler->_v08(pConn);
-
-		m_Connections.Remove2(iFound, &g_DefAlloc);
 	}
 }
 
@@ -1129,15 +785,14 @@ void CNetMgr::TermQueue(LMessageList* pQueue)
 	{
 		pRec = pCur;
 		pCur = (pCur->m_pNext == (CNetRecvPacket*)pQueue->m_pTail) ?
-		           LTNULL : pCur->m_pNext;
+		           LTNULL : static_cast<decltype(pCur)>(pCur->m_pNext);
 
 		if (pRec->m_pData)
 		{
-			::operator delete(pRec->m_pData);
 			m_UnknownD8 -= pRec->m_nAlloced;
 		}
 
-		::operator delete(pRec);
+		delete pRec;
 	}
 
 	pQueue->m_pTail = LTNULL;
@@ -1169,7 +824,7 @@ void* CNetMgr::FindQueuedPacket(LMessageList* pList, uint32 nID)
 	{
 		CNetRecvPacket* pRec = pCur;
 
-		pCur = (pCur->m_pNext == pTail) ? LTNULL : pCur->m_pNext;
+		pCur = (pCur->m_pPrev == pTail) ? LTNULL : static_cast<decltype(pCur)>(pCur->m_pPrev);
 
 		if (pRec->m_ID == nID)
 			return pRec;
@@ -1196,11 +851,7 @@ void CNetMgr::SetGuid(LTGUID* pGuid)
 // pushes nothing, and the target is five bytes of `jmp`. Named by its
 // address; the forward is a masked relocation either way, so only the
 // shipped disassembly separates the two.
-class CBaseCounterReadView : public CBaseCounter
-{
-public:
-	uint32 sub_10005fab();
-};
+
 
 // The "(%d)" in the trace line is the net counter's elapsed time in
 // server.dll only. Both lithtech.exe copies (0x459bb0 CNetMgr::DebugPrint,
@@ -1209,7 +860,7 @@ public:
 // passes a constant zero. The guard is the stand-in for however the original
 // configured that out.
 #ifdef LT_SERVER_BUILD
-#define NET_TRACE_TIME() (((CBaseCounterReadView*)&g_NetCounter)->sub_10005fab())
+#define NET_TRACE_TIME() (g_NetCounter.Read())
 #else
 #define NET_TRACE_TIME() 0
 #endif
@@ -1230,7 +881,7 @@ void CNetMgr::DebugPrint(NetConnection* pConn, int nLevel, char* pFormat, ...)
 		return;
 
 	va_start(marker, pFormat);
-	_vsnprintf(msg, sizeof(msg) - 1, pFormat, marker);
+	vsnprintf(msg, sizeof(msg) - 1, pFormat, marker);
 
 	dsi_ServerError("(%d) %s%s", NET_TRACE_TIME(), m_pTraceName, msg);
 }
@@ -1239,13 +890,7 @@ void CNetMgr::DebugPrint(NetConnection* pConn, int nLevel, char* pFormat, ...)
 // 0x100263e7 — age the window by one frame. A tracker with no window length
 // set never rolls over; one that has runs its rollover as soon as the window
 // is past.
-void CRateTracker::Update(float fDelta)
-{
-	m_Time += fDelta;
 
-	if (m_Unknown08 != 0.0f && m_Time > m_Unknown08)
-		Rollover();
-}
 
 
 // 0x10026413 — the window closes and reopens a tenth as wide: the rate over
@@ -1255,61 +900,7 @@ void CRateTracker::Update(float fDelta)
 // 0.1f, loaded once and used twice — which is why the multiply takes its
 // operand from the stack register rather than reloading the field that was
 // just written.
-void CRateTracker::Rollover()
-{
-	float fRate = m_Value / m_Time;
-	float fWindow = 0.1f;
 
-	m_Time  = fWindow;
-	m_Value = fRate * fWindow;
-}
-
-
-// 0x10025fc6 — the packet bank is reference counted like the rest of the
-// system layer, but nothing here builds it: the counter goes up and that is
-// the whole body. Whatever allocates the bank does so on first use.
-void netbank_Init()
-{
-	g_nNetBankRefs++;
-}
-
-
-// 0x10025fcd — the counterpart, and the only one of the two that does any
-// work. The walk is circular: each step reads the record out of the link
-// before advancing, and coming back to the head ends it -- which the shipped
-// build spells branchlessly, `sub` then `neg` then `sbb` then `and`, turning
-// "did we arrive back at the head" into a mask over the pointer rather than a
-// jump. That is VC6's own doing from an ordinary comparison.
-//
-// The record is deleted through its own vtable and the link is not unlinked
-// first, so the list is left pointing at freed memory until the three dwords
-// below are cleared.
-void netbank_Term()
-{
-	if (g_nNetBankRefs <= 0)
-		return;
-
-	if (--g_nNetBankRefs != 0)
-		return;
-
-	LTLink* pLink = g_NetBankList.m_pHead;
-
-	while (pLink)
-	{
-		void* pItem = pLink->m_pData;
-
-		pLink = pLink->m_pNext;
-
-		pLink = (pLink == g_NetBankList.m_pHead) ? LTNULL : pLink;
-
-		if (pItem)
-			delete (INetBankItem*)pItem;
-	}
-
-	g_NetBankList.m_pHead  = LTNULL;
-	g_NetBankList.m_nCount = 0;
-	g_nUnknown79c = 0;
-}
 
 
 // 0x10023569 — the four pieces a pending record owns are released back to
@@ -1330,20 +921,6 @@ void netbank_Term()
 // declined call site keeps alive, and not ReleaseQueued, which keeps its
 // call. It is the 31-byte size that argues against marking it and the two
 // shipped images that settle it.
-inline void CNetPending::Term()
-{
-	CNetPiece** pp = &m_pPieces[4];
-	int         i;
-
-	for (i = 4; i; i--)
-	{
-		CNetPiece* pPiece = *(--pp);
-
-		if (pPiece)
-			pPiece->Release();
-	}
-}
-
 // 0x10023542 — take a pending record off the queue, let go of what it owns,
 // and hand the record itself back (name ours).
 void CNetMgr::ReleaseQueued(CNetPending* pRec)
@@ -1352,9 +929,7 @@ void CNetMgr::ReleaseQueued(CNetPending* pRec)
 	{
 		((LMessageList*)&m_QueueC4)->Remove((LThreadMessage*)pRec);
 
-		pRec->Term();
-
-		::operator delete(pRec);
+		delete pRec;
 	}
 }
 
@@ -1383,7 +958,7 @@ void CNetMgr::FreeRecvPacket(CNetRecvPacket* pRec)
 	while (pCur)
 	{
 		pAt = pCur;
-		pCur = (pCur->m_pNext == pTail) ? LTNULL : pCur->m_pNext;
+		pCur = (pCur->m_pNext == pTail) ? LTNULL : static_cast<decltype(pCur)>(pCur->m_pNext);
 
 		if (pRec->m_nAlloced >= pAt->m_nAlloced)
 			break;
@@ -1441,23 +1016,7 @@ void CNetMgr::RemoveConnection(NetConnection* pConn)
 // is CNetBank::Allocate (0x10024162), which runs ServerMessage's constructor
 // (0x1002417f) on exactly this+0xc after the struct bank hands the record
 // back.
-class CNetSentPacketView
-{
-public:
-	uint32              m_Unknown00;         // 0x00
-	CNetSentPacketView* m_pNext;             // 0x04
-	float               m_ResendTimer;       // 0x08
-	ServerMessage       m_Packet;            // 0x0c .. 0x70
-};
-
-// The bank's allocate, which servermgr.h's CNetBank does not carry (only its
-// Free does). Placement-constructs the packet above; a failed struct-bank
-// allocation comes back as LTNULL and is *not* checked by its callers.
-class CNetBankAllocView : public CNetBank
-{
-public:
-	CNetSentPacketView* Allocate();          // 0x10024162
-};
+using CNetSentPacketView = CNetSentPacket;
 
 // servermgr.h has the send path's two signatures wrong — SendPacket and
 // SendPacketData both return LTBOOL, not void (see the note on SendPacket) —
@@ -1467,100 +1026,7 @@ public:
 // about `this`, and the redeclared members simply hide the base's. The
 // symbols the byte comparison verifies are then this class's rather than CNetMgr's,
 // which costs nothing — the verification is per function on machine code.
-class CNetMgrSendView : public CNetMgr
-{
-public:
-	LTBOOL AddConnection(NetConnection* pConn);                                 // 0x10022ade
-	LTBOOL SendPacket(class ServerMessage* pMsg, NetConnection* pConn, uint8 n); // 0x10022990
-	LTBOOL SendPacketData(class ServerMessage* pMsg, NetConnection* pConn);     // 0x10022d6c
 
-	// The send-side counterpart of CNetMgr::AddRecvBytes: the same shape —
-	// the packets-per-second tracker gains 1.0f and the bytes-per-second
-	// tracker the byte count — plus a per-connection opt-out (the
-	// connection's m_Flags bit 0) on a manager-wide float at CNetMgr+0xe0,
-	// which is one dword past the last member servermgr.h knows about
-	// (names ours).
-	void   AddSentBytes(NetConnection* pConn, uint32 nBytes);                   // 0x10022a7b
-
-	// 0x10023dc2 — CNetMgr::DebugPrint without the connection: the same
-	// level test against g_NetDebugLevel, the same 500-byte _vsnprintf and
-	// the same "(%d) %s%s" line, minus the per-connection filter that needs
-	// a connection to read m_Flags off. An overload rather than a second
-	// name, which is what the two symbols look like from the call sites.
-	void   DebugPrint(int nLevel, char* pFormat, ...);                          // 0x10023dc2
-
-	// Five more of the manager's own workers, all outside the run this file
-	// covers and none with anything at the call site that names them, so
-	// they keep their addresses. What the call sites do say:
-	//   0x10023a8c(pConn, pMsg) — run after a packet has been accepted;
-	//       nonzero means it consumed the packet and TranslatePacket is done.
-	//   0x100235e8(pConn, pMsg) — the same contract, one stage earlier, and
-	//       reached on the local path as well as the remote one.
-	//   0x10022ac2(pConn) — the in-order step: hands the connection's
-	//       current packet id to 0x10023a91 against the guaranteed queue and
-	//       then increments it.
-	//   0x10023c4d(nLen) — a receive record with room for nLen bytes; it
-	//       reserves two extra (`inc esi` twice) and comes off the free list
-	//       at CNetMgr+0xc0.
-	//   0x10023b1f(pList, pRec) — insert a receive record into the
-	//       guaranteed queue in id order; LTFALSE means it did not take it.
-	int    sub_10023a8c(NetConnection* pConn, class ServerMessage* pMsg);
-	int    sub_100235e8(NetConnection* pConn, class ServerMessage* pMsg);
-
-	// The five more the internal-packet handler reaches, none of them named
-	// by anything at the call sites. What the bytes say:
-	//   0x10021c55(pMsg, pConn, 0) — send one message to one connection;
-	//       three arguments and `ret 0xc`.
-	//   0x10023ad7(pList, nID) — the twin of 0x10023a91 with the comparison
-	//       the other way round (`jbe` where that one has `ja`) and the loop
-	//       rotated: it releases everything queued *above* the id instead
-	//       of at-or-below it.
-	//   0x100233ad(nID, pConn) — find the fragment record collecting a
-	//       given packet id for a connection, LTNULL if there is none.
-	//   0x10023495() — a fresh fragment record.
-	//   0x100233e3(pMsg, nIndex, pRec) — put one fragment into a record at
-	//       its index. The index arrives as a byte (the call site pushes the
-	//       whole dword its uint8 local sits in).
-	//   0x10023474(pRec) — nonzero once every fragment has arrived.
-	// 0x10021c55 — smgr.cpp reaches this one too, through its own view of the
-	// same class, so the signature here is load-bearing across TUs.
-	LTBOOL SendToConnection(class ServerMessage* pMsg, NetConnection* pConn,
-	                        int nFlags);
-	void   sub_1002294f(NetConnection* pConn);
-	void   sub_10023ad7(LMessageList* pList, uint32 nID);
-	class CNetFragRec* sub_100233ad(uint32 nID, NetConnection* pConn);
-	class CNetFragRec* sub_10023495();
-	LTBOOL sub_100233e3(class ServerMessage* pMsg, uint8 nIndex,
-	                    class CNetFragRec* pRec);
-	int    sub_10023474(class CNetFragRec* pRec);
-	void   sub_10022ac2(NetConnection* pConn);
-
-	// 0x10023a91 — release every record queued out of order whose id has
-	// now been overtaken: walk the list from its tail, and for each record
-	// with an id at or below the one handed in, take it off the list
-	// (0x10015b00, reached with the list as `this`) and hand it back
-	// (0x10023bb5, reached with the manager as `this`). It stops at the
-	// first record with a higher id, because the queue is kept in id
-	// order. `ret 8` and the manager spilled to a frame slot say member,
-	// two arguments (name ours).
-	void   sub_10023a91(LMessageList* pList, uint32 nID);
-	CNetRecvPacket* sub_10023c4d(int nLen);
-	LTBOOL sub_10023b1f(LMessageList* pList, CNetRecvPacket* pRec);
-
-	// Four more, on the send side. Again nothing at the call sites names
-	// them:
-	//   0x10023d16(&ref) — fills a message reference with a fresh message
-	//       to spill into.
-	//   0x10023d5b(pDst, pSrc) — hands one message's contents to another.
-	//   0x10023d73(pMsg, pData, nLen) — appends raw bytes to a message.
-	//   0x10022c2f(pData, nLen, nSpare, pConn) — the local-connection send,
-	//       taking exactly what the driver's slot 0x60 takes and returning
-	//       the same thing.
-	void   sub_10023d16(CMessageRef* pRef);
-	void   sub_10023d5b(class ServerMessage* pDst, class ServerMessage* pSrc);
-	void   sub_10023d73(class ServerMessage* pMsg, void* pData, uint32 nLen);
-	LTBOOL sub_10022c2f(void* pData, uint32 nLen, uint32 nSpare, NetConnection* pConn);
-};
 
 // 0x10024162 — one sent-packet record out of the bank, constructed in
 // place. The bank hands back raw memory, so the packet at +0x0c gets its
@@ -1576,20 +1042,6 @@ public:
 // carries another copy. server.dll keeps the out-of-line 0x10024162 and
 // the `call` to it at 0x10022990, which /Os would not keep if this were
 // inline there.
-#ifndef LT_SERVER_BUILD
-inline
-#endif
-CNetSentPacketView* CNetBankAllocView::Allocate()
-{
-	CNetSentPacketView* pRec = (CNetSentPacketView*)sb_Allocate(&m_Bank);
-
-	if (pRec)
-		pRec->m_Packet.ServerMessage::ServerMessage();
-
-	return pRec;
-}
-
-
 // 0x10023a8c — the post-accept hook: five bytes of `return 0`. Two
 // arguments and `ret 8`, and nothing in the body, so the connection and
 // the message are both unread. Whatever it was meant to do (a per-packet
@@ -1597,7 +1049,7 @@ CNetSentPacketView* CNetBankAllocView::Allocate()
 // twice, on both the local and the guaranteed path, each time treating a
 // nonzero answer as "the packet has been consumed") was gone by the time
 // this shipped.
-int CNetMgrSendView::sub_10023a8c(NetConnection* pConn, ServerMessage* pMsg)
+int CNetMgr::sub_10023a8c(NetConnection* pConn, ServerMessage* pMsg)
 {
 	return 0;
 }
@@ -1611,7 +1063,7 @@ int CNetMgrSendView::sub_10023a8c(NetConnection* pConn, ServerMessage* pMsg)
 // the call touches ecx, so VC6 leaves the incoming `this` in place. The
 // null test on the connection is the function's own — its caller has
 // already dereferenced pConn several times.
-void CNetMgrSendView::sub_10022ac2(NetConnection* pConn)
+void CNetMgr::sub_10022ac2(NetConnection* pConn)
 {
 	if (!pConn)
 		return;
@@ -1643,7 +1095,7 @@ void CNetMgrSendView::sub_10022ac2(NetConnection* pConn)
 // and re-reads the list's tail to decide whether it has come back round.
 // The loop's back edge jumps to the `while` test rather than to the body,
 // which is what says the test is shared and not duplicated.
-void CNetMgrSendView::sub_10023a91(LMessageList* pList, uint32 nID)
+void CNetMgr::sub_10023a91(LMessageList* pList, uint32 nID)
 {
 	CNetRecvPacket* pCur = (CNetRecvPacket*)pList->m_pTail;
 	CNetRecvPacket* pRec;
@@ -1651,8 +1103,8 @@ void CNetMgrSendView::sub_10023a91(LMessageList* pList, uint32 nID)
 	while (pCur)
 	{
 		pRec = pCur;
-		pCur = (pCur->m_pNext == (CNetRecvPacket*)pList->m_pTail) ?
-		           LTNULL : pCur->m_pNext;
+		pCur = (pCur->m_pPrev == (CNetRecvPacket*)pList->m_pTail) ?
+		           LTNULL : static_cast<decltype(pCur)>(pCur->m_pPrev);
 
 		if (pRec->m_ID > nID)
 			break;
@@ -1669,7 +1121,7 @@ void CNetMgrSendView::sub_10023a91(LMessageList* pList, uint32 nID)
 // the list rather than stopping. Because nothing breaks out of it, VC6
 // rotates the loop (the test moves to the bottom) and shrink-wraps ebx into
 // the body, which is the whole structural difference between the two.
-void CNetMgrSendView::sub_10023ad7(LMessageList* pList, uint32 nID)
+void CNetMgr::sub_10023ad7(LMessageList* pList, uint32 nID)
 {
 	CNetRecvPacket* pCur = (CNetRecvPacket*)pList->m_pTail;
 	CNetRecvPacket* pRec;
@@ -1677,8 +1129,8 @@ void CNetMgrSendView::sub_10023ad7(LMessageList* pList, uint32 nID)
 	while (pCur)
 	{
 		pRec = pCur;
-		pCur = (pCur->m_pNext == (CNetRecvPacket*)pList->m_pTail) ?
-		           LTNULL : pCur->m_pNext;
+		pCur = (pCur->m_pPrev == (CNetRecvPacket*)pList->m_pTail) ?
+		           LTNULL : static_cast<decltype(pCur)>(pCur->m_pPrev);
 
 		if (pRec->m_ID > nID)
 		{
@@ -1700,50 +1152,6 @@ void CNetMgrSendView::sub_10023ad7(LMessageList* pList, uint32 nID)
 // is two names for the same four-byte record. Declared here with both entry
 // points and no destructor — nothing in the image destroys a slot, and a
 // destructor VC6 emitted would have no shipped counterpart (names ours).
-class CNetFragSlot
-{
-public:
-	CNetFragSlot() { m_pMsg = LTNULL; }
-
-	// The clear is servermsg.h's CMsgCursor::Init (0x10023e86), reached
-	// through a cast in CNetFragRec::Clear.
-	class ServerMessage* Init(void* pPacket);              // 0x1000ebab
-
-#ifndef LT_SERVER_BUILD
-	// STAND-IN (lithtech.exe only): Set's body, inline, for CNetFragRec::Clear
-	// -- see the note above Clear.
-	ServerMessage* SetInline(ServerMessage* pMsg)
-	{
-		if (m_pMsg)
-			m_pMsg->Release();
-
-		m_pMsg = pMsg;
-
-		if (m_pMsg)
-			m_pMsg->AddRef();
-
-		return m_pMsg;
-	}
-#endif
-
-	class ServerMessage* m_pMsg;             // 0x00
-};
-
-class CNetFragRec
-{
-public:
-	CNetFragRec();                           // 0x10023505
-	void Clear();                            // 0x1002351c
-
-	// The same two link words CNetPending opens with — the record IS a
-	// CNetPending; the manager's second queue holds nothing else.
-	class LThreadMessage* m_pNext;           // 0x00
-	class LThreadMessage* m_pPrev;           // 0x04
-	class CNetFragSlot    m_pFrags[4];       // 0x08
-	uint32                m_ID;              // 0x18
-	NetConnection*        m_pConn;           // 0x1c
-};
-
 // The three CPacket member templates servermsg.h does not name on
 // ServerMessage. 0x100138d6, 0x1000ebd0 and 0x100240f8 are
 // CPacket::ReadType<uint8/uint16/uint32> (packet.cpp matches all three) and
@@ -1751,29 +1159,7 @@ public:
 // pointer that carries the template argument is what every call site pushes
 // as a literal zero. Declared here as ordinary members so this file can emit
 // the calls without pulling packet.h in (names ours).
-class ServerMessageTypeView
-{
-public:
-	uint16 ReadWord(uint16* pDummy);         // 0x1000ebd0
-	uint32 ReadDWord(uint32* pDummy);        // 0x100240f8
-	// 0x100260d9 again, with a *uint16* length. servermsg.h types it uint32
-	// because that is what LMessageImpl::ReadRawFL hands it, and a uint32
-	// variable pushes the same dword either way; the sub-type-3 call site
-	// here is the one that separates them — it pushes the raw dword its
-	// uint16 local sits in without zero-extending, which a uint32
-	// parameter would have forced.
-	void   ReadData(void* pData, uint16 nBytes);
-	// 0x1002616a with the same narrowing, and the same evidence: the
-	// fragment replay computes its length with a 16-bit `dec %cx` and
-	// pushes the dword it sits in.
-	void   WriteData(void* pData, uint16 nBytes);
-	// STAND-IN (name ours): WriteData through one inline level. See
-	// sub_10023d73 for why the level is measured.
-	void   WriteDataInline(void* pData, uint16 nBytes) { WriteData(pData, nBytes); }
-	void   WriteByte(uint8 nValue);          // 0x1001393e
-	void   WriteWord(uint16 nValue);         // 0x1000ec3d
-	void   WriteDWord(uint32 nValue);        // 0x1000ecd6
-};
+
 
 
 // 0x100235e8 — the internal packet handler, run before anything else looks
@@ -1854,7 +1240,7 @@ public:
 // zero *after* the sample shift, or the zero VC6 is already holding in edi
 // gets spilled to a frame slot and reloaded. All four revisions (8168,
 // 8447, 8804, 8966) emit the same five bytes.
-int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
+int CNetMgr::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 {
 	CMessageRef ref;
 	uint32      nAcks[16];
@@ -1866,15 +1252,39 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 	if ((pMsg->m_pData[0] & 0x3f) != 1)
 		return 0;
 
-	nSubType = pMsg->ReadByte(0);
+    if (!pMsg->CanRead(1)) return 1;
+    nSubType = pMsg->ReadByte(0);
+    const uint32 remaining = pMsg->m_DataLen - pMsg->m_Pos;
+    if (nSubType == 0) {
+        if (!remaining) return 1;
+        const uint32 minimum = pMsg->m_pData[pMsg->m_Pos] ? 11 : 9;
+        if (remaining < minimum || (remaining - minimum) % 4 || remaining - minimum > 32) return 1;
+        const auto ack = nolf::wire::load<uint32>(pMsg->m_pData + pMsg->m_Pos + (minimum == 11 ? 3 : 1));
+        if (ack != 0xffffffff && static_cast<int32>(ack - pConn->m_nSent) >= 0) return 1;
+    } else if (nSubType == 1) {
+        if (remaining != 0 && remaining < 4) return 1;
+    } else if (nSubType == 2) {
+        if (remaining < 2) return 1;
+    } else if (nSubType == 3) {
+        uint32 cursor = pMsg->m_Pos;
+        while (cursor < pMsg->m_DataLen) {
+            if (pMsg->m_DataLen - cursor < 2) return 1;
+            const auto length = nolf::wire::load<uint16>(pMsg->m_pData + cursor);
+            cursor += 2;
+            if (!length || length > pMsg->m_DataLen - cursor) return 1;
+            cursor += length;
+        }
+    } else if (nSubType == 4) {
+        if (remaining < 5 || (pMsg->m_pData[pMsg->m_Pos] & 0xfc) != 0x30) return 1;
+    }
 
-	if (nSubType == 0)
+    if (nSubType == 0)
 	{
-		((NetConnectionResetView*)pConn)->m_Unknown98 = 0.0f;
+		(pConn)->m_Unknown98 = 0.0f;
 
 		if (pMsg->ReadByte(0))
 		{
-			uint16       nPingSeq = ((ServerMessageTypeView*)pMsg)->ReadWord(0);
+			uint16       nPingSeq = ((ServerMessage*)pMsg)->ReadWord(0);
 			CAbstractIO* pIO;
 
 			ref.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
@@ -1894,19 +1304,18 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 			SendToConnection(ref.m_pMsg, pConn, 0);
 		}
 
-		nAckID = ((ServerMessageTypeView*)pMsg)->ReadDWord(0);
+		nAckID = ((ServerMessage*)pMsg)->ReadDWord(0);
 
-		((NetConnectionResetView*)pConn)->m_Unknown80 =
-			((ServerMessageTypeView*)pMsg)->ReadDWord(0);
-
-		sub_10023ad7(&pConn->m_GuaranteedQueue,
-		             ((NetConnectionResetView*)pConn)->m_Unknown80);
+        // A reordered ACK may describe an older send frontier. It cannot
+        // invalidate reliable frames that have already arrived successfully.
+        const auto remote_sent = pMsg->ReadDWord(nullptr);
+        pConn->m_Unknown80 = std::max(pConn->m_Unknown80,remote_sent);
 
 		nCount = 0;
 
 		while ((uint32)pMsg->m_Unknown34 - (uint32)pMsg->m_Unknown38 >= 4)
 		{
-			nAcks[nCount] = ((ServerMessageTypeView*)pMsg)->ReadDWord(0);
+			nAcks[nCount] = ((ServerMessage*)pMsg)->ReadDWord(0);
 
 			nCount++;
 
@@ -1919,7 +1328,7 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 			sub_10023a91(&pConn->m_SendQueue, nAckID);
 
 			CNetMgr::DebugPrint(pConn, 2, "Got an ack on local %d, remote %d",
-				nAckID, ((NetConnectionResetView*)pConn)->m_Unknown80);
+				nAckID, (pConn)->m_Unknown80);
 		}
 
 		for (i = 0; i < nCount; i++)
@@ -1954,50 +1363,50 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 
 		pConn->m_pDriver->Disconnect(pConn, 4, 0);
 
-		m_pHandler->_v10(4, g_EmptyString,
-			((ServerMessageTypeView*)pMsg)->ReadDWord(0));
+        const uint32 reason = pMsg->CanRead(4) ? pMsg->ReadDWord(nullptr) : 0;
+        if (m_pHandler) m_pHandler->_v10(4, g_EmptyString, reason);
 	}
 	else if (nSubType == 2)
 	{
-		if (((ServerMessageTypeView*)pMsg)->ReadWord(0) ==
-		        ((NetConnectionResetView*)pConn)->m_UnknownB8)
+		if (((ServerMessage*)pMsg)->ReadWord(0) ==
+		        (pConn)->m_UnknownB8)
 		{
 			uint32 nValid;
 
 			for (i = 0; i < 2; i++)
-				((NetConnectionResetView*)pConn)->m_UnknownA0[i] =
-					((NetConnectionResetView*)pConn)->m_UnknownA0[i + 1];
+				(pConn)->m_UnknownA0[i] =
+					(pConn)->m_UnknownA0[i + 1];
 
-			((NetConnectionResetView*)pConn)->m_UnknownA0[2] =
+			(pConn)->m_UnknownA0[2] =
 				pConn->m_Counter.Read() * 0.001f;
 
 			nValid = 0;
 
-			float* pSamples = ((NetConnectionResetView*)pConn)->m_UnknownA0;
+			float* pSamples = (pConn)->m_UnknownA0;
 
 			for (i = 0; i < 3; i++)
 			{
-				((NetConnectionResetView*)pConn)->m_Ping += pSamples[i];
+				(pConn)->m_Ping += pSamples[i];
 
 				if (pSamples[i] > 0.0f)
 					nValid++;
 			}
 
 			if (nValid)
-				((NetConnectionResetView*)pConn)->m_Ping /= nValid;
+				(pConn)->m_Ping /= nValid;
 		}
 	}
 	else if (nSubType == 3)
 	{
 		while ((uint32)pMsg->m_Unknown34 - (uint32)pMsg->m_Unknown38 >= 2)
 		{
-			uint16 nSubLen = ((ServerMessageTypeView*)pMsg)->ReadWord(0);
+			uint16 nSubLen = ((ServerMessage*)pMsg)->ReadWord(0);
 
 			if (nSubLen <= pMsg->m_Unknown34 - pMsg->m_Unknown38)
 			{
-				CNetRecvPacket* pRec = sub_10023c4d(nSubLen);
-
-				((ServerMessageTypeView*)pMsg)->ReadData(pRec->m_pData, nSubLen);
+                CNetRecvPacket* pRec = sub_10023c4d(nSubLen);
+                if (!pRec) return 1;
+                ((ServerMessage*)pMsg)->ReadData(pRec->m_pData, nSubLen);
 
 				pRec->m_Len = nSubLen;
 
@@ -2066,8 +1475,11 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 
 		if (sub_10023474(pRec))
 		{
-			CNetMgr::DebugPrint(pConn, 2, "Completed fragmented packet %d",
-				pRec->m_ID);
+            uint32 total = 5;
+            for (const auto& part : pRec->m_pFrags) total += part.m_pMsg->m_DataLen - 1;
+            if (total > 0xffff || !pMsg->Reserve(total)) { ReleaseQueued(pRec); return 1; }
+            pMsg->m_MaxDataLen = static_cast<uint16>(std::max<uint32>(pMsg->m_MaxDataLen,total));
+            CNetMgr::DebugPrint(pConn, 2, "Completed fragmented packet %d", pRec->m_ID);
 
 			pMsg->m_Unknown38 = 1;
 			pMsg->m_Unknown34 = 1;
@@ -2075,7 +1487,7 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 			pMsg->m_pData[0] = pRec->m_pFrags[0].m_pMsg->m_pData[0];
 
 			for (i = 0; i < 4; i++)
-				((ServerMessageTypeView*)pMsg)->WriteData(
+				((ServerMessage*)pMsg)->WriteData(
 					pRec->m_pFrags[i].m_pMsg->m_pData + 1,
 					pRec->m_pFrags[i].m_pMsg->m_Unknown34 - 1);
 
@@ -2121,7 +1533,7 @@ int CNetMgrSendView::sub_100235e8(NetConnection* pConn, ServerMessage* pMsg)
 // the bytes add in both arms (78 bytes); a `float` local for the conversion;
 // all four compiler revisions; `(flags&1)==0`; `PPS = PPS + 1.0f`; the flag
 // read through a byte cast or a view class.
-void CNetMgrSendView::AddSentBytes(NetConnection* pConn, uint32 nBytes)
+void CNetMgr::AddSentBytes(NetConnection* pConn, uint32 nBytes)
 {
 	if (!pConn)
 		return;
@@ -2173,8 +1585,9 @@ extern int g_NetMaxQueued;
 // is re-read. The lithtech twin (0x4597a0, 179 bytes) is byte-identical as
 // well. It clears the record with an inline `rep stos` (0x4597e7): the same
 // memset, expanded by /O2's /Oi, where server.dll's /O1 calls 0x1003e280.
-CNetRecvPacket* CNetMgrSendView::sub_10023c4d(int nLen)
+CNetRecvPacket* CNetMgr::sub_10023c4d(int nLen)
 {
+	if (nLen < 0 || nLen > 0xffff) return nullptr;
 	CNetRecvPacketSendView* pRec;
 	LThreadMessage*         pTail = m_QueueB8.m_pTail;
 	LThreadMessage*         pCur  = m_QueueB8.m_pTail;
@@ -2197,11 +1610,11 @@ CNetRecvPacket* CNetMgrSendView::sub_10023c4d(int nLen)
 		}
 	}
 
-	pRec = (CNetRecvPacketSendView*)::operator new(sizeof(CNetRecvPacketSendView));
+	pRec = new (std::nothrow) CNetRecvPacketSendView;
+	if (!pRec) return nullptr;
 
-	memset(pRec, 0, sizeof(CNetRecvPacketSendView));
-
-	pRec->m_pData    = (uint8*)::operator new(nLen);
+	pRec->m_pData = static_cast<uint8*>(::operator new(nLen, std::nothrow));
+	if (!pRec->m_pData) { delete pRec; return nullptr; }
 	pRec->m_nAlloced = nLen;
 
 	m_UnknownD8 += nLen;
@@ -2239,7 +1652,7 @@ CNetRecvPacket* CNetMgrSendView::sub_10023c4d(int nLen)
 // and the whole slot layout; past that, all four revisions (8168, 8447,
 // 8804, 8966) emit our order. Callee-saved rotation plus a store-order
 // tie-break.
-LTBOOL CNetMgrSendView::sub_10023b1f(LMessageList* pList, CNetRecvPacket* pRec)
+LTBOOL CNetMgr::sub_10023b1f(LMessageList* pList, CNetRecvPacket* pRec)
 {
 	int             nCount;
 	LThreadMessage* pTail;
@@ -2315,14 +1728,14 @@ uint16 net_Checksum(uint8* pData, uint16 nLen)
 	// shared by both.
 	while (nWords--)
 	{
-		nSum += *(uint16*)pData;
+		nSum += nolf::wire::load<uint16>(pData);
 
 		pData += 2;
 	}
 
 	while (nRem--)
 	{
-		nSum += *(char*)pData;
+		nSum += static_cast<int8>(*pData);
 
 		pData++;
 	}
@@ -2454,48 +1867,42 @@ public:
 };
 #endif
 
-LTBOOL CNetMgrSendView::AddConnection(NetConnection* pConn)
+LTBOOL CNetMgr::AddConnection(NetConnection* pConn)
 {
-	CConnList* pList;
 	uint32     i;
 
 	con_Printf("NewConnectionNotify\n");
 
-	if (!m_pHandler)
+	if (!m_pHandler || !pConn || m_Connections.FindElement(pConn) != BAD_INDEX)
 		return LTFALSE;
+	const auto lifetime = pConn->m_Lifetime;
 
-	((NetConnectionResetView*)pConn)->m_Unknown80 = 0;
-	((NetConnectionResetView*)pConn)->m_Unknown7C = 0;
-	((NetConnectionResetView*)pConn)->m_nSent = 0;
-	((NetConnectionResetView*)pConn)->m_SendWait = 0.0f;
-	((NetConnectionResetView*)pConn)->m_RecvWait = 0.0f;
-	((NetConnectionResetView*)pConn)->m_Unknown6C = 0;
-	((NetConnectionResetView*)pConn)->m_UnknownB4 = 0.0f;
-	((NetConnectionResetView*)pConn)->m_Ping = 0.0f;
+	(pConn)->m_Unknown80 = 0;
+	(pConn)->m_Unknown7C = 0;
+	(pConn)->m_nSent = 0;
+	(pConn)->m_SendWait = 0.0f;
+	(pConn)->m_RecvWait = 0.0f;
+	(pConn)->m_Unknown6C = 0;
+	(pConn)->m_UnknownB4 = 0.0f;
+	(pConn)->m_Ping = 0.0f;
 
 	for (i = 0; i < 3; i++)
-		((NetConnectionResetView*)pConn)->m_UnknownA0[i] = 0.0f;
+		(pConn)->m_UnknownA0[i] = 0.0f;
 
-	((NetConnectionResetView*)pConn)->m_Unknown98 = 0.0f;
-	((NetConnectionResetView*)pConn)->m_AckTimer = 0.0f;
-	((NetConnectionResetView*)pConn)->m_nResent = 0;
+	(pConn)->m_Unknown98 = 0.0f;
+	(pConn)->m_AckTimer = 0.0f;
+	(pConn)->m_nResent = 0;
 
-	pList = &m_Connections;
-#ifdef LT_SERVER_BUILD
-	pList->Insert2(pList->m_nElements, pConn, &g_DefAlloc);
-#else
-	((CConnListO2*)pList)->Insert2(pList->m_nElements, pConn, &g_DefAlloc);
-#endif
+    if (!m_Connections.Insert2(m_Connections.GetSize(),pConn,&g_DefAlloc)) return LTFALSE;
 
-	if (((CBaseMgrConnectView*)m_pHandler)->OnNewConnection(pConn,
-			((NetConnectionResetView*)pConn)->m_Flags & 1))
-		return LTTRUE;
-
-#ifdef LT_SERVER_BUILD
-	pList->Remove2(m_Connections.m_nElements - 1, &g_DefAlloc);
-#else
-	((CConnListO2*)pList)->Remove2(m_Connections.m_nElements - 1, &g_DefAlloc);
-#endif
+	pConn->m_Admitting = true;
+    const auto accepted = m_pHandler->_v04(pConn,pConn->m_Flags & 1);
+    if (!*lifetime) return LTFALSE;
+    pConn->m_Admitting = false;
+    const auto index = m_Connections.FindElement(pConn);
+    if (index == BAD_INDEX) return LTFALSE;
+    if (accepted) return LTTRUE;
+    m_Connections.Remove2(index,&g_DefAlloc);
 
 	return LTFALSE;
 }
@@ -2525,7 +1932,7 @@ LTBOOL CNetMgrSendView::AddConnection(NetConnection* pConn)
 // a real frame slot because the varargs DebugPrint needs it on the stack and
 // every other call here clobbers ecx.
 //
-// The ping timer is reset to `((float)rand() / 32767.0f) * 3.0f`, and the
+// The ping timer is reset to `(float(rand()) / float(RAND_MAX)) * 3.0f`, and the
 // parentheses are load-bearing: written flat as `rand() / 32767.0f * 3.0f`,
 // VC6 turns the division into a reciprocal multiply and then folds it with
 // the 3.0f into one constant, and the function comes out six bytes short with
@@ -2578,28 +1985,28 @@ void CNetMgr::WriteAckPacket(NetConnection* pConn, ServerMessage* pMsg)
 
 	pMsg->WriteByte(0);
 
-	if (((NetConnectionResetView*)pConn)->m_UnknownB4 < 0.0f)
+	if ((pConn)->m_UnknownB4 < 0.0f)
 	{
-		((NetConnectionResetView*)pConn)->m_UnknownB8++;
+		(pConn)->m_UnknownB8++;
 
 		pConn->m_Counter.Start();
 
-		((NetConnectionResetView*)pConn)->m_UnknownB4 =
-			((float)rand() / 32767.0f) * 3.0f;
+		(pConn)->m_UnknownB4 =
+			(float(rand()) / float(RAND_MAX)) * 3.0f;
 
 		pMsg->WriteByte(1);
-		pMsg->WriteWord(((NetConnectionResetView*)pConn)->m_UnknownB8);
+		pMsg->WriteWord((pConn)->m_UnknownB8);
 	}
 	else
 	{
 		pMsg->WriteByte(0);
 	}
 
-	((ServerMessageWriteView*)pMsg)->WriteDWord(
+	((ServerMessage*)pMsg)->WriteDWord(
 		pConn->m_PacketID ? pConn->m_PacketID - 1 : (uint32)-1);
 
 	((CPacket*)pMsg)->WriteType(
-		(uint32)((NetConnectionResetView*)pConn)->m_nSent);
+		(uint32)(pConn)->m_nSent);
 
 	pCur = (CNetRecvPacket*)pConn->m_GuaranteedQueue.m_pTail;
 	nID = pConn->m_PacketID;
@@ -2608,8 +2015,8 @@ void CNetMgr::WriteAckPacket(NetConnection* pConn, ServerMessage* pMsg)
 	while (pCur)
 	{
 		pRec = pCur;
-		pCur = (pCur->m_pNext == (CNetRecvPacket*)pConn->m_GuaranteedQueue.m_pTail) ?
-		           LTNULL : pCur->m_pNext;
+		pCur = (pCur->m_pPrev == (CNetRecvPacket*)pConn->m_GuaranteedQueue.m_pTail) ?
+		           LTNULL : static_cast<decltype(pCur)>(pCur->m_pPrev);
 
 		if (pRec)
 		{
@@ -2617,7 +2024,7 @@ void CNetMgr::WriteAckPacket(NetConnection* pConn, ServerMessage* pMsg)
 			{
 				((CPacket*)pMsg)->WriteType(nID);
 
-				((CNetMgrSendView*)this)->DebugPrint(1,
+				this->DebugPrint(1,
 					"NAK sent on packet frame %d", nID);
 
 				nID++;
@@ -2633,11 +2040,11 @@ void CNetMgr::WriteAckPacket(NetConnection* pConn, ServerMessage* pMsg)
 
 	if (nCount < 8)
 	{
-		while (nID < ((NetConnectionResetView*)pConn)->m_Unknown80)
+		while (nID < (pConn)->m_Unknown80)
 		{
 			((CPacket*)pMsg)->WriteType(nID);
 
-			((CNetMgrSendView*)this)->DebugPrint(1,
+			this->DebugPrint(1,
 				"NAK sent on packet frame %d", nID);
 
 			nCount++;
@@ -2740,9 +2147,10 @@ void CNetMgr::WriteAckPacket(NetConnection* pConn, ServerMessage* pMsg)
 //    0x10022c92 precedes the stack cleanup) and `m_pData[0] = 1` above
 //    bResult, which is what keeps /O2 from reusing bResult's 1 in cl for the
 //    byte store (`movb $0x1,(%edx)` at 0x00458207).
-LTBOOL CNetMgrSendView::sub_10022c2f(void* pData, uint32 nLen, uint32 nSpare,
+LTBOOL CNetMgr::sub_10022c2f(void* pData, uint32 nLen, uint32 nSpare,
                                      NetConnection* pConn)
 {
+	if (!pData || !nLen || nLen > 65535 || !pConn || !pConn->m_pDriver) return LTFALSE;
 	ServerMessage* pMsg;
 	uint8*         pBytes;
 	uint32         nPacketID;
@@ -2756,22 +2164,24 @@ LTBOOL CNetMgrSendView::sub_10022c2f(void* pData, uint32 nLen, uint32 nSpare,
 
 	if (nLen < 0x555)
 	{
-		return ((CBaseDriverSendView*)pConn->m_pDriver)->SendData(
+		return pConn->m_pDriver->SendData(
 			pData, nLen, nSpare, pConn);
 	}
 
 	pBytes    = (uint8*)pData;
-	nPacketID = *(uint32*)(pBytes + nLen - 4);
+	nPacketID = nolf::wire::load<uint32>(pBytes + nLen - 4);
 	nLen     -= 4;
 
 	CNetMgr::DebugPrint(pConn, 2, "Fragmenting packet %d", nPacketID);
 
-	msg_AllocPacket((CAbstractIO**)&pMsg, 0x1000, 0x1000);
-
-	pMsg->m_pData[0] = 1;
-
 	nOffset = 0;
 	nPiece  = (nLen >> 2) + 1;
+	pMsg = nullptr;
+	CAbstractIO* allocation = nullptr;
+	msg_AllocPacket(&allocation, nPiece + 7, 0x1000);
+	pMsg = static_cast<ServerMessage*>(allocation);
+	if (!pMsg) return LTFALSE;
+	pMsg->m_pData[0] = 1;
 	bResult = LTTRUE;
 
 	for (nFrag = 0; nFrag < 4; nFrag++)
@@ -2801,13 +2211,13 @@ LTBOOL CNetMgrSendView::sub_10022c2f(void* pData, uint32 nLen, uint32 nSpare,
 
 		pMsg->WriteByte(4);
 		pMsg->WriteByte((uint8)(nFrag | 0x30));
-		((ServerMessageWriteView*)pMsg)->WriteDWord(nPacketID);
-		pMsg->WriteData(pBytes + nOffset, nEnd - nOffset);
+		((ServerMessage*)pMsg)->WriteDWord(nPacketID);
+		if (!pMsg->WriteData(pBytes + nOffset, nEnd - nOffset)) { bResult = LTFALSE; break; }
 
 		nRoom = pMsg->m_DataSize;
 		pOut  = pMsg->m_pData;
 
-		if (!((CBaseDriverSendView*)pConn->m_pDriver)->SendData(
+		if (!pConn->m_pDriver->SendData(
 			pOut, pMsg->m_Unknown34, nRoom - pMsg->m_Unknown34, pConn))
 		{
 			bResult = LTFALSE;
@@ -2849,7 +2259,7 @@ LTBOOL CNetMgrSendView::sub_10022c2f(void* pData, uint32 nLen, uint32 nSpare,
 // (pOut first, last, beside pCur, nLen at function scope), by pOut/nRoom
 // block-scoped in either arm, by assigning pOut before nRoom, or by pIO at
 // function scope (worse: 14 instructions).
-LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn)
+LTBOOL CNetMgr::SendPacketData(ServerMessage* pMsg, NetConnection* pConn)
 {
 	CMessageRef             refSpill;
 	CMessageRef             refAck;
@@ -2866,8 +2276,8 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 		save.m_pMsg = pMsg;
 		save.m_nPos = pMsg->m_Unknown38;
 
-		((ServerMessageWriteView*)pMsg)->WriteDWord(
-			((NetConnectionResetView*)pConn)->m_nSent);
+		((ServerMessage*)pMsg)->WriteDWord(
+			(pConn)->m_nSent);
 	}
 
 	if (pMsg->m_MsgFlags & 6)
@@ -2891,18 +2301,19 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 		{
 			pRec = (CNetRecvPacketSendView*)sub_10023c4d(pMsg->m_Unknown34);
 
+			if (!pRec) return LTFALSE;
 			memcpy(pRec->m_pData, pMsg->m_pData, pMsg->m_Unknown34);
 
 			pRec->m_Len = pMsg->m_Unknown34;
-			pRec->m_ID = ((NetConnectionResetView*)pConn)->m_nSent;
+			pRec->m_ID = (pConn)->m_nSent;
 
 			((LMessageList*)&pConn->m_SendQueue)->Prepend((LThreadMessage*)pRec);
 		}
 
-		((NetConnectionResetView*)pConn)->m_nSent++;
+		(pConn)->m_nSent++;
 	}
 
-	if ((pMsg->m_MsgFlags & 8) && pRec)
+	if (((pMsg->m_MsgFlags & 8) || pConn->m_Admitting) && pRec)
 	{
 		pRec->m_bPending = 1;
 
@@ -2910,7 +2321,7 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 	}
 	{
 		CNetMgr::DebugPrint(pConn, 5, "Sent packet %d to connection %p (packet ID %d (%d), length %d).",
-			((NetConnectionResetView*)pConn)->m_nSent, pConn,
+			(pConn)->m_nSent, pConn,
 			pMsg->m_pData[0] & 0x3f, pMsg->m_pData[0], pMsg->m_Unknown34);
 
 		if (pMsg->m_MsgFlags & 0x10)
@@ -2927,7 +2338,7 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 				{
 					uint32 nLen = pRec->m_Len;
 
-					if ((int)(nLen + 4) < ((ServerMessageWriteView*)pMsg)->GetSpaceLeft())
+					if ((int)(nLen + 4) < ((ServerMessage*)pMsg)->GetSpaceLeft())
 					{
 						if (!net_CanAppend(pMsg))
 						{
@@ -2951,12 +2362,12 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 
 		if (pConn->m_AckTimer > g_NetPiggybackTime && !(m_Flags & 1) &&
 		    !(pConn->m_Flags & 1) &&
-		    ((ServerMessageWriteView*)pMsg)->GetSpaceLeft() >= 0x2c)
+		    ((ServerMessage*)pMsg)->GetSpaceLeft() >= 0x2c)
 		{
 			CAbstractIO* pIO;
 
 			CNetMgr::DebugPrint(pConn, 2, "Piggybacking ack local: %d, remote: %d.",
-				((NetConnectionResetView*)pConn)->m_nSent, pConn->m_PacketID);
+				(pConn)->m_nSent, pConn->m_PacketID);
 
 			refAck.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
 
@@ -2992,7 +2403,7 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 			nRoom = pMsg->m_DataSize;
 			pOut  = pMsg->m_pData;
 
-			return ((CBaseDriverSendView*)pConn->m_pDriver)->SendData(
+			return pConn->m_pDriver->SendData(
 				pOut, pMsg->m_Unknown34,
 				nRoom - pMsg->m_Unknown34, pConn);
 		}
@@ -3017,15 +2428,18 @@ LTBOOL CNetMgrSendView::SendPacketData(ServerMessage* pMsg, NetConnection* pConn
 // The result local lives in the *parameter* slot the now-dead pConn
 // occupied — the frame has no `sub esp` at all — which is the usual /O1
 // reuse and needs no help from the source.
-LTBOOL CNetMgrSendView::SendPacket(ServerMessage* pMsg, NetConnection* pConn, uint8 n)
+LTBOOL CNetMgr::SendPacket(ServerMessage* pMsg, NetConnection* pConn, uint8 n)
 {
 	LTBOOL bSent;
 
 	if (g_NetResendTime > 0.001f)
 	{
-		CNetSentPacketView* pRec = ((CNetBankAllocView*)&m_PacketBank)->Allocate();
+		if (pMsg->m_DataLen > 0xffff - 0x32) return LTFALSE;
+		CNetSentPacketView* pRec = m_PacketBank.Allocate();
+		if (!pRec) return LTFALSE;
 
 		pRec->m_Packet.Init(pMsg->m_Unknown34 + 0x32, 0x1000);
+		if (pRec->m_Packet.m_Flags & PACKETFLAG_WRITEOVERFLOW) { m_PacketBank.Free(pRec); return LTFALSE; }
 
 		memcpy(pRec->m_Packet.m_pData, pMsg->m_pData, pMsg->m_Unknown34);
 		pRec->m_Packet.m_Unknown34 = pMsg->m_Unknown34;
@@ -3091,6 +2505,10 @@ LTBOOL CNetMgrSendView::SendPacket(ServerMessage* pMsg, NetConnection* pConn, ui
 //     test; shipped keeps it in %dl (0x4588ad) and reuses %edi for nID.
 int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw)
 {
+    if (!pMsg || !pConn || !pMsg->m_DataLen || pMsg->m_DataLen > pMsg->m_DataSize ||
+        pMsg->m_Pos > pMsg->m_DataLen || (pMsg->m_Flags & PACKETFLAG_READOVERFLOW)) return 0;
+    const uint32 trailer = pMsg->m_pData[0] & 0x80 ? ((pConn->m_Flags & 2) ? 6 : 4) : ((pConn->m_Flags & 2) ? 2 : 0);
+    if (pMsg->m_DataLen < trailer + 1) return 0;
 	uint32 nFlags;
 	uint32 nID;
 	uint16 nStrip;
@@ -3105,7 +2523,7 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 			dsi_ServerError("         MUST use ForceRemote in addition");
 		}
 
-		if ((((float)rand() / 32767.0f) * 100.0f) < g_NetDropRate)
+		if (((float(rand()) / float(RAND_MAX)) * 100.0f) < g_NetDropRate)
 		{
 			uint32 nDropID;
 
@@ -3114,7 +2532,7 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 			nDropID = (uint32)-1;
 
 			if (pMsg->m_pData[0] & 0x80)
-				nDropID = *(uint32*)&pMsg->m_pData[pMsg->m_Unknown34 - 4];
+				nDropID = nolf::wire::load<uint32>(pMsg->m_pData + pMsg->m_DataLen - 4);
 
 			DebugPrint(pConn, 1, "Dropping packet %lu", nDropID);
 
@@ -3128,10 +2546,10 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 
 	if (nFlags & 1)
 	{
-		((NetConnectionResetView*)pConn)->m_nPacketsRecv++;
+		(pConn)->m_nPacketsRecv++;
 
 		DebugPrint(pConn, 4, "Got packet %d from connection %p (packet ID %d, length %d).",
-			((NetConnectionResetView*)pConn)->m_nPacketsRecv, pConn,
+			(pConn)->m_nPacketsRecv, pConn,
 			pMsg->m_pData[0] & 0x3f, pMsg->m_Unknown34);
 
 		// lithtech.exe 0x458801/0x458812: both refusals `jne` to ONE return-0
@@ -3144,14 +2562,14 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 		// Measured with ||, `!a && !b` and nested positive guards: all three
 		// close lithtech and all three lose server. Hence the image split.
 #ifdef LT_SERVER_BUILD
-		if (((CNetMgrSendView*)this)->sub_10023a8c(pConn, pMsg))
+		if (this->sub_10023a8c(pConn, pMsg))
 			return 0;
 
-		if (((CNetMgrSendView*)this)->sub_100235e8(pConn, pMsg))
+		if (this->sub_100235e8(pConn, pMsg))
 			return 0;
 #else
-		if (((CNetMgrSendView*)this)->sub_10023a8c(pConn, pMsg) ||
-			((CNetMgrSendView*)this)->sub_100235e8(pConn, pMsg))
+		if (this->sub_10023a8c(pConn, pMsg) ||
+			this->sub_100235e8(pConn, pMsg))
 			return 0;
 #endif
 
@@ -3169,7 +2587,7 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 		if (nLen < 2)
 			return 0;
 
-		nCRC = *(uint16*)&pMsg->m_pData[nLen - 2];
+		nCRC = nolf::wire::load<uint16>(pMsg->m_pData + nLen - 2);
 
 		if (nCRC != net_Checksum(pMsg->m_pData, nLen - 2))
 		{
@@ -3180,7 +2598,7 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 		}
 	}
 
-	if (((CNetMgrSendView*)this)->sub_100235e8(pConn, pMsg))
+	if (this->sub_100235e8(pConn, pMsg))
 		return 0;
 
 	pData = pMsg->m_pData;
@@ -3195,13 +2613,14 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 		if (pMsg->m_Unknown34 < nTail)
 			return 0;
 
-		nID = *(uint32*)&pData[pMsg->m_Unknown34 - nTail];
+		nID = nolf::wire::load<uint32>(pData + pMsg->m_Unknown34 - nTail);
+        if (nID != 0xffffffff) pConn->m_Unknown80 = std::max(pConn->m_Unknown80,nID+1);
 
 		if (nID == pConn->m_PacketID)
 		{
 			DebugPrint(pConn, 2, "Received guaranteed packet %d", nID);
 
-			((CNetMgrSendView*)this)->sub_10022ac2(pConn);
+			this->sub_10022ac2(pConn);
 		}
 		else if (nID < pConn->m_PacketID)
 		{
@@ -3225,14 +2644,14 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 
 			DebugPrint(pConn, 2, "Received out of order packet %d", nID);
 
-			pRec = ((CNetMgrSendView*)this)->sub_10023c4d(pMsg->m_Unknown34);
+			pRec = this->sub_10023c4d(pMsg->m_Unknown34);
 			pRec->m_Len = pMsg->m_Unknown34;
 
 			memcpy(pRec->m_pData, pMsg->m_pData, pMsg->m_Unknown34);
 
 			pRec->m_ID = nID;
 
-			if (!((CNetMgrSendView*)this)->sub_10023b1f(&pConn->m_GuaranteedQueue, pRec))
+			if (!this->sub_10023b1f(&pConn->m_GuaranteedQueue, pRec))
 				FreeRecvPacket(pRec);
 
 			pConn->m_AckTimer += g_NetAckTime * 0.5f;
@@ -3244,7 +2663,7 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 			pConn->m_PacketID, pConn, pMsg->m_pData[0] & 0x3f,
 			pMsg->m_pData[0], pMsg->m_Unknown34);
 
-		if (((CNetMgrSendView*)this)->sub_10023a8c(pConn, pMsg))
+		if (this->sub_10023a8c(pConn, pMsg))
 			return 0;
 
 		nStrip = 4;
@@ -3271,7 +2690,7 @@ int CNetMgr::TranslatePacket(ServerMessage* pMsg, NetConnection* pConn, int bRaw
 
 	pMsg->m_Unknown34 -= nStrip;
 
-	((NetConnectionResetView*)pConn)->m_nPacketsRecv++;
+	(pConn)->m_nPacketsRecv++;
 
 	return 1;
 }
@@ -3377,47 +2796,6 @@ DECLARE_LTLINK(g_Un390List)
 //               carries a function pointer at +0x00 and its own next at
 //               +0x04, and every function is called cdecl with
 //               (this, pNode, arg1, arg2). Returns 0.
-class CModelSub14
-{
-public:
-	CModelSub14();                           // 0x100243f6
-	LTBOOL Init(void* pOwner);               // 0x10024409
-	void   sub_10024419();                   // 0x10024419
-	LTBOOL Walk(void* pArg1, void* pArg2);   // 0x10024431 (netobj.cpp's WalkQ458)
-
-	void*  m_pHead;                          // 0x00
-	void*  m_pOwner;                         // 0x04
-};
-
-CModelSub14::CModelSub14()
-{
-	Init(LTNULL);
-}
-
-// 0x10024409 — the initialiser the constructor calls: an empty chain and the
-// owner the caller named, and it answers LTTRUE unconditionally.
-LTBOOL CModelSub14::Init(void* pOwner)
-{
-	m_pHead  = LTNULL;
-	m_pOwner = pOwner;
-
-	return LTTRUE;
-}
-
-// 0x10024419 — the destructor's whole body (0x10024404 is a bare `jmp` here)
-// and Model's own release at +0x14: walk the chain with a null first
-// argument and the address of a stack `1` as the second — `movl $1,-4(%ebp)`
-// then `lea -4(%ebp),%eax ; push %eax ; push $0`. The walk's answer is
-// dropped. The walk itself is 0x10024431, reconstructed in netobj.cpp's
-// holding pen as CModelSub14Q458::WalkQ458.
-void CModelSub14::sub_10024419()
-{
-	uint32 nOne = 1;
-
-	Walk(LTNULL, &nOne);
-}
-
-
 // ---- the fragment reassembler and the message helpers -------------------- //
 
 // 0x100211e2 — nonzero when the message in hand is a guaranteed packet whose
@@ -3428,7 +2806,7 @@ int net_CanAppend(ServerMessage* pMsg)
 {
 	uint8* pData = pMsg->m_pData;
 
-	if ((pData[0] & 0x3f) == 1 && pData[1] == 3)
+	if (pMsg->m_DataLen >= 2 && (pData[0] & 0x3f) == 1 && pData[1] == 3)
 		return 1;
 
 	return 0;
@@ -3437,17 +2815,9 @@ int net_CanAppend(ServerMessage* pMsg)
 
 // 0x10023474 — nonzero once all four fragments of a split packet have
 // arrived. `this` is never read; the record is the only argument.
-int CNetMgrSendView::sub_10023474(CNetFragRec* pRec)
+int CNetMgr::sub_10023474(CNetFragRec* pRec)
 {
-	uint32 i;
-
-	for (i = 0; i < 4; i++)
-	{
-		if (!pRec->m_pFrags[i].m_pMsg)
-			return 0;
-	}
-
-	return 1;
+    return pRec && pRec->Complete();
 }
 
 
@@ -3464,7 +2834,7 @@ int CNetMgrSendView::sub_10023474(CNetFragRec* pRec)
 // cursor alias, and a record has to match on both the id and the connection:
 // two ids can be in flight at once and two connections can be sending the
 // same id.
-CNetFragRec* CNetMgrSendView::sub_100233ad(uint32 nID, NetConnection* pConn)
+CNetFragRec* CNetMgr::sub_100233ad(uint32 nID, NetConnection* pConn)
 {
 	CNetFragRec* pTail = (CNetFragRec*)m_QueueC4.m_pTail;
 	// RE-READ THE MEMBER, do not copy pTail. Written `pCur = pTail;`
@@ -3501,11 +2871,11 @@ CNetFragRec* CNetMgrSendView::sub_100233ad(uint32 nID, NetConnection* pConn)
 // forwarder after the WriteType is what keeps Insert2 a call inside the
 // expanded write (0x00459a31 -> 0x00412f50). Without it Insert2 expands too
 // (365 bytes against 195).
-void CNetMgrSendView::sub_10023d73(ServerMessage* pMsg, void* pData, uint32 nLen)
+void CNetMgr::sub_10023d73(ServerMessage* pMsg, void* pData, uint32 nLen)
 {
 	((CPacket*)pMsg)->WriteType((uint16)nLen);
 
-	((ServerMessageTypeView*)pMsg)->WriteDataInline(pData, (uint16)nLen);
+	((ServerMessage*)pMsg)->WriteData(pData, (uint16)nLen);
 }
 
 
@@ -3513,7 +2883,7 @@ void CNetMgrSendView::sub_10023d73(ServerMessage* pMsg, void* pData, uint32 nLen
 // payload: everything written into pSrc so far goes onto pDst as one sub-
 // packet. `this` survives in ecx across the call because nothing in between
 // touches it.
-void CNetMgrSendView::sub_10023d5b(ServerMessage* pDst, ServerMessage* pSrc)
+void CNetMgr::sub_10023d5b(ServerMessage* pDst, ServerMessage* pSrc)
 {
 	sub_10023d73(pDst, pSrc->m_pData, pSrc->m_Unknown34);
 }
@@ -3542,7 +2912,7 @@ inline void NetStartPacket(CMessageRef* pRef, uint8 nID, uint8 nSubType)
 // message off the packet allocator, its first payload byte set to the
 // internal packet id (1), and the sub-type written straight after it (3, the
 // appendable sub-packet stream).
-void CNetMgrSendView::sub_10023d16(CMessageRef* pRef)
+void CNetMgr::sub_10023d16(CMessageRef* pRef)
 {
 	CAbstractIO* pIO;
 
@@ -3564,7 +2934,7 @@ void CNetMgrSendView::sub_10023d16(CMessageRef* pRef)
 // test and the same trace line, minus the per-connection quiet filter that
 // needs a connection to read m_Flags off. An overload rather than a second
 // name, which is what the two symbols look like from the call sites.
-void CNetMgrSendView::DebugPrint(int nLevel, char* pFormat, ...)
+void CNetMgr::DebugPrint(int nLevel, char* pFormat, ...)
 {
 	char    msg[500];
 	va_list marker;
@@ -3573,7 +2943,7 @@ void CNetMgrSendView::DebugPrint(int nLevel, char* pFormat, ...)
 		return;
 
 	va_start(marker, pFormat);
-	_vsnprintf(msg, sizeof(msg) - 1, pFormat, marker);
+	vsnprintf(msg, sizeof(msg) - 1, pFormat, marker);
 
 	dsi_ServerError("(%d) %s%s", NET_TRACE_TIME(), m_pTraceName, msg);
 }
@@ -3598,7 +2968,7 @@ extern int g_NetConnTroubleCount2;
 // *byte*, which is what says SendPacket's third argument is a uint8: the
 // call pushes the whole dword that slot sits in, upper three bytes and all,
 // with no zero extension.
-LTBOOL CNetMgrSendView::SendToConnection(ServerMessage* pMsg, NetConnection* pConn,
+LTBOOL CNetMgr::SendToConnection(ServerMessage* pMsg, NetConnection* pConn,
                                      int nFlags)
 {
 	uint8 nType;
@@ -3630,7 +3000,7 @@ LTBOOL CNetMgrSendView::SendToConnection(ServerMessage* pMsg, NetConnection* pCo
 // written into it and the capacity it was given, and the pipe takes the
 // length and the slack separately. The records are not taken off the queue
 // here: the walk is the cursor alias and the list is left as it was.
-void CNetMgrSendView::sub_1002294f(NetConnection* pConn)
+void CNetMgr::sub_1002294f(NetConnection* pConn)
 {
 	CNetRecvPacket* pCur;
 	CNetRecvPacket* pRec;
@@ -3643,8 +3013,8 @@ void CNetMgrSendView::sub_1002294f(NetConnection* pConn)
 	while (pCur)
 	{
 		pRec = pCur;
-		pCur = (pCur->m_pNext == (CNetRecvPacket*)pConn->m_SendQueue.m_pTail) ?
-		           LTNULL : pCur->m_pNext;
+		pCur = (pCur->m_pPrev == (CNetRecvPacket*)pConn->m_SendQueue.m_pTail) ?
+		           LTNULL : static_cast<decltype(pCur)>(pCur->m_pPrev);
 
 		sub_10022c2f(pRec->m_pData, pRec->m_Len,
 		             pRec->m_nAlloced - pRec->m_Len, pConn);
@@ -3665,33 +3035,6 @@ void CNetMgrSendView::sub_1002294f(NetConnection* pConn)
 #define NETFRAG_INLINE inline
 #endif
 
-// 0x1002351c — empty a record without freeing it, so it can be handed
-// straight back out. Each slot is released through the cursor Init, then the
-// packet id and the connection go.
-NETFRAG_INLINE void CNetFragRec::Clear()
-{
-	uint32 i;
-
-	for (i = 0; i < 4; i++)
-#ifdef LT_SERVER_BUILD
-		((CMsgCursor*)&m_pFrags[i])->Init(LTNULL);
-#else
-		m_pFrags[i].SetInline(LTNULL);
-#endif
-
-	m_ID    = 0;
-	m_pConn = LTNULL;
-}
-
-
-// 0x10023505 — a fresh fragment record: the four slots start empty and the
-// rest of the record is cleared by the same routine that recycles one.
-NETFRAG_INLINE CNetFragRec::CNetFragRec()
-{
-	Clear();
-}
-
-
 // 0x10023495 — get a record to collect a split packet in. The manager keeps
 // at most six of them: with more than that already queued the oldest (the
 // head, one past the tail on the circular list) is taken off, emptied and
@@ -3711,7 +3054,7 @@ NETFRAG_INLINE CNetFragRec::CNetFragRec()
 // GenListPos with qualified GenBegin/GenGetNext (114), an in-class
 // CountFrags (declined at /Ob1; 106 forced). lithtech used to get the reload
 // from a stand-in inline helper; this one body is identical on both images.
-CNetFragRec* CNetMgrSendView::sub_10023495()
+CNetFragRec* CNetMgr::sub_10023495()
 {
 	CNetFragRec*     pRec;
 	CNetFragRec*     pCur;
@@ -3783,38 +3126,10 @@ CNetFragRec* CNetMgrSendView::sub_10023495()
 // declarations reordered; `pRec->m_pFrags + nIndex`; `!nIndex`;
 // `&m_pData[...]`; the source message through a copy, or its data pointer
 // through a local; the length passed without the (uint16) cast.
-LTBOOL CNetMgrSendView::sub_100233e3(ServerMessage* pMsg, uint8 nIndex,
+LTBOOL CNetMgr::sub_100233e3(ServerMessage* pMsg, uint8 nIndex,
                                      CNetFragRec* pRec)
 {
-	CNetFragSlot*  pSlot = &pRec->m_pFrags[nIndex];
-	ServerMessage* pDst;
-	CAbstractIO*   pIO;
-
-	if (pSlot->m_pMsg)
-		return LTFALSE;
-
-	((CMessageRef*)pSlot)->Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
-	if (pIO)
-		pIO->Release();
-
-	if (nIndex == 0)
-	{
-		ServerMessage* pFrag = pRec->m_pFrags[0].m_pMsg;
-		uint8 nType = pMsg->ReadByte(0);
-
-		pFrag->m_pData[0] = nType;
-	}
-
-	pDst = pSlot->m_pMsg;
-
-	pDst->m_Unknown38 = 1;
-	pDst->m_Unknown34 = 1;
-
-	((ServerMessageTypeView*)pSlot->m_pMsg)->WriteData(
-		pMsg->m_pData + pMsg->m_Unknown38,
-		(uint16)(pMsg->m_Unknown34 - pMsg->m_Unknown38));
-
-	return LTTRUE;
+    return pMsg && pRec && pRec->AddFragment(*pMsg, nIndex);
 }
 
 
@@ -3985,8 +3300,8 @@ void net_LogPacket(ServerMessage* pMsg, uint32 nLen, uint8 bOut)
 					nLen -= 8;
 					nCount = 0;
 
-					((ServerMessageTypeView*)pMsg)->ReadDWord(0);
-					((ServerMessageTypeView*)pMsg)->ReadDWord(0);
+					((ServerMessage*)pMsg)->ReadDWord(0);
+					((ServerMessage*)pMsg)->ReadDWord(0);
 
 					// 0x10021f67: the entry test is PEELED (`cmp $4 ; jle
 					// 0x100226be`) and jumps straight to the print tail --
@@ -4002,7 +3317,7 @@ void net_LogPacket(ServerMessage* pMsg, uint32 nLen, uint8 bOut)
 						nCount++;
 						nLen -= 4;
 
-						((ServerMessageTypeView*)pMsg)->ReadDWord(0);
+						((ServerMessage*)pMsg)->ReadDWord(0);
 					}
 
 					// 0x10021f9b  test %edi,%edi ; je 0x100226be
@@ -4050,7 +3365,7 @@ void net_LogPacket(ServerMessage* pMsg, uint32 nLen, uint8 bOut)
 						// straddling the argument push.
 						nLen -= 2;
 
-						nSubWord = ((ServerMessageTypeView*)pMsg)->ReadWord(0);
+						nSubWord = ((ServerMessage*)pMsg)->ReadWord(0);
 
 						// 0x10021e07  test %ax,%ax -- 16-bit, so the
 						// variable is uint16 and not uint32.
@@ -4096,7 +3411,7 @@ void net_LogPacket(ServerMessage* pMsg, uint32 nLen, uint8 bOut)
 								ref.m_pMsg->Init(nSubWord, 0x1000);
 
 								// 0x10021e74 -> 0x100260d9
-								((ServerMessageTypeView*)pMsg)->ReadData(
+								((ServerMessage*)pMsg)->ReadData(
 									ref.m_pMsg->m_pData, nSubWord);
 
 								// 0x10021e85 / 0x10021e8c -- both 16-bit
@@ -4209,7 +3524,7 @@ void net_LogPacket(ServerMessage* pMsg, uint32 nLen, uint8 bOut)
 					// and is source, not scheduling.
 					nLen -= nSubLen;
 
-					((ServerMessageTypeView*)pMsg)->ReadData(
+					((ServerMessage*)pMsg)->ReadData(
 						ref.m_pMsg->m_pData, nSubByte);                // 0x10022084
 
 					ref.m_pMsg->m_Unknown34 = nSubByte;                // 0x10022095
@@ -4467,7 +3782,7 @@ void net_LogPacket(ServerMessage* pMsg, uint32 nLen, uint8 bOut)
 
 					nLen -= nSubLen;                                   // 0x10022403
 
-					((ServerMessageTypeView*)pMsg)->ReadData(
+					((ServerMessage*)pMsg)->ReadData(
 						ref.m_pMsg->m_pData, nSubByte);                // 0x1002240b
 
 					ref.m_pMsg->m_Unknown34 = nSubByte;                // 0x1002241c
@@ -4676,4 +3991,44 @@ done:
 	// 0x10022731 -> 0x1000e3f9.  Same prototype question as the in-loop
 	// print above; alternative spelling con_Printf(str).
 	dsi_PrintString(str);
+}
+
+// The transport boundary carries engine events through actual C++ types.
+bool CNetMgr::accept_connection(NetConnection& connection) { return AddConnection(&connection) != LTFALSE; }
+void CNetMgr::close_connection(NetConnection& connection) {
+    CloseConnection(&connection);
+    RemoveConnection(&connection);
+}
+void CNetMgr::release_buffers(NetConnection& connection) noexcept {
+    TermQueue(&connection.m_GuaranteedQueue);
+    TermQueue(&connection.m_SendQueue);
+    TermQueue(&connection.m_RecvList);
+    netbank_FreeMessages(&connection.m_SentList, &m_PacketBank);
+}
+void CNetMgr::flush_connection(NetConnection& connection) { sub_1002294f(&connection); }
+void CNetMgr::connectionless_packet(ServerMessage& message, const nolf::platform::Endpoint& endpoint) {
+    if (!m_pHandler) return;
+    auto bytes = nolf::platform::ipv4_bytes(endpoint.address);
+    m_pHandler->ProcessPacket(static_cast<CPacket*>(&message), bytes.data(), endpoint.port);
+}
+void CNetMgr::remote_disconnect(uint32 reason) {
+    if (m_pHandler) m_pHandler->_v10(4, g_EmptyString, reason);
+}
+LTRESULT CNetMgr::GetSessionList(NetSession*& list, char* addresses) {
+    list = nullptr;
+    return m_pMainDriver ? m_pMainDriver->GetSessionList(&list, addresses) : LT_NOTINITIALIZED;
+}
+LTRESULT CNetMgr::FreeSessionList(NetSession* list) {
+    while (list) { auto* next = list->m_pNext; delete list; list = next; }
+    return LT_OK;
+}
+CBaseDriver* CNetMgr::FindDriver(char* name) {
+    if (!name) return nullptr;
+    for (uint32 i = 0; i < m_Drivers.m_nElements; ++i)
+        if (std::strcmp(m_Drivers.m_pArray[i]->m_Name, name) == 0) return m_Drivers.m_pArray[i];
+    return nullptr;
+}
+
+void CBaseMgr::_v10(int nEvent, char* pName, int n)
+{
 }

@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : CMoveMgr.cpp
@@ -10,7 +14,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "iltclient.h"
 #include "iltphysics.h"
 #include "CMoveMgr.h"
@@ -2169,7 +2173,7 @@ void CMoveMgr::OnPhysicsUpdate(HMESSAGEREAD hRead)
 		{
 			char buffer[128];
 			SAFE_STRCPY(buffer, theStruct.m_Filename);
-			strupr(buffer);
+			nolf::ascii_uppercase(buffer);
 			if (strstr(buffer, "PLAYER") || strstr(buffer, "HERO"))
 			{
 				m_bUsingPlayerModel = LTTRUE;

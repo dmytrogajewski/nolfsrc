@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Alarm.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -200,9 +202,10 @@ uint32 Alarm::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD hR
 	{
 		case MID_TRIGGER:
 		{
-            const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+            const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+            const char* szMsg = szMsgStorage.c_str();
 
-			if ( szMsg && !_stricmp(szMsg, s_szActivate) )
+			if ( szMsg && !nolf::ascii_compare(szMsg, s_szActivate) )
 			{
                 if ( m_bPlayerUsable || g_pLTServer->GetObjectClass(hSender) != g_pLTServer->GetClass("CPlayerObj") )
 				{
@@ -216,11 +219,11 @@ uint32 Alarm::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD hR
 					}
 				}
 			}
-			else if ( szMsg && !_stricmp(szMsg, s_szLock) )
+			else if ( szMsg && !nolf::ascii_compare(szMsg, s_szLock) )
 			{
 				m_bLocked = LTTRUE;
 			}
-			else if ( szMsg && !_stricmp(szMsg, s_szUnlock) )
+			else if ( szMsg && !nolf::ascii_compare(szMsg, s_szUnlock) )
 			{
 				m_bLocked = LTFALSE;
 			}

@@ -7,13 +7,7 @@
 //*********************************************************************************
 //*********************************************************************************
 
-// The string walking uses the <tchar.h> MBCS mappings (_tcsninc/_tcsinc):
-// with _MBCS they are __inline thunks over _mbsninc/_mbsinc, and that inline
-// expansion is what sets the shipped argument-load order at each call site.
-#ifndef _MBCS
-#define _MBCS
-#endif
-#include <tchar.h>
+#include "engine/portable/text.h"
 #include "lithsystemfont.h"
 
 //*********************************************************************************
@@ -187,14 +181,8 @@ void LithSystemFont::SetDrawData(HSURFACE pDest, char *szString, LITHFONTDRAWDAT
 	if (!lfDD)
 		return;
 
-	m_pDest = pDest;
-	m_szString = szString;
-
-	if (index >= 0)
-	{
-		if (index < (int)strlen(szString))
-			szString[index] = '\0';
-	}
+    m_pDest = pDest;
+    m_szString = PrepareText(szString,index);
 
 	m_lfDD = lfDD;
 	m_dwFlags = lfDD->dwFlags;
@@ -219,13 +207,8 @@ void LithSystemFont::SetDrawData(HSURFACE pDest, char *szString, LITHFONTDRAWDAT
 		m_nY += lfDD->nYOffset;
 	}
 
-	// Only reformat the string if something has changed
-	if (m_lfDD->bForceFormat || !m_lfSD->szPrevString || m_lfSD->szPrevString != szString ||
-		m_lfDD->nLetterSpace != m_lfSD->nLastLetterSpace)
-	{
-		m_lfSD->szPrevString = szString;
-		m_lfSD->nLastLetterSpace = m_lfDD->nLetterSpace;
-
+    if (UpdateLayoutIdentity(*m_lfSD,*m_lfDD,m_dwFlags))
+    {
 		m_nExtraLetterSpace = m_lfDD->nLetterSpace;
 		m_pClient->SetFontExtraSpace(m_pFont, m_nExtraLetterSpace);
 
@@ -271,19 +254,15 @@ void LithSystemFont::SetFormatData(uint32 nFormatWidth)
 	char *pStart = pString;
 	char *pCurrent = pString;
 
-	while (1)
+	while (m_lfFD->nNumLines+1 < LTF_MAX_FORMAT_LINES)
 	{
 		int nSizeX, nSizeY;
 
 		if (*pCurrent == ' ' || *pCurrent == '\n' || *pCurrent == '\0')
 		{
-			char szTemp[LTF_MAX_STRING_SIZE];
+			std::string szTemp(pStart, pCurrent);
 
-			// Get the dimensions of the current segment
-			memcpy(szTemp, pStart, pCurrent - pStart);
-			szTemp[pCurrent - pStart] = '\0';
-
-			HSTRING hString = m_pClient->CreateString(szTemp);
+			HSTRING hString = m_pClient->CreateString(szTemp.data());
 			m_pClient->GetStringDimensions(m_pFont, hString, &nSizeX, &nSizeY);
 			m_pClient->FreeString(hString);
 
@@ -296,8 +275,9 @@ void LithSystemFont::SetFormatData(uint32 nFormatWidth)
 				m_lfFD->pWidths[m_lfFD->nNumLines] = nLastWidth;
 				m_lfFD->nNumLines++;
 
-				pStart = _tcsninc(pString, nLastSpace);
+				pStart = nolf::text::advance(pString, nLastSpace);
 
+				nLastSpace = 0;
 				nLastWidth = 0;
 				pCurrent = pStart;
 				nIndex = nLastSpace;
@@ -316,8 +296,9 @@ void LithSystemFont::SetFormatData(uint32 nFormatWidth)
 				m_lfFD->pWidths[m_lfFD->nNumLines] = nWidth;
 				m_lfFD->nNumLines++;
 
-				pStart = _tcsninc(pString, nIndex + 1);
+				pStart = nolf::text::advance(pString, nIndex + 1);
 
+				nLastSpace = 0;
 				nLastWidth = 0;
 				pCurrent = pStart;
 				nIndex = nIndex + 1;
@@ -329,7 +310,7 @@ void LithSystemFont::SetFormatData(uint32 nFormatWidth)
 			}
 		}
 
-		pCurrent = _tcsinc(pCurrent);
+		pCurrent = nolf::text::next(pCurrent);
 		nIndex++;
 	}
 
@@ -344,10 +325,10 @@ void LithSystemFont::SetFormatData(uint32 nFormatWidth)
 		if (m_dwFlags & LTF_TIMED_LETTERS)
 			m_lfSD->fTotalDrawTime += m_lfFD->nNumChars * m_lfDD->fLetterDelay;
 
-		if (m_dwFlags & LTF_TIMED_LINES)
+		if ((m_dwFlags & LTF_TIMED_LINES) && m_lfFD->nNumLines > 0)
 			m_lfSD->fTotalDrawTime += (m_lfFD->nNumLines - 1) * m_lfDD->fLineDelay;
 
-		if (m_dwFlags & LTF_TIMED_SCROLL)
+		if ((m_dwFlags & LTF_TIMED_SCROLL) && m_lfFD->nNumLines > m_nWaitLines)
 			m_lfSD->fTotalDrawTime += (m_lfFD->nNumLines - m_nWaitLines) * m_lfDD->fLineScrollTime;
 
 		for (uint32 i = 0; i < m_lfFD->nNumLines; i++)
@@ -361,7 +342,7 @@ void LithSystemFont::SetFormatData(uint32 nFormatWidth)
 
 void LithSystemFont::Draw_Method_Normal()
 {
-	if (!m_lfFD)
+	if (!m_lfFD || !m_lfFD->nNumLines)
 		return;
 
 	HLTCOLOR hColor = m_lfDD->hColor;
@@ -378,12 +359,11 @@ void LithSystemFont::Draw_Method_Normal()
 	if (m_dwFlags & LTF_DRAW_SOLID)
 		hColor = m_lfDD->hColor;
 
-	uint32 i;
-	for (i = 0; i < m_lfFD->nNumLines; i++)
+	for (uint32 i = 0; i < m_lfFD->nNumLines; i++)
 	{
 		uint32 nWidth = m_lfFD->pWidths[i];
 
-		int x;
+		int x = m_nX;
 		switch (m_byJustify)
 		{
 			case LTF_JUSTIFY_LEFT:		x = m_nX;				break;
@@ -411,7 +391,7 @@ void LithSystemFont::Draw_Method_Normal()
 
 void LithSystemFont::Draw_Method_Timed()
 {
-	if (!m_lfFD)
+	if (!m_lfFD || !m_lfFD->nNumLines)
 		return;
 
 	if (!m_lfDD)
@@ -499,13 +479,13 @@ void LithSystemFont::Draw_Method_Timed()
 		hColor = m_lfDD->hColor;
 
 	// Draw each line
-	for (i = 0; i < (uint32)nCurLine; i++)
+	for (uint32 i = 0; i < (uint32)nCurLine; i++)
 	{
 		uint32 nWidth = m_lfFD->pWidths[i];
 		uint32 nStartIndex = m_lfFD->pIndex[i];
 		uint32 nEndIndex = m_lfFD->pIndex[i+1];
 
-		if ((m_dwFlags & LTF_TIMED_LETTERS) && i == (uint32)nCurLine - 1 && fElapsed < m_lfSD->fTotalDrawTime)
+		if ((m_dwFlags & LTF_TIMED_LETTERS) && m_lfFD->pTimes[i] > 0.0f && i == (uint32)nCurLine - 1 && fElapsed < m_lfSD->fTotalDrawTime)
 		{
 			// This line is still updating... draw a partial line
 
@@ -514,23 +494,21 @@ void LithSystemFont::Draw_Method_Timed()
 				nIndex = nEndIndex;
 
 			int nSizeX = 0, nSizeY;
-			char *pStart = _tcsninc(m_szString, nStartIndex);
-			char *pEnd = _tcsninc(m_szString, nIndex);
+			char *pStart = nolf::text::advance(m_szString, nStartIndex);
+			char *pEnd = nolf::text::advance(m_szString, nIndex);
 
-			char szTemp[LTF_MAX_STRING_SIZE];
-			memcpy(szTemp, pStart, pEnd - pStart);
-			szTemp[pEnd - pStart] = '\0';
+			std::string szTemp(pStart, pEnd);
 
-			char *pTemp = szTemp;
+			char *pTemp = szTemp.data();
 			while (*pTemp)
 			{
 				if (*pTemp == '\r' || *pTemp == '\n')
 					*pTemp = ' ';
 
-				pTemp = _tcsinc(pTemp);
+				pTemp = nolf::text::next(pTemp);
 			}
 
-			HSTRING hString = m_pClient->CreateString(szTemp);
+			HSTRING hString = m_pClient->CreateString(szTemp.data());
 			m_pClient->GetStringDimensions(m_pFont, hString, &nSizeX, &nSizeY);
 			m_pClient->FreeString(hString);
 
@@ -715,25 +693,23 @@ LTBOOL LithSystemFont::SetupCompositeSurface()
 		m_pClient->FillRect(m_pStringSurf, LTNULL, hBackColor);
 
 		// Draw each line onto the composite surface
-		for (i = 0; i < m_lfFD->nNumLines; i++)
+		for (uint32 i = 0; i < m_lfFD->nNumLines; i++)
 		{
-			char *pStart = _tcsninc(pString, m_lfFD->pIndex[i]);
-			char *pEnd = _tcsninc(pString, m_lfFD->pIndex[i+1]);
+			char *pStart = nolf::text::advance(pString, m_lfFD->pIndex[i]);
+			char *pEnd = nolf::text::advance(pString, m_lfFD->pIndex[i+1]);
 
-			char szTemp[LTF_MAX_STRING_SIZE];
-			memcpy(szTemp, pStart, pEnd - pStart);
-			szTemp[pEnd - pStart] = '\0';
+			std::string szTemp(pStart, pEnd);
 
-			char *pTemp = szTemp;
+			char *pTemp = szTemp.data();
 			while (*pTemp)
 			{
 				if (*pTemp == '\r' || *pTemp == '\n')
 					*pTemp = ' ';
 
-				pTemp = _tcsinc(pTemp);
+				pTemp = nolf::text::next(pTemp);
 			}
 
-			HSTRING hString = m_pClient->CreateString(szTemp);
+			HSTRING hString = m_pClient->CreateString(szTemp.data());
 
 			m_rRect.Init(0, i * m_nHeight, m_lfFD->pWidths[i], (i+1) * m_nHeight);
 

@@ -1,13 +1,19 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // FolderCustomControls.cpp: implementation of the CFolderCustomControls class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "FolderCustomControls.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
 #include "ClientRes.h"
-#include "keyfixes.h"
-#include "dinput.h"
+#include "KeyFixes.h"
 #ifdef NOLFSRC_MODERN
 // M-P2-03: no console while keys are being bound
 #include "cshell/p2_console.h"
@@ -171,20 +177,20 @@ void CFolderCustomControls::SetControlText(int nIndex)
 	CLTGUIColumnTextCtrl *pCtrl = GetControlFromEntryIndex(nIndex);
 	if (!pCtrl) 
 	{
-		_ASSERT(0);
+		GAME_ASSERT(0);
 		return;
 	}
 
 	char strControls[256] = "";
 	int numControls = 0;
 
-	if ( _mbstrlen(m_pEntries[nIndex].strControlName[0]) != 0 )
+	if ( nolf::text::length(m_pEntries[nIndex].strControlName[0]) != 0 )
 	{
 		SAFE_STRCPY(strControls,m_pEntries[nIndex].strControlName[0]);
 		++numControls;
 	}
 
-	if ( _mbstrlen(m_pEntries[nIndex].strControlName[1]) != 0 )
+	if ( nolf::text::length(m_pEntries[nIndex].strControlName[1]) != 0 )
 	{
 		if (numControls)
 			strcat(strControls,", ");
@@ -193,7 +199,7 @@ void CFolderCustomControls::SetControlText(int nIndex)
 		strcat(strControls,m_pEntries[nIndex].strControlName[1]);
 	}
 
-	if ( _mbstrlen(m_pEntries[nIndex].strControlName[2]) != 0 )
+	if ( nolf::text::length(m_pEntries[nIndex].strControlName[2]) != 0 )
 	{
 		if (numControls)
 			strcat(strControls,", ");
@@ -204,7 +210,7 @@ void CFolderCustomControls::SetControlText(int nIndex)
 
 
 	// If the key is unassigned, then just set the text to the unassigned message
-	if ( _mbstrlen(strControls) == 0 )
+	if ( nolf::text::length(strControls) == 0 )
 	{
 		pCtrl->SetString(FOLDER_COLUMN_KEY, IDS_CONTROL_UNASSIGNED);
 	}
@@ -300,7 +306,7 @@ void CFolderCustomControls::UnBind(int commandIndex, uint32 deviceType)
 	char szDevice[2048];
     if (!g_pLTClient->GetDeviceName (deviceType, szDevice, sizeof(szDevice)) == LT_OK)
 	{
-		_ASSERT(0);
+		GAME_ASSERT(0);
 		return;
 	}
 
@@ -349,7 +355,7 @@ void CFolderCustomControls::UnBind(int commandIndex, uint32 deviceType)
 
 					// Set the binding
 					if (g_pInterfaceResMgr->IsEnglish() && ptr->strTriggerName[0] == ';')
-						sprintf(tempStr, "rangebind \"%s\" \"##39\" 0 0 \"\"", szDevice);
+						sprintf(tempStr, "rangebind \"%s\" \"39\" 0 0 \"\"", szDevice);
 					else
 						sprintf(tempStr, "rangebind \"%s\" \"%s\" 0 0 \"\"", szDevice, ptr->strTriggerName);
                     g_pLTClient->CPrint(tempStr);
@@ -410,12 +416,12 @@ void CFolderCustomControls::UnBind(int commandIndex, uint32 deviceType)
 // Binds a key to a action
 void CFolderCustomControls::Bind(int commandIndex, char *lpszControlName, uint32 deviceType, uint8 diCode)
 {
-	_ASSERT(lpszControlName);
+	GAME_ASSERT(lpszControlName);
 
 	char szDevice[2048];
     if (!g_pLTClient->GetDeviceName (deviceType, szDevice, sizeof(szDevice)) == LT_OK)
 	{
-		_ASSERT(0);
+		GAME_ASSERT(0);
 		return;
 	}
 
@@ -436,7 +442,7 @@ void CFolderCustomControls::Bind(int commandIndex, char *lpszControlName, uint32
 		char tempStr[256];
 
 		if (diCode)
-			sprintf(tempStr, "rangebind \"%s\" \"##%d\" 0 0 \"%s\"", szDevice, diCode, CommandName(m_pEntries[commandIndex].nAction));
+			sprintf(tempStr, "rangebind \"%s\" \"%d\" 0 0 \"%s\"", szDevice, diCode, CommandName(m_pEntries[commandIndex].nAction));
 		else
 			sprintf(tempStr, "rangebind \"%s\" \"%s\" 0 0 \"%s\"", szDevice, lpszControlName, CommandName(m_pEntries[commandIndex].nAction));
 		g_pLTClient->CPrint(tempStr);
@@ -604,7 +610,7 @@ LTBOOL CFolderCustomControls::SetCurrentSelection (DeviceInput* pInput)
 
 	char sNewKey[256];
 	SAFE_STRCPY(sNewKey,pInput->m_ControlName);
-	if (pInput->m_DeviceType == DEVICETYPE_KEYBOARD && (_mbstrlen(pInput->m_ControlName) == 1))
+	if (pInput->m_DeviceType == DEVICETYPE_KEYBOARD && (nolf::text::length(pInput->m_ControlName) == 1))
 	{
 		ConvertKeyToCurrentKeyboard(sNewKey, pInput->m_ControlName, 256);
 	}
@@ -620,7 +626,7 @@ LTBOOL CFolderCustomControls::SetCurrentSelection (DeviceInput* pInput)
 			g_pLTClient->CPrint("diCode:%d",diCode);
 			sprintf(szDebugStr,"diCode:%d",diCode);
 
-			if (_mbstrlen(pInput->m_ControlName) != 1)
+			if (nolf::text::length(pInput->m_ControlName) != 1)
 			{
 				Bind(nIndex, pInput->m_ControlName, pInput->m_DeviceType, diCode);
 			}
@@ -646,7 +652,7 @@ LTBOOL CFolderCustomControls::SetCurrentSelection (DeviceInput* pInput)
 			for (int i = 0; i < m_nEntries; i++)
 			{
 				if (i == nIndex) continue;
-				if (stricmp (m_pEntries[i].strControlName[dev], sNewKey) == 0)
+				if (nolf::ascii_compare (m_pEntries[i].strControlName[dev], sNewKey) == 0)
 				{
 					Bind(i,"", pInput->m_DeviceType);
 				}
@@ -669,14 +675,10 @@ LTBOOL CFolderCustomControls::KeyRemappable (DeviceInput* pInput)
 
 
 //*********************************************************************************
-	uint8 nDIK = (uint8)pInput->m_ControlName[63];
-	if (nDIK == DIK_ESCAPE)
-        return LTFALSE;
-	if (nDIK == DIK_PAUSE)
-        return LTFALSE;
-	if (nDIK >= DIK_F1 && nDIK <= DIK_F10)
-        return LTFALSE;
-	if (nDIK >= DIK_F11 && nDIK <= DIK_F15)
+	if (!pInput) return LTFALSE;
+	const auto key=pInput->m_KeyCode;
+	if (pInput->m_ControlType == CONTROLTYPE_KEY &&
+		(key == VK_ESCAPE || key == VK_PAUSE || (key >= VK_F1 && key <= VK_F15)))
         return LTFALSE;
 	char sNewKey[256];
 	ConvertKeyToCurrentKeyboard(sNewKey, pInput->m_ControlName, 256);
@@ -893,7 +895,7 @@ void CFolderCustomControls::FillControlList()
 		{
 			continue;
 		}
-		for (i = 0; i < m_nEntries; i++)
+		for (int i = 0; i < m_nEntries; i++)
 		{
 			// find the binding for this action
 
@@ -983,7 +985,7 @@ LTBOOL CFolderCustomControls::CheckMouseWheel (DeviceInput* pInput)
 	char szDevice[256];
     if (!g_pLTClient->GetDeviceName (pInput->m_DeviceType, szDevice, sizeof(szDevice)) == LT_OK)
 	{
-		_ASSERT(0);
+		GAME_ASSERT(0);
 		return LTFALSE;
 	}
 
@@ -1002,8 +1004,8 @@ LTBOOL CFolderCustomControls::CheckMouseWheel (DeviceInput* pInput)
 	{
 
 
-		if (stricmp(ptr->strDeviceName,pInput->m_DeviceName) == 0 &&
-			stricmp(ptr->strTriggerName,pInput->m_ControlName) == 0)
+		if (nolf::ascii_compare(ptr->strDeviceName,pInput->m_DeviceName) == 0 &&
+			nolf::ascii_compare(ptr->strTriggerName,pInput->m_ControlName) == 0)
 		{
 			pBinding = ptr;
 			bFound = LTTRUE;
@@ -1050,7 +1052,7 @@ LTBOOL CFolderCustomControls::CheckMouseWheel (DeviceInput* pInput)
 	for (int i = 0; i < m_nEntries; i++)
 	{
 		if (i == nIndex) continue;
-		if (stricmp (m_pEntries[i].strControlName[dev], tempStr) == 0)
+		if (nolf::ascii_compare (m_pEntries[i].strControlName[dev], tempStr) == 0)
 		{
 			Bind(i,"", pInput->m_DeviceType);
 		}
@@ -1099,7 +1101,7 @@ void CFolderCustomControls::RebindWheel(int nUpAction,int nDownAction)
     g_pLTClient->GetDeviceName (DEVICETYPE_MOUSE, szDevice, sizeof(szDevice));
 
 	// Set the binding
-	//rangebind "##mouse" "##z-axis" 0.100000 255.000000 "Forward" -255.000000 -0.100000 "Backward" 
+	//rangebind "mouse" "z-axis" 0.100000 255.000000 "Forward" -255.000000 -0.100000 "Backward"
 	char tempStr[512] = "";
 	char upStr[64] = "";
 	if (nUpAction >= 0)
@@ -1112,7 +1114,7 @@ void CFolderCustomControls::RebindWheel(int nUpAction,int nDownAction)
 		sprintf(downStr,"-0.10 -255.0 \"%s\"",CommandName(nDownAction));
 	}
 
-	sprintf(tempStr, "rangebind \"%s\" \"##z-axis\" %s %s", szDevice, upStr, downStr);
+	sprintf(tempStr, "rangebind \"%s\" \"z-axis\" %s %s", szDevice, upStr, downStr);
     g_pLTClient->CPrint(tempStr);
     g_pLTClient->RunConsoleString(tempStr);
 }

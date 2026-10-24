@@ -1,7 +1,8 @@
 // FolderHostOptions.cpp: implementation of the CFolderHostOptions class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "FolderHostOptions.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -9,7 +10,7 @@
 #include "VarTrack.h"
 #include "WeaponMgr.h"
 #include "NetDefs.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 
 #include "GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
@@ -155,7 +156,7 @@ void    CFolderHostOptions::OnFocus(LTBOOL bFocus)
 				} break;
 			case SO_SPECIAL:
 				{
-					if (stricmp(pOpt->szVariable,"NetDefaultWeapon") == 0)
+					if (nolf::ascii_compare(pOpt->szVariable,"NetDefaultWeapon") == 0)
 					{
 						CCycleCtrl *pCycle = AddCycleItem(pOpt->nNameId,pOpt->nHelpId,kHeaderWidth,kSpacerWidth,&m_anValues[i]);
 						WEAPON* pWeapon = LTNULL;
@@ -201,7 +202,7 @@ void    CFolderHostOptions::OnFocus(LTBOOL bFocus)
 			OPTION* pOpt = g_pServerOptionMgr->GetOption(i);
 			if (IsAllowedGameType((int)pOpt->eGameType))
 			{
-				if (stricmp(pOpt->szVariable,"NetDefaultWeapon") == 0 && m_anValues[i] > 0)
+				if (nolf::ascii_compare(pOpt->szVariable,"NetDefaultWeapon") == 0 && m_anValues[i] > 0)
 				{
 					//translate from string index to command id
 					pOpt->SetValue((LTFLOAT)g_nWeaponCommands[m_anValues[i]-1]);
@@ -221,7 +222,7 @@ void    CFolderHostOptions::OnFocus(LTBOOL bFocus)
 				nNumOptions = MAX_GAME_OPTIONS;
 			
 			HMESSAGEWRITE hWrite = g_pLTClient->StartMessage(MID_UPDATE_OPTIONS);
-			for (i = 0; i < nNumOptions; i++)
+			for (int i = 0; i < nNumOptions; i++)
 			{
 				OPTION* pOpt = g_pServerOptionMgr->GetOption(i);
 				if (g_pGameClientShell->GetGameType() == pOpt->eGameType || pOpt->eGameType == SINGLE)

@@ -1,50 +1,25 @@
-// *********************************************************************** //
-//
-//  MODULE:   GAMESPYCLIENTMGR (.CPP)  -- our replacement for
-//            GameSpyClientMgr.lib
-//
-//  PURPOSE:  The client-side server browser CShell.dll links
-//            (CGameSpyClientMgr, CGameSpyServer, CGameSpyPlayer; headers in
-//            src/LT2/lithshared/incs and src/LT2/lithshared/gamespy). Only the
-//            multiplayer "Join" folder (FolderJoin.cpp) uses it.
-//
-//  WHY THIS IS NOT A RECONSTRUCTION.  The prebuilt library is the GameSpy
-//  C Engine SDK plus thin Monolith wrappers -- middleware, deliberately not
-//  byte-matched. The build compiles
-//  every binary from our own source, so this file stands in for it: the
-//  same interface, written from the headers alone.
-//
-//  WHAT IT DOES.  The SDK filled its list from master.gamespy.com, which
-//  was shut down in 2013. With no master there is nothing to list, so the
-//  manager initialises, refreshes to an empty list and stays idle; the Join
-//  folder shows no servers. The server and player wrappers are complete
-//  but are never handed a server.
-//
-// *********************************************************************** //
-
-#include <windows.h>
-#include <string.h>
-#include <stdlib.h>
+// Native GameSpy browser: asynchronous TCP master exchange and bounded UDP status queries.
 #include "GameSpyClientMgr.h"
-#ifdef NOLFSRC_MODERN
-//  THE MODERN BUILD (NOLFSRC_MODERN, M-P6-02) does fill the list: from the
-//  master the game names with GameSpyClient_SetMasterServer (default
-//  master.openspy.net), then by querying each server; see gsmaster.h and
-//  the first #ifdef below.
-#include <stdio.h>
-#include "gsmaster.h"
-#endif
+#include "gs_protocol.h"
+#include "platform/sockets.h"
+#include "platform/system.h"
+#include "platform/logging.h"
+#include <algorithm>
+#include <charconv>
+#include <cstring>
+#include <cstdlib>
+#include <cstdio>
+#include <memory>
+#include <new>
+#include <string>
+#include <string_view>
+#include <vector>
 
-#ifdef NOLFSRC_MODERN
-
-// ----------------------------------------------------------------------- //
-//  M-P6-02: the modern build's browser. RefreshServers asks the master
-//  (gsmaster.h) for the list over TCP, then queries every listed server
-//  with \status\ over UDP, GSCM_MAX_UPDATES at a time; Update, called every
-//  frame by the Join folder, moves both along without blocking (except the
-//  master's name lookup when a refresh starts). A server is listed once it
-//  has answered; one that never answers is left out.
-// ----------------------------------------------------------------------- //
+static std::uint64_t milliseconds() { return nolf::platform::monotonic_nanoseconds()/1000000; }
+static std::string address_text(std::uint32_t address) {
+    unsigned char bytes[4]; std::memcpy(bytes,&address,4);
+    return std::to_string(bytes[0])+'.'+std::to_string(bytes[1])+'.'+std::to_string(bytes[2])+'.'+std::to_string(bytes[3]);
+}
 
 #define GSL_MAX_SERVERS		1024	// servers taken from one master list
 #define GSL_MAX_PAIRS		224		// keys kept per server
@@ -60,13 +35,15 @@ enum { GSS_WAITING, GSS_QUERYING, GSS_DONE, GSS_FAILED };
 
 struct GServerImplementation
 {
-	unsigned long	nIP;			// network order
+	std::uint32_t	nIP;			// network order
 	unsigned short	nPort;			// host order
 	int				nState;			// GSS_*
 	int				nTries;
-	DWORD			dwSent;			// first send, for the ping
-	DWORD			dwLastSend;
+	std::uint64_t			dwSent;			// first send, for the ping
+	std::uint64_t			dwLastSend;
 	int				nPing;
+	std::uint64_t packet_mask;
+	std::uint32_t query_id;
 	int				nPacketsGot;
 	int				nPackets;		// from the packet carrying \final\, 0 until then
 	int				nPairs;
@@ -79,10 +56,12 @@ struct GServerImplementation
 struct GServerListImplementation
 {
 	int				nState;			// sl_*
-	SOCKET			hTCP;
-	SOCKET			hUDP;
-	DWORD			dwListStart;
-	BOOL			bSentRequest;
+	std::unique_ptr<nolf::platform::TcpSocket> hTCP;
+	std::unique_ptr<nolf::platform::UdpSocket> hUDP;
+	std::uint64_t			dwListStart;
+	LTBOOL			bSentRequest;
+	std::string request;
+	std::size_t request_sent{};
 	int				nRecv;
 	char			aRecv[GSL_LIST_BUFFER];
 
@@ -97,7 +76,6 @@ struct GServerListImplementation
 };
 
 static char s_sMasterServer[128] = "";
-static BOOL s_bWinsock = FALSE;
 
 void GameSpyClient_SetMasterServer(const char* sAddr)
 {
@@ -113,7 +91,7 @@ static char* GSL_GetValue(GServerImplementation* pServer, const char* sKey)
 	if (!pServer || !sKey) return(NULL);
 	for (int i = 0; i < pServer->nPairs; i++)
 	{
-		if (stricmp(&pServer->sData[pServer->aKey[i]], sKey) == 0)
+		if (nolf::ascii_compare(&pServer->sData[pServer->aKey[i]], sKey) == 0)
 			return(&pServer->sData[pServer->aValue[i]]);
 	}
 	return(NULL);
@@ -151,53 +129,49 @@ static void GSL_AddString(GServerImplementation* pServer, const char* sKey, cons
 }
 
 // One reply packet: \key\value...[\final\]\queryid\<id>.<packet>
-static void GSL_ParseReply(GServerImplementation* pServer, const char* pData, int nLen)
-{
-	const char* p    = pData;
-	const char* pEnd = pData + nLen;
-	BOOL bFinal  = FALSE;
-	int  nPacket = 1;
-
-	while (p < pEnd && *p == '\\')
-	{
-		const char* pKey = ++p;
-		while (p < pEnd && *p != '\\') p++;
-		int nKeyLen = (int)(p - pKey);
-		if (p >= pEnd) break;
-
-		const char* pValue = ++p;
-		while (p < pEnd && *p != '\\') p++;
-		int nValueLen = (int)(p - pValue);
-
-		if (nKeyLen == 5 && strnicmp(pKey, "final", 5) == 0)
-		{
-			bFinal = TRUE;		// "\final\" has no value: what follows is the next key
-			continue;
-		}
-		if (nKeyLen == 7 && strnicmp(pKey, "queryid", 7) == 0)
-		{
-			const char* pDot = pValue;
-			while (pDot < pValue + nValueLen && *pDot != '.') pDot++;
-			if (pDot < pValue + nValueLen) nPacket = atoi(pDot + 1);
-			continue;
-		}
-		GSL_AddPair(pServer, pKey, nKeyLen, pValue, nValueLen);
-	}
-
-	pServer->nPacketsGot++;
-	if (bFinal) pServer->nPackets = (nPacket > 0) ? nPacket : 1;
+static void GSL_ParseReply(GServerImplementation* server,const char* data,int size) {
+    const std::string_view packet(data,static_cast<std::size_t>(size));
+    bool final=false;
+    unsigned number=1,query_id=0;
+    std::vector<std::pair<std::string_view,std::string_view>> pairs;
+    std::size_t cursor=0;
+    while (cursor<packet.size() && packet[cursor]==char(92)) {
+        const auto start=++cursor;
+        const auto delimiter=packet.find(char(92),start);
+        if (delimiter==packet.npos) return;
+        const auto key=packet.substr(start,delimiter-start);
+        cursor=delimiter+1;
+        if (nolf::ascii_compare(key,"final")==0) { final=true; if (cursor==packet.size()) break; if (packet[cursor]!=char(92)) return; continue; }
+        const auto end=packet.find(char(92),cursor);
+        const auto value=packet.substr(cursor,end==packet.npos ? packet.size()-cursor : end-cursor);
+        cursor=end==packet.npos ? packet.size() : end;
+        if (nolf::ascii_compare(key,"queryid")==0) {
+            const auto dot=value.find('.');
+            if (dot==value.npos) return;
+            const auto id=std::from_chars(value.data(),value.data()+dot,query_id);
+            const auto part=std::from_chars(value.data()+dot+1,value.data()+value.size(),number);
+            if (id.ec!=std::errc{} || id.ptr!=value.data()+dot || part.ec!=std::errc{} || part.ptr!=value.data()+value.size()) return;
+        } else pairs.emplace_back(key,value);
+    }
+    if (!number || number>64 || (server->packet_mask && server->query_id!=query_id)) return;
+    const auto bit=std::uint64_t{1}<<(number-1);
+    if (server->packet_mask & bit) return;
+    if (final) {
+        if (server->nPackets && server->nPackets!=static_cast<int>(number)) return;
+        server->nPackets=static_cast<int>(number);
+    }
+    server->query_id=query_id; server->packet_mask |= bit; ++server->nPacketsGot;
+    for (const auto& [key,value] : pairs) GSL_AddPair(server,key.data(),static_cast<int>(key.size()),value.data(),static_cast<int>(value.size()));
 }
-
+static bool GSL_ReplyComplete(const GServerImplementation* server) {
+    if (!server->nPackets) return false;
+    const auto expected=server->nPackets==64 ? ~std::uint64_t{0} : (std::uint64_t{1}<<server->nPackets)-1;
+    return (server->packet_mask & expected)==expected;
+}
 
 // --- the list ------------------------------------------------------------ //
 
-static void GSL_CloseSockets(GServerListImplementation* pList)
-{
-	if (pList->hTCP != INVALID_SOCKET) closesocket(pList->hTCP);
-	if (pList->hUDP != INVALID_SOCKET) closesocket(pList->hUDP);
-	pList->hTCP = INVALID_SOCKET;
-	pList->hUDP = INVALID_SOCKET;
-}
+static void GSL_CloseSockets(GServerListImplementation* list) { list->hTCP.reset(); list->hUDP.reset(); }
 
 static void GSL_Reset(GServerListImplementation* pList)
 {
@@ -210,14 +184,9 @@ static void GSL_Reset(GServerListImplementation* pList)
 	pList->nFinished    = 0;
 	pList->nListed      = 0;
 	pList->nRecv        = 0;
-	pList->bSentRequest = FALSE;
+	pList->bSentRequest = LTFALSE;
+    pList->request.clear(); pList->request_sent=0;
 	pList->nState       = sl_idle;
-}
-
-static void GSL_SetNonBlocking(SOCKET hSocket)
-{
-	u_long nOn = 1;
-	ioctlsocket(hSocket, FIONBIO, &nOn);
 }
 
 // The master's binary list (6 bytes per server) -> aServers.
@@ -233,17 +202,17 @@ static void GSL_TakeList(GServerListImplementation* pList, const char* pData, in
 	for (int i = 0; i < nCount; i++)
 	{
 		const unsigned char* p = (const unsigned char*)pData + i * 6;
-		unsigned long  nIP;
+		std::uint32_t nIP;
 		unsigned short nPort = (unsigned short)((p[4] << 8) | p[5]);
 		memcpy(&nIP, p, 4);
-		if (!nIP || nIP == INADDR_NONE || !nPort) continue;
+		if (!nIP || nIP == 0xffffffffu || !nPort) continue;
 
-		BOOL bDuplicate = FALSE;
+		LTBOOL bDuplicate = LTFALSE;
 		for (int j = 0; j < pList->nServers; j++)
 		{
 			if (pList->aServers[j].nIP == nIP && pList->aServers[j].nPort == nPort)
 			{
-				bDuplicate = TRUE;
+				bDuplicate = LTTRUE;
 				break;
 			}
 		}
@@ -256,115 +225,64 @@ static void GSL_TakeList(GServerListImplementation* pList, const char* pData, in
 		pServer->nPort  = nPort;
 		pServer->nState = GSS_WAITING;
 
-		struct in_addr in;
-		in.s_addr = nIP;
-		GSL_AddString(pServer, "hostaddr", inet_ntoa(in));
+        const auto address=address_text(nIP);
+        GSL_AddString(pServer,"hostaddr",address.c_str());
 	}
 }
 
 // The master conversation, one step.
-static void GSL_UpdateListXfer(GServerListImplementation* pList, const char* sGameName, const char* sSecretKey)
-{
-	BOOL bDone = FALSE;
-
-	fd_set rd, ex;
-	struct timeval tv = { 0, 0 };
-	FD_ZERO(&rd);
-	FD_ZERO(&ex);
-	FD_SET(pList->hTCP, &rd);
-	FD_SET(pList->hTCP, &ex);
-
-	int nReady = select(0, &rd, NULL, &ex, &tv);
-	if (nReady == SOCKET_ERROR || FD_ISSET(pList->hTCP, &ex))
-	{
-		bDone = TRUE;			// could not connect
-	}
-	else if (nReady > 0 && FD_ISSET(pList->hTCP, &rd))
-	{
-		int nSpace = GSL_LIST_BUFFER - 1 - pList->nRecv;
-		int nGot   = (nSpace > 0) ? recv(pList->hTCP, &pList->aRecv[pList->nRecv], nSpace, 0) : 0;
-		if (nGot > 0)
-		{
-			pList->nRecv += nGot;
-			pList->aRecv[pList->nRecv] = '\0';
-		}
-		else if (nGot == 0 || WSAGetLastError() != WSAEWOULDBLOCK)
-		{
-			bDone = TRUE;		// the master closes when the list is sent
-		}
-	}
-
-	if (!pList->bSentRequest)
-	{
-		// \basic\\secure\<challenge>: answer it and ask for the list
-		char sChallenge[80];
-		if (!bDone && GSM_FindKey(pList->aRecv, "secure", sChallenge, sizeof(sChallenge)) &&
-		    pList->nRecv > 0 && pList->aRecv[pList->nRecv - 1] != '\\')
-		{
-			char sValidate[96];
-			char sRequest[512];
-			GSM_Validate(sChallenge, sSecretKey, sValidate);
-			sprintf(sRequest,
-			        "\\gamename\\%.64s\\enctype\\0\\validate\\%s\\final\\"
-			        "\\queryid\\1.1\\"
-			        "\\list\\cmp\\gamename\\%.64s\\final\\",
-			        sGameName, sValidate, sGameName);
-			send(pList->hTCP, sRequest, (int)strlen(sRequest), 0);
-			pList->bSentRequest = TRUE;
-			pList->nRecv = 0;
-		}
-	}
-	else if (pList->nRecv >= 7 && memcmp(&pList->aRecv[pList->nRecv - 7], "\\final\\", 7) == 0)
-	{
-		bDone = TRUE;
-	}
-
-	if (!bDone && (GetTickCount() - pList->dwListStart) > GSL_LIST_TIMEOUT) bDone = TRUE;
-	if (!bDone) return;
-
-	// Take what came (an \error\ reply is not a list).
-	if (pList->bSentRequest &&
-	    !(pList->nRecv >= 7 && (memcmp(pList->aRecv, "\\error\\", 7) == 0 || memcmp(pList->aRecv, "\\fatal\\", 7) == 0)))
-	{
-		int nLen = pList->nRecv;
-		if (nLen >= 7 && memcmp(&pList->aRecv[nLen - 7], "\\final\\", 7) == 0) nLen -= 7;
-		GSL_TakeList(pList, pList->aRecv, nLen);
-	}
-
-	closesocket(pList->hTCP);
-	pList->hTCP = INVALID_SOCKET;
-
-	if (pList->nServers > 0)
-	{
-		pList->hUDP = socket(AF_INET, SOCK_DGRAM, 0);
-		if (pList->hUDP != INVALID_SOCKET)
-		{
-			GSL_SetNonBlocking(pList->hUDP);
-			pList->nState = sl_querying;
-			return;
-		}
-	}
-
-	GSL_Reset(pList);
+static void GSL_UpdateListXfer(GServerListImplementation* list,const char* game,const char* key) {
+    bool done=false;
+    if (list->hTCP->connected()) {
+        if (list->bSentRequest && list->request_sent < list->request.size()) {
+            list->request_sent+=list->hTCP->send(std::as_bytes(std::span(list->request.data(),list->request.size())).subspan(list->request_sent));
+        }
+        const auto space=GSL_LIST_BUFFER-1-list->nRecv;
+        if (space <= 0) { GSL_Reset(list); return; }
+        auto input=std::as_writable_bytes(std::span(list->aRecv+list->nRecv,std::size_t(space)));
+        if (auto count=list->hTCP->receive(input)) {
+            list->nRecv+=static_cast<int>(*count); list->aRecv[list->nRecv]=0;
+            done=*count==0;
+        }
+    }
+    if (!list->bSentRequest) {
+        // This legacy protocol sends a six-character secure challenge without
+        // a length prefix. Wait for all six across TCP read boundaries.
+        char challenge[80];
+        if (!done && nolf::gamespy::find_key(list->aRecv,"secure",challenge,sizeof(challenge)) && std::strlen(challenge)==6) {
+            char validation[96]; nolf::gamespy::validate(challenge,key,validation);
+            char request[512];
+            std::snprintf(request,sizeof(request),
+                "\\gamename\\%.64s\\enctype\\0\\validate\\%s\\final\\\\queryid\\1.1\\\\list\\cmp\\gamename\\%.64s\\final\\",game,validation,game);
+            list->request=request; list->request_sent=0;
+            list->bSentRequest=LTTRUE; list->nRecv=0; list->aRecv[0]=0;
+        }
+    } else if (list->nRecv>=7 && std::memcmp(list->aRecv+list->nRecv-7,"\\final\\",7)==0) done=true;
+    if (milliseconds()-list->dwListStart > GSL_LIST_TIMEOUT) { GSL_Reset(list); return; }
+    if (!done) return;
+    if (list->bSentRequest && list->request_sent==list->request.size() &&
+        !(list->nRecv>=7 && (std::memcmp(list->aRecv,"\\error\\",7)==0 || std::memcmp(list->aRecv,"\\fatal\\",7)==0))) {
+        int size=list->nRecv;
+        if (size>=7 && std::memcmp(list->aRecv+size-7,"\\final\\",7)==0) size-=7;
+        if (size%6==0) GSL_TakeList(list,list->aRecv,size);
+    }
+    list->hTCP.reset();
+    if (list->nServers>0) {
+        list->hUDP=std::make_unique<nolf::platform::UdpSocket>(); list->nState=sl_querying;
+    } else GSL_Reset(list);
 }
 
 static void GSL_SendQuery(GServerListImplementation* pList, GServerImplementation* pServer)
 {
-	struct sockaddr_in addr;
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family      = AF_INET;
-	addr.sin_addr.s_addr = pServer->nIP;
-	addr.sin_port        = htons(pServer->nPort);
+    static constexpr char query[]="\\status\\";
+    pList->hUDP->send({address_text(pServer->nIP),pServer->nPort},std::as_bytes(std::span(query,sizeof(query)-1)));
 
-	static const char s_sQuery[] = "\\status\\";
-	sendto(pList->hUDP, s_sQuery, sizeof(s_sQuery) - 1, 0, (struct sockaddr*)&addr, sizeof(addr));
-
-	pServer->dwLastSend = GetTickCount();
+	pServer->dwLastSend = milliseconds();
 	if (!pServer->nTries) pServer->dwSent = pServer->dwLastSend;
 	pServer->nTries++;
 }
 
-static void GSL_Finish(GServerListImplementation* pList, GServerImplementation* pServer, BOOL bAnswered)
+static void GSL_Finish(GServerListImplementation* pList, GServerImplementation* pServer, LTBOOL bAnswered)
 {
 	pServer->nState = bAnswered ? GSS_DONE : GSS_FAILED;
 	pList->nActive--;
@@ -379,44 +297,29 @@ static void GSL_Finish(GServerListImplementation* pList, GServerImplementation* 
 	}
 }
 
-// The server queries, one step. TRUE when a server was added to the list.
-static BOOL GSL_UpdateQueries(GServerListImplementation* pList)
+// The server queries, one step. LTTRUE when a server was added to the list.
+static LTBOOL GSL_UpdateQueries(GServerListImplementation* pList)
 {
-	BOOL  bNew  = FALSE;
-	DWORD dwNow = GetTickCount();
+	LTBOOL  bNew  = LTFALSE;
+	std::uint64_t dwNow = milliseconds();
 	int   i;
 
-	// replies
-	for (;;)
-	{
-		char aPacket[1500];
-		struct sockaddr_in from;
-		int nFromLen = sizeof(from);
-		int nGot = recvfrom(pList->hUDP, aPacket, sizeof(aPacket) - 1, 0, (struct sockaddr*)&from, &nFromLen);
-		if (nGot == SOCKET_ERROR)
-		{
-			if (WSAGetLastError() == WSAECONNRESET) continue;	// an ICMP "port unreachable"
-			break;
-		}
-		if (nGot <= 0) break;
-		aPacket[nGot] = '\0';
-
-		for (i = 0; i < pList->nServers; i++)
-		{
-			GServerImplementation* pServer = &pList->aServers[i];
-			if (pServer->nState != GSS_QUERYING) continue;
-			if (pServer->nIP != from.sin_addr.s_addr || pServer->nPort != ntohs(from.sin_port)) continue;
-
-			if (!pServer->nPacketsGot) pServer->nPing = (int)(GetTickCount() - pServer->dwSent);
-			GSL_ParseReply(pServer, aPacket, nGot);
-			if (pServer->nPackets && pServer->nPacketsGot >= pServer->nPackets)
-			{
-				GSL_Finish(pList, pServer, TRUE);
-				bNew = TRUE;
-			}
-			break;
-		}
-	}
+    // Bound receive work so a busy network cannot starve the UI frame.
+    for (int packet_index=0;packet_index<128;++packet_index) {
+        const auto packet=pList->hUDP->receive(std::chrono::milliseconds(0));
+        if (!packet) break;
+        if (packet->bytes.empty() || packet->bytes.size()>1499) continue;
+        std::string text(reinterpret_cast<const char*>(packet->bytes.data()),packet->bytes.size());
+        if (text.find('\0')!=text.npos) continue;
+        for (i=0;i<pList->nServers;++i) {
+            auto* server=&pList->aServers[i];
+            if (server->nState!=GSS_QUERYING || server->nPort!=packet->peer.port || address_text(server->nIP)!=packet->peer.address) continue;
+            if (!server->nPacketsGot) server->nPing=static_cast<int>(milliseconds()-server->dwSent);
+            GSL_ParseReply(server,text.c_str(),static_cast<int>(text.size()));
+            if (GSL_ReplyComplete(server)) { GSL_Finish(pList,server,LTTRUE); bNew=LTTRUE; }
+            break;
+        }
+    }
 
 	// timeouts and resends
 	for (i = 0; i < pList->nServers; i++)
@@ -425,20 +328,15 @@ static BOOL GSL_UpdateQueries(GServerListImplementation* pList)
 		if (pServer->nState != GSS_QUERYING) continue;
 		if ((dwNow - pServer->dwLastSend) < GSL_QUERY_RETRY) continue;
 
-		if (pServer->nPacketsGot)
-		{
-			// part of the reply came: take what there is
-			GSL_Finish(pList, pServer, TRUE);
-			bNew = TRUE;
-		}
-		else if (pServer->nTries >= GSL_QUERY_TRIES)
-		{
-			GSL_Finish(pList, pServer, FALSE);
-		}
-		else
-		{
-			GSL_SendQuery(pList, pServer);
-		}
+        if (pServer->nTries >= GSL_QUERY_TRIES) GSL_Finish(pList,pServer,LTFALSE);
+        else {
+            // A retry is a new response transaction. Never count duplicates
+            // or a partial reply as a complete server listing.
+            pServer->packet_mask=0; pServer->query_id=0; pServer->nPacketsGot=0; pServer->nPackets=0;
+            pServer->nPairs=0; pServer->nDataUsed=0;
+            const auto address=address_text(pServer->nIP); GSL_AddString(pServer,"hostaddr",address.c_str());
+            GSL_SendQuery(pList,pServer);
+        }
 	}
 
 	// new queries
@@ -459,14 +357,14 @@ static BOOL GSL_UpdateQueries(GServerListImplementation* pList)
 	return(bNew);
 }
 
-static BOOL GSL_IsListed(GServerListImplementation* pList, void* pHandle)
+static LTBOOL GSL_IsListed(GServerListImplementation* pList, void* pHandle)
 {
-	if (!pList || !pHandle) return(FALSE);
+	if (!pList || !pHandle) return(LTFALSE);
 	for (int i = 0; i < pList->nListed; i++)
 	{
-		if ((void*)pList->apListed[i] == pHandle) return(TRUE);
+		if ((void*)pList->apListed[i] == pHandle) return(LTTRUE);
 	}
-	return(FALSE);
+	return(LTFALSE);
 }
 
 
@@ -474,7 +372,7 @@ static BOOL GSL_IsListed(GServerListImplementation* pList, void* pHandle)
 
 static const char*  s_sSortKey  = "";
 static GCompareMode s_eSortMode = cm_stricase;
-static BOOL         s_bSortUp   = TRUE;
+static LTBOOL         s_bSortUp   = LTTRUE;
 
 static int GSL_Compare(const void* pA, const void* pB)
 {
@@ -499,7 +397,7 @@ static int GSL_Compare(const void* pA, const void* pB)
 			break;
 		}
 		case cm_strcase: nCmp = strcmp(sA, sB);  break;
-		default:         nCmp = stricmp(sA, sB); break;
+		default:         nCmp = nolf::ascii_compare(sA, sB); break;
 	}
 
 	return(s_bSortUp ? nCmp : -nCmp);
@@ -508,7 +406,7 @@ static int GSL_Compare(const void* pA, const void* pB)
 
 // --- CGameSpyClientMgr ---------------------------------------------------- //
 
-BOOL CGameSpyClientMgr::Init(const char* sGameName, const char* sSecretKey)
+LTBOOL CGameSpyClientMgr::Init(const char* sGameName, const char* sSecretKey)
 {
 	Term();
 
@@ -517,16 +415,11 @@ BOOL CGameSpyClientMgr::Init(const char* sGameName, const char* sSecretKey)
 	strncpy(m_sSecretKey, sSecretKey ? sSecretKey : "", GSCM_MAX_STRING - 1);
 	m_sSecretKey[GSCM_MAX_STRING - 1] = '\0';
 
-	if (!s_bWinsock)
-	{
-		WSADATA wsaData;
-		s_bWinsock = (WSAStartup(MAKEWORD(1, 1), &wsaData) == 0);
-	}
 
-	if (!CreateServerList()) return(FALSE);
+	if (!CreateServerList()) return(LTFALSE);
 
-	m_bInit = TRUE;
-	return(TRUE);
+	m_bInit = LTTRUE;
+	return(LTTRUE);
 }
 
 void CGameSpyClientMgr::Term()
@@ -537,27 +430,23 @@ void CGameSpyClientMgr::Term()
 
 void CGameSpyClientMgr::Clear()
 {
-	m_bInit           = FALSE;
+	m_bInit           = LTFALSE;
 	m_pServerList     = NULL;
 	m_sGameName[0]    = '\0';
 	m_sSecretKey[0]   = '\0';
 	m_nGetServerIndex = 0;
 	m_nProgress       = 0;
-	m_bNewServer      = FALSE;
+	m_bNewServer      = LTFALSE;
 }
 
-BOOL CGameSpyClientMgr::CreateServerList()
+LTBOOL CGameSpyClientMgr::CreateServerList()
 {
-	GServerListImplementation* pList = (GServerListImplementation*)malloc(sizeof(GServerListImplementation));
-	if (!pList) return(FALSE);
-
-	memset(pList, 0, sizeof(*pList));
-	pList->hTCP = INVALID_SOCKET;
-	pList->hUDP = INVALID_SOCKET;
-	GSL_Reset(pList);
+    auto* pList=new(std::nothrow) GServerListImplementation{};
+    if (!pList) return LTFALSE;
+    GSL_Reset(pList);
 
 	m_pServerList = pList;
-	return(TRUE);
+	return(LTTRUE);
 }
 
 void CGameSpyClientMgr::FreeServerList()
@@ -565,7 +454,7 @@ void CGameSpyClientMgr::FreeServerList()
 	if (m_pServerList)
 	{
 		GSL_Reset(m_pServerList);
-		free(m_pServerList);
+		delete m_pServerList;
 	}
 	m_pServerList = NULL;
 }
@@ -584,40 +473,32 @@ void CGameSpyClientMgr::ClearServers()
 {
 	if (m_pServerList) GSL_Reset(m_pServerList);
 	m_nGetServerIndex = 0;
-	m_bNewServer      = FALSE;
+	m_bNewServer      = LTFALSE;
 }
 
-BOOL CGameSpyClientMgr::RefreshServers(BOOL bAsync)
+LTBOOL CGameSpyClientMgr::RefreshServers(LTBOOL bAsync)
 {
-	if (!m_bInit || !m_pServerList) return(FALSE);
+	if (!m_bInit || !m_pServerList) return(LTFALSE);
 
 	ClearServers();
 	m_nProgress = 100;
 
 	GServerListImplementation* pList = m_pServerList;
 
-	unsigned long nIP;
-	int nPort;
-	if (!GSM_Resolve(s_sMasterServer, GSM_LIST_PORT, &nIP, &nPort)) return(TRUE);
+    std::string master=*s_sMasterServer ? s_sMasterServer : "master.openspy.net";
+    if (nolf::ascii_compare(master,"none")==0) return LTTRUE;
+    std::uint16_t port=28900;
+    if (const auto delimiter=master.find(':'); delimiter!=master.npos) {
+        unsigned parsed=0;
+        const auto value=std::string_view(master).substr(delimiter+1);
+        const auto result=std::from_chars(value.data(),value.data()+value.size(),parsed);
+        if (result.ec!=std::errc{} || result.ptr!=value.data()+value.size() || !parsed || parsed>65535) return LTFALSE;
+        port=static_cast<std::uint16_t>(parsed); master.resize(delimiter);
+    }
+    try { pList->hTCP=std::make_unique<nolf::platform::TcpSocket>(nolf::platform::Endpoint{master,port}); }
+    catch (const std::exception& error) { nolf::platform::log("server browser",error.what()); GSL_Reset(pList); return LTFALSE; }
 
-	pList->hTCP = socket(AF_INET, SOCK_STREAM, 0);
-	if (pList->hTCP == INVALID_SOCKET) return(TRUE);
-	GSL_SetNonBlocking(pList->hTCP);
-
-	struct sockaddr_in addr;
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family      = AF_INET;
-	addr.sin_addr.s_addr = nIP;
-	addr.sin_port        = htons((unsigned short)nPort);
-
-	if (connect(pList->hTCP, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR &&
-	    WSAGetLastError() != WSAEWOULDBLOCK)
-	{
-		GSL_Reset(pList);
-		return(TRUE);
-	}
-
-	pList->dwListStart = GetTickCount();
+	pList->dwListStart = milliseconds();
 	pList->nState      = sl_listxfer;
 	m_nProgress        = 0;
 
@@ -627,11 +508,11 @@ BOOL CGameSpyClientMgr::RefreshServers(BOOL bAsync)
 		while (pList->nState != sl_idle)
 		{
 			Update();
-			Sleep(10);
+			nolf::platform::sleep_for(std::chrono::milliseconds(10));
 		}
 	}
 
-	return(TRUE);
+	return(LTTRUE);
 }
 
 CGameSpyServer* CGameSpyClientMgr::GetServer(int nIndex)
@@ -658,20 +539,20 @@ CGameSpyServer* CGameSpyClientMgr::GetNextServer()
 	return(GetServer(m_nGetServerIndex));
 }
 
-BOOL CGameSpyClientMgr::ExistNewServer()
+LTBOOL CGameSpyClientMgr::ExistNewServer()
 {
-	BOOL bNew = m_bNewServer;
-	m_bNewServer = FALSE;
+	LTBOOL bNew = m_bNewServer;
+	m_bNewServer = LTFALSE;
 	return(bNew);
 }
 
-void CGameSpyClientMgr::SortServersByName(BOOL bAscending)     { SortServers(bAscending, "hostname", cm_stricase); }
-void CGameSpyClientMgr::SortServersByPing(BOOL bAscending)     { SortServers(bAscending, "ping", cm_int); }
-void CGameSpyClientMgr::SortServersByPlayers(BOOL bAscending)  { SortServers(bAscending, "numplayers", cm_int); }
-void CGameSpyClientMgr::SortServersByMap(BOOL bAscending)      { SortServers(bAscending, "mapname", cm_stricase); }
-void CGameSpyClientMgr::SortServersByGameType(BOOL bAscending) { SortServers(bAscending, "gametype", cm_stricase); }
+void CGameSpyClientMgr::SortServersByName(LTBOOL bAscending)     { SortServers(bAscending, "hostname", cm_stricase); }
+void CGameSpyClientMgr::SortServersByPing(LTBOOL bAscending)     { SortServers(bAscending, "ping", cm_int); }
+void CGameSpyClientMgr::SortServersByPlayers(LTBOOL bAscending)  { SortServers(bAscending, "numplayers", cm_int); }
+void CGameSpyClientMgr::SortServersByMap(LTBOOL bAscending)      { SortServers(bAscending, "mapname", cm_stricase); }
+void CGameSpyClientMgr::SortServersByGameType(LTBOOL bAscending) { SortServers(bAscending, "gametype", cm_stricase); }
 
-void CGameSpyClientMgr::SortServers(BOOL bAscending, char* sSortKey, GCompareMode eCompareMode)
+void CGameSpyClientMgr::SortServers(LTBOOL bAscending, char* sSortKey, GCompareMode eCompareMode)
 {
 	if (!m_pServerList || m_pServerList->nListed < 2 || !sSortKey) return;
 
@@ -686,6 +567,7 @@ void CGameSpyClientMgr::Update()
 	GServerListImplementation* pList = m_pServerList;
 	if (!m_bInit || !pList) return;
 
+    try {
 	switch (pList->nState)
 	{
 		case sl_listxfer:
@@ -693,18 +575,20 @@ void CGameSpyClientMgr::Update()
 			break;
 
 		case sl_querying:
-			if (GSL_UpdateQueries(pList)) m_bNewServer = TRUE;
+			if (GSL_UpdateQueries(pList)) m_bNewServer = LTTRUE;
 			m_nProgress = pList->nServers ? (pList->nFinished * 100 / pList->nServers) : 100;
 			break;
 	}
+    } catch (const std::exception& error) { nolf::platform::log("server browser",error.what()); GSL_Reset(pList); }
+    if (pList->nState==sl_idle) m_nProgress=100;
 }
 
 void CGameSpyClientMgr::HandleCallback(GServerList pServerList, int nMsg, void* pParam1, void* pParam2)
 {
 	if (nMsg == LIST_PROGRESS)
 	{
-		m_nProgress  = (int)pParam2;
-		m_bNewServer = TRUE;
+		m_nProgress = static_cast<int>(reinterpret_cast<std::intptr_t>(pParam2));
+		m_bNewServer = LTTRUE;
 	}
 }
 
@@ -715,155 +599,19 @@ CGameSpyServer* CGameSpyClientMgr::CreateGameSpyServer(GServer pGServer)
 	return(&m_CurServer);
 }
 
-#else
-
-// ----------------------------------------------------------------------- //
-//  CGameSpyClientMgr
-// ----------------------------------------------------------------------- //
-
-BOOL CGameSpyClientMgr::Init(const char* sGameName, const char* sSecretKey)
-{
-	Term();
-
-	strncpy(m_sGameName, sGameName ? sGameName : "", GSCM_MAX_STRING - 1);
-	m_sGameName[GSCM_MAX_STRING - 1] = '\0';
-	strncpy(m_sSecretKey, sSecretKey ? sSecretKey : "", GSCM_MAX_STRING - 1);
-	m_sSecretKey[GSCM_MAX_STRING - 1] = '\0';
-
-	if (!CreateServerList()) return(FALSE);
-
-	m_bInit = TRUE;
-	return(TRUE);
-}
-
-void CGameSpyClientMgr::Term()
-{
-	FreeServerList();
-	Clear();
-}
-
-void CGameSpyClientMgr::Clear()
-{
-	m_bInit           = FALSE;
-	m_pServerList     = NULL;
-	m_sGameName[0]    = '\0';
-	m_sSecretKey[0]   = '\0';
-	m_nGetServerIndex = 0;
-	m_nProgress       = 0;
-	m_bNewServer      = FALSE;
-}
-
-BOOL CGameSpyClientMgr::CreateServerList()
-{
-	// There is no master to create a list against; the (always empty) list
-	// needs no state of its own.
-	m_pServerList = NULL;
-	return(TRUE);
-}
-
-void CGameSpyClientMgr::FreeServerList()
-{
-	m_pServerList = NULL;
-}
-
-int CGameSpyClientMgr::GetNumServers()
-{
-	return(0);
-}
-
-int CGameSpyClientMgr::GetState()
-{
-	return(sl_idle);
-}
-
-void CGameSpyClientMgr::ClearServers()
-{
-	m_nGetServerIndex = 0;
-	m_bNewServer      = FALSE;
-}
-
-BOOL CGameSpyClientMgr::RefreshServers(BOOL bAsync)
-{
-	if (!m_bInit) return(FALSE);
-
-	ClearServers();
-	m_nProgress = 100;
-	return(TRUE);
-}
-
-CGameSpyServer* CGameSpyClientMgr::GetServer(int nIndex)
-{
-	return(NULL);
-}
-
-CGameSpyServer* CGameSpyClientMgr::GetServerFromHandle(void* pHandle)
-{
-	return(NULL);
-}
-
-CGameSpyServer* CGameSpyClientMgr::GetFirstServer()
-{
-	m_nGetServerIndex = 0;
-	return(GetServer(m_nGetServerIndex));
-}
-
-CGameSpyServer* CGameSpyClientMgr::GetNextServer()
-{
-	m_nGetServerIndex++;
-	return(GetServer(m_nGetServerIndex));
-}
-
-BOOL CGameSpyClientMgr::ExistNewServer()
-{
-	BOOL bNew = m_bNewServer;
-	m_bNewServer = FALSE;
-	return(bNew);
-}
-
-void CGameSpyClientMgr::SortServersByName(BOOL bAscending)     { SortServers(bAscending, "hostname", cm_stricase); }
-void CGameSpyClientMgr::SortServersByPing(BOOL bAscending)     { SortServers(bAscending, "ping", cm_int); }
-void CGameSpyClientMgr::SortServersByPlayers(BOOL bAscending)  { SortServers(bAscending, "numplayers", cm_int); }
-void CGameSpyClientMgr::SortServersByMap(BOOL bAscending)      { SortServers(bAscending, "mapname", cm_stricase); }
-void CGameSpyClientMgr::SortServersByGameType(BOOL bAscending) { SortServers(bAscending, "gametype", cm_stricase); }
-
-void CGameSpyClientMgr::SortServers(BOOL bAscending, char* sSortKey, GCompareMode eCompareMode)
-{
-	// an empty list is sorted
-}
-
-void CGameSpyClientMgr::Update()
-{
-}
-
-void CGameSpyClientMgr::HandleCallback(GServerList pServerList, int nMsg, void* pParam1, void* pParam2)
-{
-	if (nMsg == LIST_PROGRESS)
-	{
-		m_nProgress  = (int)pParam2;
-		m_bNewServer = TRUE;
-	}
-}
-
-CGameSpyServer* CGameSpyClientMgr::CreateGameSpyServer(GServer pGServer)
-{
-	if (!pGServer) return(NULL);
-	if (!m_CurServer.Init(pGServer)) return(NULL);
-	return(&m_CurServer);
-}
-#endif
 
 
 // ----------------------------------------------------------------------- //
 //  CGameSpyServer -- one browser row. Never handed a server (see above).
 // ----------------------------------------------------------------------- //
 
-BOOL CGameSpyServer::Init(GServer pServer)
+LTBOOL CGameSpyServer::Init(GServer pServer)
 {
 	Term();
-	if (!pServer) return(FALSE);
+	if (!pServer) return(LTFALSE);
 	m_pGServer = pServer;
-	m_bInit    = TRUE;
-	return(TRUE);
+	m_bInit    = LTTRUE;
+	return(LTTRUE);
 }
 
 void CGameSpyServer::Term()
@@ -875,7 +623,7 @@ void CGameSpyServer::Term()
 void CGameSpyServer::Clear()
 {
 	m_pGServer     = NULL;
-	m_bInit        = FALSE;
+	m_bInit        = LTFALSE;
 	m_nNumPlayers  = 0;
 	m_nPlayerIndex = 0;
 }
@@ -961,7 +709,7 @@ CGameSpyPlayer* CGameSpyServer::GetNextPlayer()
 	return(GetPlayer(m_nPlayerIndex));
 }
 
-void CGameSpyServer::SortPlayers(BOOL bAscending, int nKey)
+void CGameSpyServer::SortPlayers(LTBOOL bAscending, int nKey)
 {
 	// insertion sort by the requested key
 	for (int i = 1; i < m_nNumPlayers; i++)
@@ -975,7 +723,7 @@ void CGameSpyServer::SortPlayers(BOOL bAscending, int nKey)
 			{
 				case GSS_SORT_PING:  nCmp = a->GetPing() - b->GetPing(); break;
 				case GSS_SORT_FRAGS: nCmp = a->GetFrags() - b->GetFrags(); break;
-				default:             nCmp = stricmp(a->GetName(), b->GetName()); break;
+				default:             nCmp = nolf::ascii_compare(a->GetName(), b->GetName()); break;
 			}
 			if (!bAscending) nCmp = -nCmp;
 			if (nCmp <= 0) break;
@@ -993,14 +741,14 @@ void CGameSpyServer::SortPlayers(BOOL bAscending, int nKey)
 //  CGameSpyPlayer
 // ----------------------------------------------------------------------- //
 
-BOOL CGameSpyPlayer::Init(GServer pGServer, int nIndex)
+LTBOOL CGameSpyPlayer::Init(GServer pGServer, int nIndex)
 {
 	Term();
-	if (!pGServer) return(FALSE);
+	if (!pGServer) return(LTFALSE);
 	m_pGServer = pGServer;
 	m_nIndex   = nIndex;
-	m_bInit    = TRUE;
-	return(TRUE);
+	m_bInit    = LTTRUE;
+	return(LTTRUE);
 }
 
 void CGameSpyPlayer::Term()
@@ -1012,7 +760,7 @@ void CGameSpyPlayer::Clear()
 {
 	m_pGServer = NULL;
 	m_nIndex   = 0;
-	m_bInit    = FALSE;
+	m_bInit    = LTFALSE;
 }
 
 char* CGameSpyPlayer::GetName()  { return(GetStringValue("player")); }

@@ -8,10 +8,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include "Spawner.h"
 #include "iltserver.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "SoundMgr.h"
 #include "ObjectMsgs.h"
 
@@ -211,9 +213,10 @@ uint32 Spawner::ObjectMessageFn( HOBJECT hSender, uint32 messageID, HMESSAGEREAD
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
-			if (_stricmp(szMsg, "default") == 0)
+			if (nolf::ascii_compare(szMsg, "default") == 0)
 			{
                 szMsg = g_pLTServer->GetStringData(m_hstrDefaultSpawn);
 			}

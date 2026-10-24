@@ -12,6 +12,16 @@
 #include "ltbasedefs.h"
 #include "iltmath.h"
 
+// Shared by the geometry and math modules; no reconstructed duplicate views.
+struct SAxisBasis {
+    LTVector m_vRight, m_vUp, m_vNormal;
+};
+class CAxisBasis : public SAxisBasis {
+public:
+    CAxisBasis(LTVector right, LTVector up, LTVector normal);
+};
+extern SAxisBasis g_AxisBases[6];
+
 class ICommonMath
 {
 public:
@@ -61,7 +71,7 @@ void quat_FromMatrix(LTMatrix* pMat, LTRotation* pRot);
 // 0x100118d5 — a 4x4 from a position, a rotation and a scale, any of which
 // may be null; the three matrix builders below are all this one function
 // with the parts they do not want left out.
-void mat_SetupTransform(LTVector* pPos, LTRotation* pRot, void* pScale,
+void mat_SetupTransform(LTVector* pPos, LTRotation* pRot, LTVector* pScale,
                         LTMatrix* pMat);
 
 // 0x10011b1e — the product of two matrices, into a third.
@@ -74,6 +84,10 @@ void quat_ToMatrix(LTRotation* pRot, LTMatrix* pMat);
 // 0x10011637 — a direction and an up hint turned into three orthogonal axes.
 void vec_AlignVectors(LTVector* pVector, LTVector* pUp, LTVector* pRight,
                       LTVector* pUpOut, LTVector* pForward);
+
+// ILTMath::AlignRotation with the up hint optional: the SDK passes a null one
+// through, which a reference cannot carry.
+void rot_Align(LTRotation* pRotation, LTVector* pVector, LTVector* pUp);
 
 // 0x10011964 — a rotation of `amount` about an arbitrary axis, as a matrix.
 // The axis goes by value, twelve bytes copied onto the stack at the call.

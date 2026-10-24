@@ -1,11 +1,23 @@
+#include "file_transfer.h"
+#include "engine/portable/sky.h"
 // server.dll — CServerMgr's interface-facing half (reconstruction). Build /O1.
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
-#include <new.h>
+#include <new>
 #include "servermgr.h"
+#include "saveio.h"
+#include "object_lifetime.h"
+#include "engine/portable/string.h"
+#include "platform/system.h"
+#include <cstdint>
+#include <algorithm>
+#include <bit>
+#include <limits>
+#include <stdexcept>
+#include "serverengine.h"
 #include "servermsg.h"
 #include "commonmodel.h"
 #include "servermodel.h"
@@ -20,7 +32,7 @@
 // Three of servermgr.h's declarations for functions defined in this file
 // have the wrong return type -- each body ends `xor %eax,%eax` on its only
 // exit, which is LT_OK, where the header says void -- so they are defined
-// under a 2 suffix (the convention sm_ObjectRemoved2 and
+// under a 2 suffix (the convention sm_ObjectRemoved and
 // sm_UpdateClientState2 already set) and declared here so their callers in
 // this file reach the definitions rather than the header's declarations.
 LTRESULT sm_ClientEnterWorld2(CServerMgr* pMgr, class Client* pClient);   // 0x1002759a
@@ -99,25 +111,6 @@ inline void* sm_sb_AllocateCleared(StructBank* pBank)
 // out-of-line definition and keeps it, so the body is reached through a view
 // of the same layout; at /O1 the only difference from the shipped call is its
 // masked target.
-class CMsgCursorView
-{
-public:
-	ServerMessage* m_pMsg;
-
-	inline ServerMessage* Init(ServerMessage* pMsg)
-	{
-		if (m_pMsg)
-			m_pMsg->Release();
-
-		m_pMsg = pMsg;
-
-		if (m_pMsg)
-			m_pMsg->AddRef();
-
-		return m_pMsg;
-	}
-};
-
 // ---- this file's globals ------------------------------------------------ //
 //
 // The server manager's own .bss run, 0x100587a0 .. 0x10058bf4 (every
@@ -153,26 +146,11 @@ CClassMgr*      g_pClassMgr;             // 0x10058bf4
 // both levels and /Os declines both, which is why server.dll still calls the
 // forward. Same argument, and the same local-COMDAT/ICF arrangement, as
 // sm_sb_Allocate at the top of this file. One call site in this TU.
-class CObjQueueBank
-{
-public:
-	// Image seam (measured): with the body visible, server.dll's /Os expands
-	// this forward and calls sm_sb_Allocate directly from sm_RemoveObject
-	// (push $imm/pop, 93 vs 92); lithtech.exe's /O2 needs the body to expand
-	// both levels (0x0046a2a3). So server.dll sees only the declaration.
-#ifdef LT_SERVER_BUILD
-	LTLink* Allocate();                      // 0x1000ed6f
-#else
-	LTLink* Allocate() { return (LTLink*)sm_sb_Allocate(&m_Bank); }
-#endif
 
-	uint8      m_vptr[4];
-	StructBank m_Bank;                       // +0x04
-};
 
 // 0x10058bc0. The object is packet.cpp's g_LinkNodeBank, defined once in
 // svnew.cpp; link/aliases.rsp carries this spelling onto that one.
-extern CObjQueueBank g_ObjQueueBank;
+
 
 // 0x10058bdc, the shared LTLink free pool Term and sm_DrainObjectQueue thread
 // spent links onto through their m_pPrev, is not a global of its own: it is
@@ -198,6 +176,7 @@ LTRESULT CServerMgr::SetupError(int nError, ...)
 
 	va_start(marker, nError);
 	dResult = dsi_SetupMessage(m_ErrorString, sizeof(m_ErrorString), nError, marker);
+	va_end(marker);
 	m_ErrorCode = nError;
 	return dResult;
 }
@@ -205,7 +184,7 @@ LTRESULT CServerMgr::SetupError(int nError, ...)
 LTBOOL CServerMgr::AddResources(char** pResources, uint32 nResources)
 {
 	int nTrees;
-	void* pTrees[50];
+
 
 	SetupGlobals();
 
@@ -215,7 +194,7 @@ LTBOOL CServerMgr::AddResources(char** pResources, uint32 nResources)
 		return LTFALSE;
 	}
 
-	fs_AddResources(&m_FileMgr, pResources, nResources, pTrees, &nTrees);
+	fs_AddResources(&m_FileMgr, pResources, nResources, nullptr, &nTrees);
 	if (nTrees == 0)
 	{
 		SetupError(27, pResources[0]);
@@ -227,20 +206,22 @@ LTBOOL CServerMgr::AddResources(char** pResources, uint32 nResources)
 
 LTBOOL CServerMgr::LoadBinaries()
 {
+	ServerActivity activity(m_Lifetime);
+	if (!activity.available()) return LTFALSE;
+	ServerCallbackGuard operation(m_Lifetime);
 	SetupGlobals();
-	return !cb_LoadModule(&m_ClassMgr);
+    const auto result = cb_LoadModule(&m_ClassMgr);
+	return operation.unchanged() && result == LT_OK;
 }
 
-void CServerMgr::SetGameInfo(void* pGameInfo, uint32 nGameInfoLen)
-{
-	dfree(m_pGameInfo);
-
-	m_pGameInfo = dalloc(nGameInfoLen);
-	if (m_pGameInfo)
-	{
-		memcpy(m_pGameInfo, pGameInfo, nGameInfoLen);
-		m_GameInfoLen = nGameInfoLen;
-	}
+LTBOOL CServerMgr::SetGameInfo(void* data, uint32 size) {
+    if (size > 16u*1024*1024 || (size && !data)) return LTFALSE;
+    try {
+        std::vector<std::byte> staged(size);
+        if (size) std::memcpy(staged.data(),data,size);
+        m_GameInformation.swap(staged);
+        return LTTRUE;
+    } catch (const std::bad_alloc&) { return LTFALSE; }
 }
 
 int CServerMgr::GetNumClients()
@@ -330,141 +311,6 @@ void CServerMgr::GetErrorString(char* pString, int maxLen)
 	strncpy(pString, m_ErrorString, maxLen);
 }
 
-// ---- the ILTSoundMgr personality at +0x04 --------------------------------- //
-
-// The duration comes back through an inlined float-returning accessor
-// (name ours; a stand-in for whatever SoundInstance getter the original
-// used). lithtech 0x475c8f copies it `flds 0x24(%eax) ; mov ref ; fstps`,
-// the value loaded before the reference; a plain member assignment gives
-// /O2 an integer move with the reference loaded first. server.dll
-// (0x10034233) is `flds/fstps` either way.
-inline LTFLOAT sm_GetSoundInstanceDuration(SoundInstance* pSound)
-{
-	return pSound->m_fDuration;
-}
-
-LTRESULT CServerMgr::GetSoundDuration(HLTSOUND hSound, LTFLOAT &fDuration)
-{
-	SoundInstance* pSound = (SoundInstance*)hSound;
-
-	if (!pSound || !pSound->m_hSample)
-		RETURN_ERROR(1, "CServerMgr::GetSoundDuration", LT_INVALIDPARAMS);
-
-	fDuration = sm_GetSoundInstanceDuration(pSound);
-	return LT_OK;
-}
-
-// The done test is an inlined helper with early returns, not an if/else
-// chain in IsSoundDone itself. Written inline in the caller, every
-// arrangement of the arms (flat chain, swapped, OR-merged, both nestings,
-// ternaries) left server 0x100342b3 with the two result blocks swapped:
-// VC6 merged the two LTFALSE sites and hosted the survivor before the timer
-// compare. The expansion's returns become jumps to the inline's exit, which
-// makes the timer compare fall through to LTFALSE and jump forward (`jbe`)
-// to LTTRUE, as shipped. /O2 (lithtech 0x475ce0) is identical either way.
-inline LTBOOL sm_IsSoundInstanceDone(SoundInstance* pSound)
-{
-	if (!pSound->m_hSample)
-		return LTFALSE;
-	if (pSound->m_fTimer > 0.0f)
-		return LTFALSE;
-	return LTTRUE;
-}
-
-LTRESULT CServerMgr::IsSoundDone(HLTSOUND hSound, LTBOOL &bDone)
-{
-	SoundInstance* pSound = (SoundInstance*)hSound;
-
-	if (!pSound)
-		RETURN_ERROR(1, "CServerMgr::IsSoundDone", LT_INVALIDPARAMS);
-
-	bDone = sm_IsSoundInstanceDone(pSound);
-	return LT_OK;
-}
-
-// 0x100343f2 — record that a kept sound changed, so every client hears about
-// it in the next update. The object map has to still know the sound (its
-// entry type is 2 and its record is live) or the call is refused.
-//
-// LTRESULT, not the void servermgr.h declares (as sm_SetSoundChangeFlag):
-// the good path ends `xor %eax,%eax` and the refusal answers LT_ERROR. The
-// error site's own literal names the function "SetSoundTrackChangeFlags",
-// which is the only naming evidence there is; renamed to it here.
-//
-// `inline`, and defined here rather than with the rest of the sound helpers,
-// because lithtech.exe's KillSoundLoop (0x00475e88..0x00475f02) carries this
-// whole body expanded -- its "SetSoundTrackChangeFlags" literal and all --
-// while server.dll's calls it (0x100343d8). /Os declines a body this size and
-// /Ot takes it: the same /O1-vs-/O2 split as ObjectCreateStruct::Clear. The
-// inliner is forward-only, so the definition has to precede its caller; it
-// keeps its standalone COMDAT at /O1 because the call site there still needs
-// one. The two other expansion sites (0x004838dc, 0x00483a45) are another TU
-// reaching it through servermgr.h.
-inline LTRESULT sm_SetSoundTrackChangeFlags(CServerMgr* pServerMgr,
-                                            SoundInstance* pSound, uint32 dwFlag)
-{
-	CObjectMapEntry* pEntry =
-		&pServerMgr->m_Unknown8fc.m_pArray[((uint32*)pSound->m_pUnknown0c)[2]];
-
-	if (pEntry->m_nFlags != 2 || pEntry->m_pRecord == LTNULL)
-		RETURN_ERROR(1, "SetSoundTrackChangeFlags", LT_ERROR);
-
-	if (pSound->m_Unknown2c == 0)
-	{
-		SoundInstance** ppHead = &pServerMgr->m_pChangedSounds;
-
-		pSound->m_pNextChanged = *ppHead;
-		*ppHead = pSound;
-	}
-
-	pSound->m_Unknown2c |= (uint16)dwFlag;
-
-	return LT_OK;
-}
-
-LTRESULT CServerMgr::KillSound(HLTSOUND hSound)
-{
-	SoundInstance* pSound = (SoundInstance*)hSound;
-
-	if (!pSound)
-		RETURN_ERROR(1, "CServerMgr::KillSound", LT_INVALIDPARAMS);
-
-	// Only sounds the game kept a handle to can be killed by handle.
-	if (!(pSound->m_PlaySoundFlags & PLAYSOUND_GETHANDLE))
-		RETURN_ERROR(1, "CServerMgr::KillSound", LT_ERROR);
-
-	// The timer is cleared first. /O1 hides that -- it hoists the `fldz`
-	// above the integer store and lands `movl $1,0x10 / fstps 0x20`, which
-	// reads as the other order -- but /O2 turns the float zero into a plain
-	// dword store and keeps source order: 0x20 then 0x10 (0x00475de1).
-	pSound->m_fTimer = 0.0f;
-	pSound->m_bKill = LTTRUE;
-	return LT_OK;
-}
-
-LTRESULT CServerMgr::KillSoundLoop(HLTSOUND hSound)
-{
-	SoundInstance* pSound = (SoundInstance*)hSound;
-
-	if (!pSound)
-		RETURN_ERROR(1, "CServerMgr::KillSoundLoop", LT_INVALIDPARAMS);
-
-	if ((pSound->m_PlaySoundFlags & (PLAYSOUND_LOOP | PLAYSOUND_GETHANDLE)) !=
-	    (PLAYSOUND_LOOP | PLAYSOUND_GETHANDLE))
-	{
-		RETURN_ERROR(1, "CServerMgr::KillSoundLoop", LT_ERROR);
-	}
-
-	// This method overrides the second base, so it receives the sound
-	// subobject and the compiler steps back four bytes to form `this`.
-	sm_SetSoundTrackChangeFlags(this, pSound, 0x20);
-
-	// Timer first, as in KillSound: /O2 keeps source order (0x00475ebd).
-	pSound->m_fTimer = 0.0f;
-	pSound->m_bKill = LTTRUE;
-	return LT_OK;
-}
-
 int CServerMgr::GetErrorCode()
 {
 	return m_ErrorCode;
@@ -533,22 +379,38 @@ LTRESULT CServerMgr::LoadWorld(ILTStream* pStream, char* pWorldName)
 	RETURN_ERROR_INFO(1, "CServerMgr::LoadWorld", LT_INVALIDWORLDFILE, pWorldName);
 }
 
-LTRESULT CServerMgr::DoRunWorld()
-{
-	if (!m_pWorldFile)
-		RETURN_ERROR(1, "CServerMgr::DoRunWorld", LT_NOTINWORLD);
-
-	sm_CacheObjectFiles(this);
-	sm_CacheFiles(this);
-
-	m_Unknown198 = 0;
-	m_UpdatesPerSec = g_UpdatesPerSec;
-
-	m_ClassMgr.m_pServerShell->PostStartWorld();
-	sm_FlushObjectQueue(this);
-
-	dsi_ServerError("Running world");
-	return LT_OK;
+LTRESULT CServerMgr::DoRunWorld() {
+    ServerActivity activity(m_Lifetime);
+    if (!activity.available()) return LT_NOTINITIALIZED;
+    if (!m_Initialized || m_Terminating || m_EndingWorld || !m_Lifetime->alive || !m_ClassMgr.m_pServerShell) return LT_NOTINITIALIZED;
+    if (!m_pWorldFile || !m_bWorldLoaded) return LT_NOTINWORLD;
+    if (m_RunningWorldStart) return LT_ERROR;
+    if (m_Unknown198 == 0) return LT_OK;
+    ServerCallbackGuard operation(m_Lifetime);
+    struct Scope {
+        CServerMgr* manager; ServerCallbackGuard guard;
+        ~Scope() { if (guard.alive()) manager->m_RunningWorldStart = false; }
+    } scope{this,operation};
+    m_RunningWorldStart = true;
+    try {
+        auto result = sm_CacheObjectFiles(this);
+        if (!operation.unchanged()) return LT_ERROR;
+        if (result != LT_OK) return result;
+        result = sm_CacheFiles(this);
+        if (!operation.unchanged()) return LT_ERROR;
+        if (result != LT_OK) return result;
+        m_Unknown198 = 0; m_UpdatesPerSec = g_UpdatesPerSec;
+        m_ClassMgr.shell([](IServerShell& shell) { shell.PostStartWorld(); });
+        if (!operation.unchanged()) return LT_ERROR;
+        sm_FlushObjectQueue(this);
+        if (!operation.unchanged()) return LT_ERROR;
+        dsi_ServerError("Running world");
+        return LT_OK;
+    } catch (const std::exception& error) {
+        if (operation.unchanged()) m_Unknown198 = 1;
+        nolf::platform::log("world startup",error.what());
+        return LT_ERROR;
+    }
 }
 
 // 0x1002c929 — the server handed back. Term() is the whole body; everything
@@ -564,14 +426,30 @@ LTRESULT CServerMgr::DoRunWorld()
 #ifdef LT_SERVER_BUILD
 CServerMgr::~CServerMgr()
 {
+    m_Lifetime->alive = false;
 	Term();
 }
 
 CServerMgr::CServerMgr()
 {
-	m_Unknown7fc = 0;
-	m_Unknown800 = 0;
-	m_ClientServerType = ServerType;
+    m_ErrorCode = LT_OK; std::fill(std::begin(m_ErrorString),std::end(m_ErrorString),0);
+    m_Unknown198 = 1; m_ServerFlags = m_Unknown1a0 = 0;
+    m_bWorldLoaded = 0; m_hWorldFile = nullptr;
+    m_pUnknown6a8 = nullptr; m_pCollisionInfo = nullptr;
+    m_FrameTime = m_UpdatesPerSec = m_Unknown6b8 = m_Unknown6bc = m_Unknown6c0 = m_Unknown6c8 = m_Time = 0;
+    m_Unknown6c4 = m_Unknown6dc = 0; m_Unknown6d0 = 0; m_Unknown6d4 = m_Unknown6d8 = 0;
+    m_Unknown7f4 = m_Unknown7f8 = m_Unknown7fc = m_Unknown800 = 0;
+    m_Unknown804 = nullptr; m_Link83c.Init2(nullptr);
+    m_Unknown8b8 = 200; m_Unknown8bc = 0; m_hHash8c0 = nullptr;
+    m_Link8c4.Init2(nullptr); m_Link8d0.Init2(nullptr);
+    m_pChangedObjects = nullptr; m_pChangedSounds = nullptr;
+    m_pUnknown928 = nullptr;
+    m_SkyDef.m_Min.Init(-10,-10,-10); m_SkyDef.m_Max.Init(10,10,10);
+    m_SkyDef.m_ViewMin.Init(); m_SkyDef.m_ViewMax.Init();
+    std::fill(std::begin(m_SkyObjects),std::end(m_SkyObjects),uint16(0xffff));
+    m_hGlobalLightObject = nullptr;
+    m_Properties.reset(); m_pAppHandler = nullptr;
+    m_ClientServerType = ServerType;
 }
 #endif
 
@@ -584,7 +462,7 @@ ServerMessage* CServerMgr::StartMessage()
 	if (pIO)
 		pIO->Release();
 
-	msg.m_pMsg->m_Write.m_pObjectIO = (CMsgObjectIO*)m_Unknown804;
+	msg.m_pMsg->m_Write.m_pObjectIO = m_Unknown804;
 
 	// The reference the caller gets: the AddRef here is what the scoped
 	// reference's destructor balances on the way out.
@@ -608,63 +486,14 @@ ServerMessage* CServerMgr::StartMessage()
 void cs_DirtyAllModels();                 // 0x00414a00 (client only)
 #endif
 
-// The instance walk names its head first and takes the cursor off it. With
-// `pCur = ObjectListHead()->m_pNext; while (pCur != ObjectListHead())` instead, every
-// instruction is the same and `this` and the swept `Model*` trade esi for
-// edi — the register rotation this function was written off with for two
-// sessions. Same lever as sm_EndWorldA/B and sub_1002af00.
-LTRESULT CServerMgr::FreeUnusedModels()
-{
-	LTLink* pCur;
-	LTLink* pHead;
-	Model* pModel;
-	void* hCur;
-	void* hElement;
 
-	// Mark every model an object still references...
-	pHead = ObjectListHead();
-	pCur = pHead->m_pNext;
-	while (pCur != pHead)
-	{
-		pModel = ((ModelInstance*)pCur->m_pData)->m_AnimTracker.m_TimeRef.m_pModel;
-		if (pModel)
-			pModel->m_Flags |= 1;
-
-		pCur = pCur->m_pNext;
-	}
-
-	// ...and, when a client shares the process, the models ITS objects hold...
-#ifndef LT_SERVER_BUILD
-	cs_DirtyAllModels();
-#endif
-
-	// ...count the hash's references per model...
-	hCur = dhash_GetFirst(m_hModelHash);
-	while (hCur)
-	{
-		pModel = (Model*)dhash_GetData(dhash_GetNext(&hCur));
-		pModel->m_CacheCount++;
-	}
-
-	// ...and free each model whose last reference goes by unmarked.
-	hCur = dhash_GetFirst(m_hModelHash);
-	while (hCur)
-	{
-		hElement = dhash_GetNext(&hCur);
-		pModel = (Model*)dhash_GetData(hElement);
-
-		pModel->m_CacheCount--;
-		if (pModel->m_CacheCount == 0 && !(pModel->m_Flags & 1))
-		{
-			if (g_DebugLevel >= 2)
-				dsi_ServerError("Debug: Server caching out model %s", pModel->GetFilename());
-
-			dhash_Remove(m_hModelHash, hElement);
-			delete pModel;
-		}
-	}
-
-	return LT_OK;
+// Retire borrowed hash entries before releasing unused owned models.
+LTRESULT CServerMgr::FreeUnusedModels() {
+    m_Models.CollectUnused([this](std::string_view name) {
+        if (auto* element = dhash_FindElement(m_hModelHash,name.data(),static_cast<uint32>(name.size())))
+            dhash_Remove(m_hModelHash,element);
+    });
+    return LT_OK;
 }
 
 // 0x1000d020 — CConnList's buffer release, reached through a view so that a
@@ -721,35 +550,31 @@ public:
 
 void CServerMgr::Term()
 {
+    ServerActivity activity(m_Lifetime);
+    if (m_Terminating) return;
+    m_Terminating = true;
+    ++m_Lifetime->epoch;
 	SetupGlobals();
+    m_Models.CancelAll();
 
 	m_Thread.Term(LTTRUE);
 	ProcessThreadMessages();
 
 	EndWorld(0);
 
-	dfree(m_pGameInfo);
-	m_pGameInfo = LTNULL;
-	m_GameInfoLen = 0;
+    m_GameInformation.clear();
 
-	// Remove every client. The removal unlinks, so walk with the next
-	// pointer in hand.
-	{
-		LTLink* pListHead = &m_ClientList.m_Head;
-		LTLink* pCur = pListHead->m_pNext;
-		while (pCur != pListHead)
-		{
-			LTLink* pNext = pCur->m_pNext;
-			sm_RemoveClient(this, (Client*)pCur->m_pData);
-			pCur = pNext;
-		}
-	}
+    while (m_ClientList.m_Head.m_pNext != &m_ClientList.m_Head) {
+        sm_RemoveClient(this,static_cast<Client*>(m_ClientList.m_Head.m_pNext->m_pData));
+    }
+
 	dl_InitList(&m_ClientList);
 
 	m_NetMgr.Term();
 
 	sm_RemoveObjects(this, LTTRUE);
 	sm_FreeList44(this);
+    m_InterObjectLinks.Clear();
 
 	// Give the spare links back to the shared pool, threading them on
 	// through their prev pointers.
@@ -766,7 +591,7 @@ void CServerMgr::Term()
 	m_Link8c4.TieOff();
 	m_Unknown8bc = 0;
 
-	m_Unknown8fc.SetSize2(0, (LAlloc*)&g_PacketDataBank);
+	m_Unknown8fc.SetSize2(0, (LAlloc*)&g_DefAlloc);
 	m_World.Term();
 	sm_TermModels(this);
 
@@ -774,43 +599,30 @@ void CServerMgr::Term()
 	m_hModelHash = LTNULL;
 
 	m_ClassMgr.Term();
-	cb_Term();
 
 	cc_TermState(&m_ConsoleState);
-	dsi_SetErrorHook(sm_ErrorHook, LTNULL);
+	sb_EnumStrings([](char* text, void*) { sm_ErrorHook(text); }, nullptr);
 
 	fs_Term(&m_FileMgr);
 
 	sb_Term(&m_ObjectListBank);
 	sb_Term(&m_ObjectLinkBank);
-	sb_Term(&m_Bank848);
-	sb_Term(&m_Bank9D4);
-	sb_Term(&m_Bank864);
-	sb_Term(&m_Bank0C);
-	sb_Term(&m_Bank28);
-	sb_Term(&m_PropBank);
-	sb_Term(&m_Bank89C);
+	m_SoundInstances.Term();
 	m_MessageBank.Term();
 
 	dhash_Free(m_hHash8c0);
 	m_hHash8c0 = LTNULL;
 
-	if (m_Unknown91c)
-	{
-		dfree(m_Unknown91c);
-		m_Unknown91c = LTNULL;
-	}
-
-	m_Unknown924 = 0;
-	m_Unknown920 = 0;
+    m_CachedFiles.clear();
 
 	un390_Term(&m_Unknown390);
 
 	if (m_pUnknown6a8)
 	{
-		operator delete(m_pUnknown6a8);
+		delete m_pUnknown6a8;
 		m_pUnknown6a8 = LTNULL;
 	}
+    m_pCollisionInfo = nullptr;
 
 	if (m_pUnknown928)
 	{
@@ -818,27 +630,29 @@ void CServerMgr::Term()
 		m_pUnknown928 = LTNULL;
 	}
 
-	if (m_pUnknown808)
+	if (m_pPacketTrace)
 	{
-		m_pUnknown808->Release();
-		m_pUnknown808 = LTNULL;
+		m_pPacketTrace->Release();
+		m_pPacketTrace = LTNULL;
 	}
 
 	if (m_Unknown804)
 	{
-		operator delete(m_Unknown804);
+		delete m_Unknown804;
 		m_Unknown804 = LTNULL;
 	}
 
 	if (m_pPlaceholderModel)
 	{
-		delete m_pPlaceholderModel;
+		m_PlaceholderModelOwner.reset();
 		m_pPlaceholderModel = LTNULL;
 	}
 
 	m_pAppHandler = LTNULL;
 	g_pServerMgr = LTNULL;
 	g_pClassMgr = LTNULL;
+    m_Initialized = false;
+    m_Terminating = false;
 }
 
 // The packet-slot rewind is INDEXED, not walked. Written with a
@@ -849,47 +663,35 @@ void CServerMgr::Term()
 // with `lea 0x134(%ecx),%edx`, which is what shipped. (Loops want
 // the array indexed, not walked — and this was the last byte of a function
 // previously written off as the SpriteControl::SetCurPos SIB near class.)
-void CServerMgr::EndWorld(int bKeepWorldData)
-{
-	LTLink* pCur;
-	int i, j;
-
-	m_bWorldLoaded = 0;
-
-	// Rewind every client's packet slots to one byte.
-	for (pCur = m_ClientList.m_Head.m_pNext; pCur != &m_ClientList.m_Head; pCur = pCur->m_pNext)
-	{
-		Client* pClient = (Client*)pCur->m_pData;
-		for (i = 0; i < 2; i++)
-		{
-			for (j = 0; j < 2; j++)
-			{
-				CPacket* pPacket = pClient->m_PacketSets[i][j].m_pPacket;
-				pPacket->m_Pos = 1;
-				pPacket->m_DataLen = 1;
-			}
-		}
-	}
-
-	sm_EndWorldA(this);
-	sm_EndWorldB(this);
-
-	{
-		LTLink* pHead = &m_ClientList.m_Head;
-		for (pCur = pHead->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-			sm_ResetClient(this, (Client*)pCur->m_pData, 1);
-	}
-
-	sm_EndWorldC(this);
-	sm_RemoveObjects(this, LTFALSE);
-	sm_EndWorldD(this);
-
-	m_World.TermObjects();
-	if (!bKeepWorldData)
-		m_World.Term();
-
-	m_Unknown198 = 1;
-	dsi_ServerError("World ended");
+void CServerMgr::EndWorld(int keep_data) {
+    ServerActivity activity(m_Lifetime);
+    if (m_EndingWorld) return;
+    m_EndingWorld = true; ++m_Lifetime->epoch;
+    struct Scope {
+        CServerMgr& manager; ServerCallbackGuard guard;
+        ~Scope() { if (guard.alive()) manager.m_EndingWorld = false; }
+    } scope{*this,ServerCallbackGuard(m_Lifetime)};
+    m_bWorldLoaded = 0;
+    m_Properties.reset();
+    client_Visit(m_ClientList,[](void*,Client& client) {
+        for (auto& pair : client.m_PacketSets) for (auto& set : pair) if (auto* packet = set.Packet()) packet->m_Pos = packet->m_DataLen = 1;
+    },nullptr);
+    sm_EndWorldA(this);
+    if (!scope.guard.unchanged()) return;
+    sm_EndWorldB(this);
+    struct Context { CServerMgr* manager; ServerCallbackGuard guard; } context{this,scope.guard};
+    client_Visit(m_ClientList,[](void* pointer,Client& client) {
+        auto& context = *static_cast<Context*>(pointer);
+        if (context.guard.unchanged()) sm_SetClientState(context.manager,&client,1);
+    },&context);
+    if (!scope.guard.unchanged()) return;
+    sm_EndWorldC(this); sm_RemoveObjects(this,LTFALSE);
+    if (!scope.guard.unchanged()) return;
+    sm_EndWorldD(this);
+    m_World.TermObjects();
+    if (!keep_data) m_World.Term();
+    m_Unknown198 = 1;
+    dsi_ServerError("World ended");
 }
 
 // Detach every client's tracked object (name ours).
@@ -937,65 +739,13 @@ void sm_EndWorldC(CServerMgr* pMgr)
 
 // ---- the world's model precache ------------------------------------------ //
 
-// 0x10001865 — a class by name out of the class manager's hash; CClassMgr
-// does not declare it, so it is reached through a view (name ours, from what
-// its answer is used as: CreateObject's hClass).
-class CClassMgrFindView
-{
-public:
-	HCLASS FindClass(char* pszName);         // 0x10001865
-};
-
-// The shipped body (0x10001865, 47 bytes, thiscall, `ret $0x4`): strlen of
-// the name, the hash lookup on m_hClassHash (+0x24) with that length, and
-// the element's data if there was one. Both cleanups merge into one
-// `add $0x10,%esp`. Its home in the image is between CClassMgr::Term
-// (0x100017c8) and cb_LoadModule (0x10001894), i.e. counter.cpp's run of
-// CClassMgr members; it is written here, through the view, because this is
-// the file that calls it.
-HCLASS CClassMgrFindView::FindClass(char* pszName)
-{
-	void* hElement = dhash_FindElement(((CClassMgr*)this)->m_hClassHash,
-		pszName, strlen(pszName));
-
-	if (hElement)
-		return (HCLASS)dhash_GetData(hElement);
-
-	return LTNULL;
-}
-
 // The parts of a resource tree the precache reads. servermgr.h models the
 // tree as a pad and one list pointer and the list as three named fields, and
 // neither covers what is needed here, so both are reached through views
 // (names by offset). The flag word at the list's +0x48 decides which of the
 // two shapes the tree holds: bit 3 an indexed table of names, bits 4-5 a
 // single name hanging off the tree's own +0x0c.
-class CPrecacheListView
-{
-public:
-	uint8  m_pad_00[0x04];
-	uint32 m_Table04;                        // +0x04  the table 0x10007e44 indexes
-	uint8  m_pad_08[0x48 - 0x08];
-	uint32 m_Flags48;                        // +0x48
-	uint8  m_pad_4c[0x140 - 0x4c];
-	uint32 m_nEntries140;                    // +0x140
-};
-
-class CPrecacheNameView
-{
-public:
-	uint8 m_pad_00[0x04];
-	char  m_Name[1];                         // +0x04  inline
-};
-
-class CPrecacheTreeView
-{
-public:
-	uint8              m_pad_00[0x04];
-	CPrecacheListView* m_pList;              // +0x04
-	uint8              m_pad_08[0x0c - 0x08];
-	CPrecacheNameView* m_pName0c;            // +0x0c
-};
+using CPrecacheTreeView = CServerWorldRec;
 
 // 0x10007e44 — the i'th name out of the table at the list's +0x04, copied
 // into the caller's buffer; nonzero if there was one (name ours).
@@ -1010,263 +760,156 @@ int fs_GetTableName(void* pTable, uint32 iEntry, char* pName, uint32 nMaxLen);
 void cs_PreLoadWorld(char* pWorldName);     // 0x004148d0 (client only)
 #endif
 
-class CPrecacheView
-{
-public:
-	LTBOOL PrecacheModels();                 // 0x10033e76
-};
-
-LTRESULT CServerMgr::DoStartWorld(char* pszWorldName, uint32 flags, float fTime)
-{
-	char str[256];
-	LTBOOL bSameWorld;
-	void* hFile;
-	LTRESULT dResult;
-
-	// Reseed everything from the clock, the game shell included.
-	uint32 seed = (uint32)dsi_GetTime();
-	srand(seed);
-	m_ClassMgr.m_pServerShell->SRand(seed);
-
-	// Does the request name the world already loaded?
-	bSameWorld = LTFALSE;
-	if ((flags & 4) && m_hWorldFile)
-	{
-		strncpy(str, fs_GetFilename(&m_FileMgr, m_hWorldFile), 255);
-		_strupr(str);
-
-		char* pExt = strstr(str, ".DAT");
-		if (pExt)
-			*pExt = 0;
-
-		if (_stricmp((char*)pszWorldName, str) == 0)
-			bSameWorld = LTTRUE;
-	}
-
-	LTBOOL bWasRunning = (m_Unknown198 == 0);
-	m_ClassMgr.m_pServerShell->PreStartWorld(bWasRunning);
-	if (bWasRunning)
-		EndWorld(bSameWorld);
-
-	memset(m_SkyObjects, 0xff, sizeof(m_SkyObjects));
-	// Integer store order here and below is lithtech's (0x004751e6,
-	// 0x00475339, 0x00475356..0x0047538f), which keeps source order; /O1
-	// hoists its `andl $0` stores and matches either way.
-	m_Time = 0.0f;
-	m_pChangedObjects = LTNULL;
-	m_pChangedSounds = LTNULL;
-	m_Link83c.TieOff();
-
-	sprintf(str, "%s.dat", pszWorldName);
-
-	ILTStream* pStream = fs_OpenFile(&m_FileMgr, str);
-	if (!pStream)
-	{
-		SetupError(41, pszWorldName);
-		RETURN_ERROR_INFO(1, "CServerMgr::DoStartWorld", LT_MISSINGWORLDFILE, pszWorldName);
-	}
-
-	if (!fs_GetFileIdentifier(&m_FileMgr, str, 1, &hFile))
-	{
-		SetupError(41, pszWorldName);
-		RETURN_ERROR_INFO(1, "CServerMgr::DoStartWorld", LT_MISSINGWORLDFILE, pszWorldName);
-	}
-
+LTRESULT CServerMgr::DoStartWorld(char* requested, uint32 flags, float time) {
+    ServerActivity activity(m_Lifetime);
+    if (!activity.available()) return LT_NOTINITIALIZED;
+    if (!requested || !*requested || (flags & ~uint32(7)) || !std::isfinite(time)) return LT_INVALIDPARAMS;
+    if (!m_Initialized || !m_Lifetime->alive || m_Terminating || m_EndingWorld || !m_ClassMgr.m_pServerShell) return LT_NOTINITIALIZED;
+    if (m_StartingWorld || m_RunningWorldStart) return LT_ERROR;
+    const auto life = m_Lifetime;
+    ServerCallbackGuard operation(life);
+    struct Transition {
+        CServerMgr* manager; ServerCallbackGuard guard;
+        bool changed = false, committed = false;
+        ~Transition() {
+            if (!guard.alive()) return;
+            if (changed && !committed && !manager->m_Terminating && !manager->m_EndingWorld) manager->EndWorld(0);
+            if (guard.alive()) manager->m_StartingWorld = false;
+        }
+    } transition{this,operation};
+    m_StartingWorld = true;
+    try {
+        auto name = nolf::platform::asset_key(requested);
+        if (name.ends_with(".dat")) name.resize(name.size()-4);
+        if (name.empty() || name.size()+4 >= LT_MAX_PATH) return LT_INVALIDPARAMS;
+        const auto filename = name + ".dat";
+        struct ReleaseStream { void operator()(ILTStream* stream) const { if (stream) stream->Release(); } };
+        std::unique_ptr<ILTStream,ReleaseStream> stream(fs_OpenFile(&m_FileMgr,const_cast<char*>(filename.c_str())));
+        if (!stream) { SetupError(41,name.c_str()); return LT_MISSINGWORLDFILE; }
+        void* file = nullptr;
+        if (!fs_GetFileIdentifier(&m_FileMgr,const_cast<char*>(filename.c_str()),1,&file)) {
+            SetupError(41,name.c_str()); return LT_MISSINGWORLDFILE;
+        }
+        bool same = false;
+        if ((flags & 4) && m_hWorldFile && m_World.m_bLoaded) {
+            const auto* current = fs_GetFilename(&m_FileMgr,m_hWorldFile);
+            same = current && nolf::platform::asset_key(current) == filename;
+        }
+        const auto ticks = nolf::platform::monotonic_nanoseconds();
+        const auto seed = static_cast<uint32>(ticks ^ (ticks >> 32));
+        srand(seed);
+        m_ClassMgr.shell([&](IServerShell& shell) { shell.SRand(seed); });
+        if (!operation.unchanged()) return LT_ERROR;
+        const bool was_running = m_Unknown198 == 0;
+        transition.changed = true;
+        m_ClassMgr.shell([&](IServerShell& shell) { shell.PreStartWorld(was_running ? LTTRUE : LTFALSE); });
+        if (!operation.unchanged()) return LT_ERROR;
+        // Loaded-but-paused worlds own actors too; retire them before replacing
+        // their geometry, even if RunWorld has not yet been called.
+        if (m_bWorldLoaded || was_running) {
+            const auto generation = life->epoch;
+            EndWorld(same ? 1 : 0);
+            if (!life->alive || life->epoch != generation+1 || !m_Initialized || m_Terminating) return LT_ERROR;
+            operation = ServerCallbackGuard(life);
+        }
+        std::fill(std::begin(m_SkyObjects),std::end(m_SkyObjects),uint16(0xffff));
+        m_Time = 0; m_pChangedObjects = nullptr; m_pChangedSounds = nullptr; m_Link83c.TieOff();
 #ifndef LT_SERVER_BUILD
-	// lithtech.exe only (0x00475287 `call 0x004148d0`): the client shell
-	// hears about the world before it loads. server.dll has no such call.
-	cs_PreLoadWorld(pszWorldName);
+        cs_PreLoadWorld(name.data());
+        if (!operation.unchanged()) return LT_ERROR;
 #endif
-
-	if (bSameWorld && m_hWorldFile)
-	{
-		m_bWorldLoaded = 1;
-	}
-	else
-	{
-		dResult = LoadWorld(pStream, pszWorldName);
-		if (dResult != LT_OK)
-		{
-			pStream->Release();
-			return dResult;
-		}
-	}
-
-	m_hWorldFile = hFile;
-
-	sm_StartWorldA(this, 1);
-	((CPrecacheView*)this)->PrecacheModels();
-
-	dResult = sm_LoadWorldObjects(this, pStream, pszWorldName, flags & 1);
-	if (dResult != LT_OK)
-	{
-		dsi_ServerError("FAILED to load world: %s", pszWorldName);
-		return dResult;
-	}
-
-	m_pWorldStream = pStream;
-	m_Unknown324 |= 1;
-	dsi_ServerError("Loaded world: %s", pszWorldName);
-
-	m_Unknown6c4 = 0;
-	m_Unknown6bc = fTime;
-	m_Unknown6c0 = 0.0f;
-	m_Unknown6d0 = 0;
-	m_Unknown6c8 = 0.0f;
-	m_Time = 0.0f;
-	m_Unknown6b8 = 0.0f;
-	m_Unknown6d8 = fTime;
-	m_FrameTime = 0.0f;
-
-	if (flags & 2)
-		DoRunWorld();
-
-	return LT_OK;
+        if (same) m_bWorldLoaded = 1;
+        else {
+            const auto result = LoadWorld(stream.get(),name.data());
+            if (!operation.unchanged()) return LT_ERROR;
+            if (result != LT_OK) return result;
+        }
+        m_hWorldFile = file;
+        auto result = sm_StartWorldA(this,1);
+        if (result != LT_OK) return result;
+        if (!PrecacheModels()) return LT_ERROR;
+        if (!operation.unchanged()) return LT_ERROR;
+        result = sm_LoadWorldObjects(this,stream.get(),name.data(),flags & 1);
+        if (!operation.unchanged()) return LT_ERROR;
+        if (result != LT_OK) return result;
+        m_pWorldStream = stream.release(); m_Unknown324 |= 1;
+        m_Unknown6c4 = 0; m_Unknown6bc = time; m_Unknown6c0 = 0;
+        m_Unknown6d0 = 0; m_Unknown6c8 = 0; m_Time = 0; m_Unknown6b8 = 0;
+        m_Unknown6d8 = time; m_FrameTime = 0;
+        if (flags & 2) {
+            result = DoRunWorld();
+            if (!operation.unchanged()) return LT_ERROR;
+            if (result != LT_OK) return result;
+        }
+        transition.committed = true;
+        dsi_ServerError("Loaded world: %s",name.c_str());
+        return LT_OK;
+    } catch (const std::exception& error) {
+        nolf::platform::log("world startup",error.what());
+        return LT_ERROR;
+    }
 }
 
-// The object Init hangs at +0x6a8: the object mover, whose vtable is the
-// thirteen-slot table at 0x1004e8c8 (Init's inline construction stores it at
-// 0x10031fbe, then the manager at +0x04). servermgr.h's CUnknown6A8Obj
-// declares one slot of it, so constructing that emitted a one-entry vtable;
-// the class is objmover.cpp's CObjectMoverQ47C, restated here with the same
-// slots and signatures so this construction plants the full table and each
-// slot links to the body that file (or spritecontrol.cpp, through
-// link/aliases.rsp) defines.
-class CObjectMoverQ47C
-{
-public:
-	CObjectMoverQ47C(CServerMgr* pMgr)
-	{
-		m_pMgr = pMgr;
-	}
-
-	virtual void SetObjectChangeFlags(LTObject* pObj, uint32 nFlags);  // 0x1003524a
-	virtual CollisionInfo** GetCollisionInfo();                          // 0x10035260
-	virtual void TouchNotify(LTObject* pObj, HOBJECT hToucher,
-	                         LTVector* pStopVel, float fForceMag);        // 0x10035269
-	virtual void Attach(LTObject* pObj, LTObject* pParent);             // 0x100352d5
-	virtual void Detach(LTObject* pObj);                                 // 0x100352f5
-	virtual void UpdateAttachments(WMMoveState* pState);                 // 0x1003530b
-	virtual int  _v18();                                                 // 0x10035541
-	virtual uint32 Crush(LTObject* pObj, void* pData);                   // 0x100352b4
-	virtual void _v20();                                                 // 0x10035568
-	virtual int  _v24();                                                 // 0x100355db
-	virtual LTBOOL CanDeactivate(LTObject* pObj);                        // 0x100355df
-	virtual char*  GetObjectClassName(LTObject* pObj);                   // 0x100355ec
-	virtual uint32 _v30();                                               // 0x10032332
-
-	CServerMgr* m_pMgr;                      // +0x04
-};
-
-LTBOOL CServerMgr::Init()
-{
-	SetupGlobals();
-
-	m_Unknown804 = new CMessageObjectHelper(this);
-	m_pPlaceholderModel = new CUnknownB28Obj(&g_PacketDataBank, &g_PacketDataBank);
-	m_pUnknown6a8 = (CUnknown6A8Obj*)new CObjectMoverQ47C(this);
-
-	if (un390_Init(&m_Unknown390, 0) == 0 &&
-	    m_Unknown804 && m_pPlaceholderModel && m_pUnknown6a8 &&
-	    m_Thread.Init(this) != 0 &&
-	    m_Thread.Start(3) == 0)
-	{
-		m_Unknown210.Init(&m_Unknown390);
-		m_NetMgr.SetNetName("SERVER_PLAYER");
-
-		m_NetMgr.m_pHandler = this;
-		m_Link83c.TieOff();
-		m_pAppHandler = LTNULL;
-		m_pCurProps = LTNULL;
-		m_ErrorString[0] = 0;
-		m_Unknown8fc.SetCacheSize(100);
-		m_Unknown91c = LTNULL;
-		m_Unknown924 = 0;
-		m_Unknown920 = 0;
-		memset(m_SkyObjects, 0xff, sizeof(m_SkyObjects));
-		m_hGlobalLightObject = 0;
-		m_Unknown8b8 = 200;
-		m_Unknown8bc = 0;
-		m_pGameInfo = LTNULL;
-		m_GameInfoLen = 0;
-		m_Unknown198 = 1;
-		m_ServerFlags = 0;
-		m_Unknown1a0 = 0;
-		g_Unknown58bec = 0;
-		m_Unknown7f8 = 0;
-		m_Unknown7f4 = 0;
-
-		sb_Init2(&m_ObjectListBank, 8, 0x10, 4);
-		sb_Init2(&m_ObjectLinkBank, 8, 0x80, 0x40);
-		sb_Init2(&m_Bank848, 0x14, 0x20, 0x20);
-		sb_Init2(&m_Bank9D4, 0x160, 0x30, 0x20);
-		sb_Init2(&m_Bank864, 0x18, 0x20, 0x10);
-		sb_Init2(&m_Bank0C, 0x1c, 0x10, 0x10);
-		sb_Init2(&m_Bank28, 0x60, 0x10, 0x10);
-		sb_Init2(&m_PropBank, 0xc0, 0x10, 0x10);
-		sb_Init2(&m_Bank89C, 10, 0x20, 0x20);
-
-		m_MessageBank.m_Bank.m_Unknown08 = 0x40;
-
-		m_Link8c4.TieOff();
-		m_Link8d0.TieOff();
-		dl_InitList(&m_List8dc);
-		dl_InitList(&m_ClientList);
-		dl_InitList(&m_List8ec);
-		dl_InitList(&m_List44);
-		dl_InitList(&m_List54);
-
-		m_SkyDef.m_Min.Init(-10.0f, -10.0f, -10.0f);
-		m_SkyDef.m_Max.Init(10.0f, 10.0f, 10.0f);
-		m_SkyDef.m_ViewMin.Init();
-		m_SkyDef.m_ViewMax.Init();
-
-		// Store order from lithtech 0x47345c..0x4734aa, which keeps these
-		// zero stores in source order (server.dll's /O1 is identical either way).
-		m_bWorldLoaded = 0;
-		m_hWorldFile = LTNULL;
-		m_pUnknown808 = LTNULL;
-		m_FrameTime = 0.0f;
-		m_UpdatesPerSec = 0.0f;
-		m_Unknown6bc = 0.0f;
-		m_Unknown6c0 = 0.0f;
-		m_Unknown6c4 = 0;
-		m_Unknown6c8 = 0.0f;
-		m_Time = 0.0f;
-		m_Unknown6d0 = 0;
-		m_Unknown6d4 = 0.0f;
-		m_Unknown6d8 = 0.0f;
-		m_Unknown6b8 = 0.0f;
-
-		m_hHash8c0 = dhash_Create(500, 1);
-		m_hModelHash = dhash_Create(100, 1);
-
-		cc_InitState(this, &m_ConsoleState);
-		cc_LoadConfigFile(&m_ConsoleState, "s_autoexec.cfg", 2, 0);
-
-		m_pUnknown928 = sm_CreateUnknown928(this);
-
-		fs_Init(&m_FileMgr, this);
-		m_ClassMgr.Init(this);
-		m_UnknownA14.Init(300);
-
-		m_pCollisionInfo = LTNULL;
-		sm_ResetProfileCounters();
-		return LTTRUE;
-	}
-
-	return LTFALSE;
+LTBOOL CServerMgr::Init() {
+    if (m_Initialized) return LTTRUE;
+    if (!m_Lifetime->alive || m_Terminating) return LTFALSE;
+    SetupGlobals();
+    try {
+        if (un390_Init(&m_Unknown390,0) != 0) throw std::runtime_error("native object manager initialization failed");
+        m_Unknown804 = new CMessageObjectHelper(this);
+        m_PlaceholderModelOwner = std::make_shared<Model>(&g_DefAlloc,&g_DefAlloc);
+        m_pPlaceholderModel = m_PlaceholderModelOwner.get();
+        m_pUnknown6a8 = new ServerObjectMover(this);
+        m_Unknown210.Init(&m_Unknown390);
+        m_NetMgr.SetNetName("SERVER_PLAYER"); m_NetMgr.m_pHandler = this;
+        m_Link83c.Init2(nullptr); m_Link8c4.Init2(nullptr); m_Link8d0.Init2(nullptr);
+        m_Unknown8fc.SetCacheSize(100);
+        m_Unknown8b8 = 200; m_Unknown8bc = 0;
+        m_Unknown198 = 1; m_ServerFlags = m_Unknown1a0 = 0;
+        m_Unknown7f4 = m_Unknown7f8 = m_Unknown7fc = m_Unknown800 = 0;
+        m_CachedFiles.clear();
+        m_pChangedObjects = nullptr; m_pChangedSounds = nullptr;
+        m_pAppHandler = nullptr; m_Properties.reset(); m_ErrorCode = LT_OK; m_ErrorString[0] = 0;
+        m_FrameTime = m_UpdatesPerSec = m_Unknown6b8 = m_Unknown6bc = m_Unknown6c0 = m_Unknown6c8 = m_Time = 0;
+        m_Unknown6c4 = m_Unknown6dc = 0; m_Unknown6d0 = 0; m_Unknown6d4 = m_Unknown6d8 = 0;
+        m_bWorldLoaded = 0; m_hWorldFile = nullptr; m_pCollisionInfo = nullptr;
+        std::fill(std::begin(m_SkyObjects),std::end(m_SkyObjects),uint16(0xffff)); m_hGlobalLightObject = nullptr;
+        if (!sb_Init2(&m_ObjectListBank,sizeof(ObjectList),16,4) ||
+            !sb_Init2(&m_ObjectLinkBank,sizeof(ObjectLink),128,64)) throw std::bad_alloc();
+        m_MessageBank.m_Bank.m_CacheSize = 64;
+        m_hHash8c0 = dhash_Create(500,DHASHKEY_STRING); m_hModelHash = dhash_Create(100,DHASHKEY_FILENAME);
+        if (!m_hHash8c0 || !m_hModelHash) throw std::bad_alloc();
+        fs_Init(&m_FileMgr,this); m_FileMgr.set_notification(se_NotifyFileRegistered);
+        cc_InitState(this,&m_ConsoleState);
+        if (!m_ConsoleState.m_Initialized) throw std::bad_alloc();
+        cc_LoadConfigFile(&m_ConsoleState,const_cast<char*>("s_autoexec.cfg"),2,0);
+        if (!m_ClassMgr.Init(this)) throw std::runtime_error("native class manager initialization failed");
+        m_pUnknown928 = sm_CreateUnknown928(this);
+        if (!m_pUnknown928) throw std::bad_alloc();
+        sm_ResetProfileCounters();
+        // Publication and callbacks use fully initialized native services.
+        if (!m_Thread.Init(this) || m_Thread.Start(3) != LT_OK) throw std::runtime_error("native server worker initialization failed");
+        m_Initialized = true; return LTTRUE;
+    } catch (const std::exception& error) {
+        nolf::platform::log("server initialization",error.what()); Term(); return LTFALSE;
+    }
 }
 
 LTRESULT CServerMgr::PlaySound(PlaySoundInfo* pPlaySoundInfo, HLTSOUND& hResult)
 {
+    hResult = LTNULL;
 	SoundInstance* pSound = LTNULL;
-	void* pTrack = LTNULL;
+	std::shared_ptr<const SoundTrack> pTrack;
 	char* pSoundName;
 	void* hFile;
 
 	if (!pPlaySoundInfo)
 		return LT_INVALIDPARAMS;
+    pPlaySoundInfo->m_hSound = LTNULL;
+    const auto validRequest = sound_NormalizeRequest(*pPlaySoundInfo);
+    if (validRequest != LT_OK) return validRequest;
+    if ((pPlaySoundInfo->m_dwFlags & (PLAYSOUND_ATTACHED | PLAYSOUND_CLIENTLOCAL)) &&
+        (!pPlaySoundInfo->m_hObject || !m_Unknown390.m_Allocated.contains(pPlaySoundInfo->m_hObject))) return LT_INVALIDPARAMS;
 
 	// A world must be up, and an attached sound must name its object.
 	if (!m_pWorldFile)
@@ -1284,21 +927,6 @@ LTRESULT CServerMgr::PlaySound(PlaySoundInfo* pPlaySoundInfo, HLTSOUND& hResult)
 		return LT_MISSINGFILE;
 	}
 
-	// Spatialized sounds need sane radii.
-	if (pPlaySoundInfo->m_dwFlags & (PLAYSOUND_AMBIENT | PLAYSOUND_3D))
-	{
-		pPlaySoundInfo->m_fOuterRadius =
-			LTCLAMP(pPlaySoundInfo->m_fOuterRadius, 1.0f, 65000.0f);
-		pPlaySoundInfo->m_fInnerRadius =
-			LTCLAMP(pPlaySoundInfo->m_fInnerRadius, 1.0f, 65000.0f);
-	}
-
-	// Drop the control flags that ask for the defaults anyway.
-	if ((pPlaySoundInfo->m_dwFlags & PLAYSOUND_CTRL_VOL) && pPlaySoundInfo->m_nVolume == 100)
-		pPlaySoundInfo->m_dwFlags &= ~PLAYSOUND_CTRL_VOL;
-
-	if ((pPlaySoundInfo->m_dwFlags & PLAYSOUND_CTRL_PITCH) && pPlaySoundInfo->m_fPitchShift == 1.0f)
-		pPlaySoundInfo->m_dwFlags &= ~PLAYSOUND_CTRL_PITCH;
 
 	if (pPlaySoundInfo->m_dwFlags & (PLAYSOUND_TIMESYNC | PLAYSOUND_TIME |
 	    PLAYSOUND_GETHANDLE | PLAYSOUND_ATTACHED | PLAYSOUND_LOOP))
@@ -1310,13 +938,12 @@ LTRESULT CServerMgr::PlaySound(PlaySoundInfo* pPlaySoundInfo, HLTSOUND& hResult)
 		// A kept, non-looping timed sound needs its length data up front.
 		if ((pPlaySoundInfo->m_dwFlags & (PLAYSOUND_TIMESYNC | PLAYSOUND_TIME | PLAYSOUND_ATTACHED)) &&
 		    !(pPlaySoundInfo->m_dwFlags & PLAYSOUND_LOOP) &&
-		    (pTrack = GetSoundTrack(hFile)) == LTNULL)
+		    !(pTrack = AddCachedFile(static_cast<CFileRef*>(hFile))))
 		{
 			return LT_ERROR;
 		}
 
-		StructBank* pBank = &m_Bank28;
-		pSound = (SoundInstance*)sm_sb_Allocate(pBank);
+		pSound = m_SoundInstances.Allocate();
 		if (!pSound)
 			return LT_ERROR;
 
@@ -1325,13 +952,12 @@ LTRESULT CServerMgr::PlaySound(PlaySoundInfo* pPlaySoundInfo, HLTSOUND& hResult)
 		else
 			pPlaySoundInfo->m_hSound = LTNULL;
 
-		if (!pSound->Init(pPlaySoundInfo, m_Time, hFile, pTrack))
+		if (!pSound->Init(*this, pPlaySoundInfo, m_Time, static_cast<CFileRef*>(hFile), pTrack))
 		{
 			pPlaySoundInfo->m_hSound = LTNULL;
 
-			// Hand the instance straight back to its bank.
-			*(void**)pSound = pBank->m_pFreeList;
-			pBank->m_pFreeList = pSound;
+			pSound->Term();
+			m_SoundInstances.Free(pSound);
 			return LT_ERROR;
 		}
 
@@ -1340,9 +966,15 @@ LTRESULT CServerMgr::PlaySound(PlaySoundInfo* pPlaySoundInfo, HLTSOUND& hResult)
 	else
 	{
 		// Fire and forget: queue the play for the clients and be done.
-		SoundRecord* pRecord = (SoundRecord*)sm_AddSoundRecord(this, 0);
-		PLAYSOUNDINFO_COPY(pRecord->m_Info, *pPlaySoundInfo);
-		pRecord->m_hFile = hFile;
+        try {
+            auto record = std::make_shared<SoundRecord>();
+            record->file_name = static_cast<CFileRef*>(hFile)->m_Name;
+            record->file_id = static_cast<CFileRef*>(hFile)->m_nFileID;
+            record->m_Info = *pPlaySoundInfo;
+            if (record->m_Info.m_dwFlags & PLAYSOUND_CLIENTLOCAL)
+                record->m_Info.m_vPosition = record->m_Info.m_hObject->m_Pos;
+            if (!client_QueueSound(m_ClientList,std::move(record))) return LT_OUTOFMEMORY;
+        } catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
 	}
 
 	// pSound is still LTNULL on the fire-and-forget path.
@@ -1350,145 +982,95 @@ LTRESULT CServerMgr::PlaySound(PlaySoundInfo* pPlaySoundInfo, HLTSOUND& hResult)
 	return LT_OK;
 }
 
-LTBOOL CServerMgr::Update(long flags, float fTime)
-{
-	int nUpdates;
-	volatile long* pCount;
-	int i;
-
-	SetupGlobals();
-	ProcessThreadMessages();
-
-	// Everything below runs on accumulated server time.
-	fTime += m_Unknown6b8;
-	m_Unknown6d4 = fTime - m_Unknown6d8;
-#ifdef NOLFSRC_MODERN
-	// M-P1-23: a game tick takes at least 10 ms (the clamp below), and the
-	// client calls this every frame: above 100 frames a second the world
-	// ran faster than real time (3x at 300).  So a tick runs only once
-	// 10 ms have passed since the last one, measured from that tick; the
-	// packets and the network still go every call.  Time that runs
-	// backwards -- a new world re-bases it (m_Unknown6b8), leaving the last
-	// tick's time ahead -- ticks at once and starts afresh, as the clamp
-	// made of it; waiting for it stalled the new world for as long as the
-	// old one had run.
-	bool bP1Tick = m_Unknown198 != 0 || (flags & 1) || (m_ServerFlags & 1) ||
-		m_Unknown6d4 >= 0.01f || m_Unknown6d4 < 0.0f;
-	if (bP1Tick)
-		m_Unknown6d8 = fTime;
-#else
-	m_Unknown6d8 = fTime;
-#endif
-
-	m_NetMgr.Update("Server: ", fTime, 1);
-
-	g_Unknown585a0 = 0.0f;
-	g_Unknown5872c = 0;
-	g_Unknown58728 = 0;
-	g_nIsectQueries = 0;
-	g_nIsectTime = 0;
-	g_FindSphereTicks = 0;
-	g_FindSphereCount = 0;
-
-	if (sm_ProcessPackets(this))
-		return LTFALSE;
-
-	if (m_Unknown198 == 0)
-	{
-		if (!(flags & 1) && !(m_ServerFlags & 1))
-		{
-#ifdef NOLFSRC_MODERN
-		  // M-P1-23: see above
-		  if (bP1Tick)
-		  {
-#endif
-			// Fixed-step: run however many update ticks real time has banked.
-			if (g_UpdatesPerSec != m_UpdatesPerSec)
-			{
-				m_Unknown6c4 = 0;
-				m_Unknown6c8 = m_Time;
-				m_Unknown6bc = m_Unknown6c0;
-				m_Unknown6d0 = 0;
-			}
-
-			m_UpdatesPerSec = g_UpdatesPerSec;
-
-			float fInv = 1.0f / g_UpdatesPerSec;
-			m_FrameTime = g_TimeScale * fInv;
-			m_Unknown6c0 = m_Unknown6bc + (float)m_Unknown6c4 * fInv;
-
-			nUpdates = (int)((fTime - m_Unknown6c0) / fInv);
-			if (nUpdates < 0)
-				nUpdates = 0;
-
-			m_FrameTime = m_Unknown6d4;
-			m_FrameTime = LTCLAMP(m_FrameTime, 0.01f, 0.2f);
-			m_Time += m_FrameTime;
-
-			// The one-trip tick loop is a GOTO loop with a plain register
-			// counter. lithtech keeps it (0x0047443c `xor %ebp,%ebp`,
-			// 0x004744a3 `inc %ebp ; cmp $0x1,%ebp ; jl`) where VC6 deletes
-			// every for/while/do spelling of a constant one-trip loop; the
-			// old spelling ran the counter through the volatile fTime slot
-			// and was 711 bytes against 698. Only the m_Unknown1a0 store
-			// still goes through that slot (0x0047443e). server.dll
-			// (0x10032e69) is identical either way. Left in lithtech (698 of
-			// 698, 6 blocks): the busy-wait has a pre-test there
-			// (0x0047446a) and not in server.dll, the float zero to
-			// g_Unknown585a0 comes from %edi, and the slot store is
-			// scheduled ahead of the m_Time store. Every while/goto/pointer
-			// spelling of the wait tried costs server.dll 4 bytes.
-			pCount = (volatile long*)&fTime;
-			*pCount = m_Unknown1a0;
-			i = 0;
-		UpdateLoop:
-			UpdateSounds(m_FrameTime);
-
-			if ((m_Unknown1a0 & 4) && !(m_Unknown1a0 & 8))
-			{
-				// The famous hoisted-read busy-wait.
-				do { } while (m_Unknown6dc == 0);
-				m_Unknown6dc = m_Unknown6dc - 1;
-			}
-
-			if (m_ClassMgr.m_pServerShell)
-				m_ClassMgr.m_pServerShell->Update(m_FrameTime);
-
-			UpdateObjects();
-
-			m_Unknown6d0++;
-			i++;
-			m_Unknown6d4 = 0.0f;
-			if (i < 1)
-				goto UpdateLoop;
-
-			m_Unknown6c4 += nUpdates;
-			m_Unknown6c0 = m_Unknown6bc + (float)m_Unknown6c4 * fInv;
-#ifdef NOLFSRC_MODERN
-		  }
-#endif
-		}
-		else
-		{
-			// Variable-step: one update with the real elapsed time.
-			m_Unknown6d8 = fTime;
-			sm_UpdateClients(this);
-		}
-
-		sm_FlushObjectQueue(this);
-		RemoveDeadSounds();
-	}
-
-	if (g_ShowGameTime)
-		dsi_ServerError("Game time: %.2f", m_Time);
-
-	if (g_ShowTickCounts)
-	{
-		dsi_PrintStat("ILTServer::FindObjectsTouchingSphere ticks: %d", g_FindSphereTicks);
-		dsi_PrintStat("ILTServer::FindObjectsTouchingSphere count: %d", g_FindSphereCount);
-	}
-
-	return LTTRUE;
+LTBOOL CServerMgr::Update(long flags, float requested_time) {
+    ServerActivity activity(m_Lifetime);
+    const float rate = g_UpdatesPerSec;
+    if (!activity.available() || !m_Initialized || m_Terminating || m_EndingWorld || m_StartingWorld || m_Updating ||
+        !std::isfinite(requested_time) || !std::isfinite(rate) || rate <= 0 || rate > 10000 ||
+        !std::isfinite(m_Time) || !std::isfinite(m_Unknown6d8) || !std::isfinite(m_Unknown6bc) || !std::isfinite(m_Unknown6c0)) return LTFALSE;
+    const double adjusted = static_cast<double>(requested_time)+m_Unknown6b8;
+    if (!std::isfinite(adjusted) || std::fabs(adjusted) > std::numeric_limits<float>::max()) return LTFALSE;
+    const float time = static_cast<float>(adjusted);
+    ServerCallbackGuard operation(m_Lifetime);
+    auto interrupted = [&]() -> LTBOOL {
+        return operation.alive() && activity.available() && m_Initialized && m_bWorldLoaded && !m_Terminating ? LTTRUE : LTFALSE;
+    };
+    struct Updating {
+        CServerMgr* manager; ServerCallbackGuard guard;
+        ~Updating() { if (guard.alive()) manager->m_Updating = false; }
+    } updating{this,operation};
+    m_Updating = true;
+    try {
+        SetupGlobals();
+        ProcessThreadMessages();
+        if (!operation.unchanged()) return interrupted();
+        const double elapsed = static_cast<double>(time)-m_Unknown6d8;
+        if (!std::isfinite(elapsed)) return LTFALSE;
+        // Preserve the modern game's 10ms minimum tick interval. Network
+        // processing continues on every call, including paused/demo waits.
+        const bool paused = (flags & 1) || (m_ServerFlags & 1);
+        const bool demo_wait = (m_Unknown1a0 & 4) && !(m_Unknown1a0 & 8) && !m_Unknown6dc;
+        const bool tick = m_Unknown198 == 0 && !paused && !demo_wait && (elapsed >= .01 || elapsed < 0);
+        if (m_Unknown198 != 0 || paused || tick) m_Unknown6d8 = time;
+        m_Unknown6d4 = static_cast<float>(std::clamp(elapsed,-double(std::numeric_limits<float>::max()),double(std::numeric_limits<float>::max())));
+        m_NetMgr.Update(const_cast<char*>("Server: "),time,1);
+        if (!operation.unchanged()) return interrupted();
+        g_Unknown585a0 = 0; g_Unknown5872c = g_Unknown58728 = 0;
+        g_nIsectQueries = g_nIsectTime = g_FindSphereTicks = g_FindSphereCount = 0;
+        const auto packets = sm_ProcessPackets(this);
+        if (!operation.unchanged()) return interrupted();
+        if (packets) return LTFALSE;
+        if (m_Unknown198 == 0) {
+            if (tick) {
+                if (rate != m_UpdatesPerSec) {
+                    m_Unknown6c4 = 0; m_Unknown6c8 = m_Time;
+                    m_Unknown6bc = m_Unknown6c0; m_Unknown6d0 = 0;
+                }
+                m_UpdatesPerSec = rate;
+                const double inverse = 1.0/double(m_UpdatesPerSec);
+                const double previous = double(m_Unknown6bc)+double(m_Unknown6c4)*inverse;
+                const double updates = std::max(0.0,(double(time)-previous)/inverse);
+                // Preserve serialized counter widths without float conversion
+                // overflow or a multi-year counter rollover corrupting time.
+                if (updates > double(UINT32_MAX-m_Unknown6c4)) {
+                    m_Unknown6c4 = 0; m_Unknown6bc = time; m_Unknown6c0 = time;
+                } else {
+                    m_Unknown6c4 += static_cast<uint32>(updates);
+                    m_Unknown6c0 = static_cast<float>(double(m_Unknown6bc)+double(m_Unknown6c4)*inverse);
+                }
+                m_FrameTime = static_cast<float>(std::clamp(elapsed,.01,.2));
+                const double next_time = double(m_Time)+m_FrameTime;
+                if (!std::isfinite(next_time) || std::fabs(next_time) > std::numeric_limits<float>::max()) return LTFALSE;
+                m_Time = static_cast<float>(next_time);
+                if ((m_Unknown1a0 & 4) && !(m_Unknown1a0 & 8)) --m_Unknown6dc;
+                UpdateSounds(m_FrameTime);
+                if (!operation.unchanged()) return interrupted();
+                if (m_ClassMgr.m_pServerShell) m_ClassMgr.shell([&](IServerShell& shell) { shell.Update(m_FrameTime); });
+                if (!operation.unchanged()) return interrupted();
+                UpdateObjects();
+                if (!operation.unchanged()) return interrupted();
+                m_Unknown6d0 = std::bit_cast<int32>(std::bit_cast<uint32>(m_Unknown6d0)+uint32(1));
+                m_Unknown6d4 = 0;
+            }
+            sm_FlushObjectQueue(this);
+            if (!operation.unchanged()) return interrupted();
+            RemoveDeadSounds();
+            if (!operation.unchanged()) return interrupted();
+        } else {
+            // File downloads and client state still progress between worlds.
+            sm_UpdateClients(this);
+            if (!operation.unchanged()) return interrupted();
+        }
+        if (g_ShowGameTime) dsi_ServerError("Game time: %.2f",m_Time);
+        if (g_ShowTickCounts) {
+            dsi_ServerError("ILTServer::FindObjectsTouchingSphere ticks: %u",g_FindSphereTicks);
+            dsi_ServerError("ILTServer::FindObjectsTouchingSphere count: %u",g_FindSphereCount);
+        }
+        return LTTRUE;
+    } catch (const std::exception& error) {
+        nolf::platform::log("server update",error.what());
+        return LTFALSE;
+    }
 }
 
 // The seven packet handlers 0x10029ee7 installs. Four are already written
@@ -1529,13 +1111,13 @@ LTRESULT sm_GiveMessageToShell(CServerMgr* pMgr, ServerMessage* pMsg,
 // also closes it for /O2's, which is what cost this function there.
 void sm_ResetProfileCounters()
 {
-	memset(g_PacketHandlers, 0, 0x400);
+	std::fill(std::begin(g_PacketHandlers),std::end(g_PacketHandlers),nullptr);
 
 	g_PacketHandlers[6]  = sub_1002a0d0;
-	g_PacketHandlers[7]  = (PacketHandlerFn)sm_ReadClientCommands;
-	g_PacketHandlers[8]  = (PacketHandlerFn)sm_Unknown29f42;
+	g_PacketHandlers[7]  = [](CServerMgr* manager, ServerMessage* packet, Client* client) { return static_cast<int>(sm_ReadClientCommands(manager,packet,client)); };
+	g_PacketHandlers[8]  = [](CServerMgr* manager, ServerMessage* packet, Client* client) { return static_cast<int>(sm_Unknown29f42(manager,packet,client)); };
 	g_PacketHandlers[10] = sub_1002a0f2;
-	g_PacketHandlers[11] = (PacketHandlerFn)sm_GiveMessageToShell;
+	g_PacketHandlers[11] = [](CServerMgr* manager, ServerMessage* packet, Client* client) { return static_cast<int>(sm_GiveMessageToShell(manager,packet,client ? client->Handle() : nullptr)); };
 	g_PacketHandlers[9]  = sub_1002a167;
 	g_PacketHandlers[5]  = sub_1002a193;
 }
@@ -1568,175 +1150,73 @@ void sm_ResetProfileCounters()
 // after the m_nFrames store). Also probed for lithtech without effect: int
 // nLen, `sName + nLen`, a named pad count, `30 > nLen`; strlen written out
 // at each use is not CSE'd (969 bytes).
-void CServerMgr::UpdateObjects()
-{
-	char sName[32];
-#ifdef LT_SERVER_BUILD
-	CBaseCounter counter(0);
-#endif
-	LTLink* pCur;
-	LTObject* pObject;
-	CClassStats* pStats;
-	int i, j;
-	int nTotalObjects, nTotalUpdated;
-
-	// Reset the per-class frame counts, and the running averages every
-	// 600 frames.
-	for (i = 0; i < m_ClassMgr.m_nClasses; i++)
-	{
-		m_ClassMgr.m_pClassStats[i].m_Ticks = 0;
-		m_ClassMgr.m_pClassStats[i].m_nUpdated = 0;
-		m_ClassMgr.m_pClassStats[i].m_nObjects = 0;
-		m_ClassMgr.m_pClassStats[i].m_bPrinted = 0;
-		if (m_ClassMgr.m_pClassStats[i].m_nFrames >= 600)
-		{
-			m_ClassMgr.m_pClassStats[i].m_nFrames = 0;
-			m_ClassMgr.m_pClassStats[i].m_TotalTicks = 0;
-			m_ClassMgr.m_pClassStats[i].m_MaxTicks = 0;
-		}
-	}
-
-	// Run every active object's update, timing each one.
-	LTLink* pListHead = &m_List8dc.m_Head;
-	pCur = pListHead->m_pNext;
-	while (pCur != pListHead)
-	{
-		pObject = (LTObject*)pCur->m_pData;
-		pCur = pCur->m_pNext;
-
-		if (pObject->m_ChangeFlags & 0x38)
-			break;
-
-		if (pObject->m_ChangeFlags & 4)
-		{
-			// Count the object's update timer down; when it runs out, the
-			// deactivation flag goes up.
-			if (g_bAutoDeactivate)
-			{
-				SObjData* pSData = pObject->m_pSData;
-				if (pSData->m_UpdateTimer > 0.0f)
-				{
-					pSData->m_UpdateTimer -= m_FrameTime;
-					if (pObject->m_pSData->m_UpdateTimer <= 0.0f)
-						pObject->m_ChangeFlags |= 0x200;
-				}
-			}
-
-			pStats = pObject->m_pSData->m_pClass->m_Stats[m_ClassMgr.m_nIndex];
-
-			// lithtech.exe times nothing here: no counter is constructed and
-			// the update is a bare call (0x00473cc9 -> 0x004697e0), so the
-			// class tick counts it prints are always zero.
-#ifdef LT_SERVER_BUILD
-			cnt_StartCounter(&counter);
-			sm_UpdateObject(this, pObject);
-			pStats->m_Ticks += cnt_EndCounter(&counter);
-#else
-			sm_UpdateObject(this, pObject);
-#endif
-
-			pStats->m_nUpdated++;
-		}
-	}
-
-	if (g_ShowClassTicks)
-	{
-		// Census: how many objects of each class are in the world.
-		nTotalObjects = 0;
-		pCur = pListHead->m_pNext;
-		while (pCur != pListHead)
-		{
-			pObject = (LTObject*)pCur->m_pData;
-			pStats = pObject->m_pSData->m_pClass->m_Stats[m_ClassMgr.m_nIndex];
-			pStats->m_nObjects++;
-			nTotalObjects++;
-			pCur = pCur->m_pNext;
-		}
-
-		// Fold this frame into the running averages.
-		for (i = 0; i < m_ClassMgr.m_nClasses; i++)
-		{
-			pStats = &m_ClassMgr.m_pClassStats[i];
-			pStats->m_nFrames++;
-			pStats->m_TotalTicks += pStats->m_Ticks;
-			if (pStats->m_MaxTicks < pStats->m_Ticks)
-				pStats->m_MaxTicks = pStats->m_Ticks;
-		}
-
-		nTotalUpdated = 0;
-		g_TotalTicks = 0;
-
-		dsi_PrintString("------------------------- Class Tick Counts -------------------------------------");
-		dsi_PrintString("Class                (OBJECTS) Total Updated   (TICKS) Average    Max     Frame");
-		dsi_PrintString("---------------------------------------------------------------------------------");
-
-		// Selection sort by average ticks, printing as we go.
-		for (i = 0; i < m_ClassMgr.m_nClasses; i++)
-		{
-			CClassStats* pBest = LTNULL;
-
-			for (j = 0; j < m_ClassMgr.m_nClasses; j++)
-			{
-				pStats = &m_ClassMgr.m_pClassStats[j];
-				if (pStats->m_bPrinted == 0)
-				{
-					if (pStats->m_TotalTicks != 0)
-					{
-						if (!pBest)
-							pBest = pStats;
-
-						if (pStats->m_TotalTicks / pStats->m_nFrames <=
-						    pBest->m_TotalTicks / pBest->m_nFrames)
-						{
-							pBest = pStats;
-						}
-					}
-					else
-					{
-						// Never ticked: retire the class without a row.
-						pStats->m_bPrinted = 1;
-					}
-				}
-			}
-
-			if (pBest)
-			{
-				pBest->m_bPrinted = 1;
-
-				strncpy(sName, pBest->m_pClass->m_pClassName, 32);
-				sName[31] = 0;
-
-				uint32 nLen = strlen(sName);
-				if (nLen < 30)
-					memset(&sName[nLen], ' ', 30 - nLen);
-
-				dsi_PrintClassRow("%s| %3d |  %3d  |           %6d | %6d | %6d",
-					sName, pBest->m_nObjects, pBest->m_nUpdated,
-					pBest->m_TotalTicks / pBest->m_nFrames,
-					pBest->m_MaxTicks, pBest->m_Ticks);
-
-				g_TotalTicks += pBest->m_Ticks;
-				nTotalUpdated += pBest->m_nUpdated;
-			}
-		}
-
-		dsi_PrintString(" ");
-		dsi_PrintString("FRAME TOTALS:");
-		dsi_PrintFrameTotals("  (OBJECTS) Total: %d, Updated: %d,  (TICKS) %d",
-			nTotalObjects, nTotalUpdated, g_TotalTicks);
-		dsi_PrintString("---------------------------------------------------------------------------------");
-		dsi_PrintString(" ");
-	}
-	else
-	{
-		g_TotalTicks = 0;
-		for (i = 0; i < m_ClassMgr.m_nClasses; i++)
-		{
-			g_TotalTicks += m_ClassMgr.m_pClassStats[i].m_Ticks;
-			m_ClassMgr.m_pClassStats[i].m_nFrames = 0;
-			m_ClassMgr.m_pClassStats[i].m_TotalTicks = 0;
-		}
-	}
+void CServerMgr::UpdateObjects() {
+    ServerActivity activity(m_Lifetime);
+    if (!activity.available() || !m_Initialized || m_Terminating || m_EndingWorld) return;
+    struct Context { CServerMgr* manager; ServerCallbackGuard guard; } context{this,ServerCallbackGuard(m_Lifetime)};
+    for (int index = 0; index < m_ClassMgr.m_nClasses; ++index) {
+        auto& stats = m_ClassMgr.m_pClassStats[index];
+        stats.m_Ticks = stats.m_nUpdated = stats.m_nObjects = stats.m_bPrinted = 0;
+        if (stats.m_nFrames >= 600) stats.m_nFrames = stats.m_TotalTicks = stats.m_MaxTicks = 0;
+    }
+    if (!object_Visit(m_List8dc,[](void* pointer,LTObject& object) {
+        auto& context = *static_cast<Context*>(pointer);
+        if (!context.guard.unchanged()) return false;
+        auto& manager = *context.manager;
+        if (object.m_ChangeFlags & 0x38) return false;
+        if (!(object.m_ChangeFlags & 4) || !object.m_pSData) return true;
+        ObjectCallbackGuard actor(object);
+        if (g_bAutoDeactivate && object.m_pSData->m_UpdateTimer > 0) {
+            object.m_pSData->m_UpdateTimer -= manager.m_FrameTime;
+            if (object.m_pSData->m_UpdateTimer <= 0) object.m_ChangeFlags |= 0x200;
+        }
+        auto* definition = object.m_pSData->m_pClass;
+        CBaseCounter timer(0); timer.Start();
+        sm_UpdateObject(&manager,&object);
+        const auto ticks = timer.ReadRaw();
+        if (!context.guard.unchanged()) return false;
+        if (actor.unchanged() && definition && object.m_pSData->m_pClass == definition) {
+            auto* stats = static_cast<CClassStats*>(definition->m_pInternal[manager.m_ClassMgr.m_nIndex]);
+            if (stats) { stats->m_Ticks += ticks; ++stats->m_nUpdated; }
+        }
+        return true;
+    },&context) || !context.guard.unchanged()) return;
+    uint32 total_ticks = 0;
+    if (!g_ShowClassTicks) {
+        for (int index = 0; index < m_ClassMgr.m_nClasses; ++index) {
+            auto& stats = m_ClassMgr.m_pClassStats[index];
+            total_ticks += stats.m_Ticks; stats.m_nFrames = stats.m_TotalTicks = 0;
+        }
+        g_TotalTicks = std::bit_cast<int32>(total_ticks);
+        return;
+    }
+    std::size_t objects = 0;
+    auto* head = &m_List8dc.m_Head;
+    for (auto* link = head->m_pNext; link != head; link = link->m_pNext) {
+        auto* object = static_cast<LTObject*>(link->m_pData);
+        if (!object->m_pSData || !object->m_pSData->m_pClass) continue;
+        auto* stats = static_cast<CClassStats*>(object->m_pSData->m_pClass->m_pInternal[m_ClassMgr.m_nIndex]);
+        if (stats) { ++stats->m_nObjects; ++objects; }
+    }
+    struct Row { std::string name; uint32 objects, updated, average, maximum, ticks; };
+    std::vector<Row> rows;
+    uint32 updated = 0;
+    for (int index = 0; index < m_ClassMgr.m_nClasses; ++index) {
+        auto& stats = m_ClassMgr.m_pClassStats[index];
+        ++stats.m_nFrames; stats.m_TotalTicks += stats.m_Ticks;
+        stats.m_MaxTicks = std::max(stats.m_MaxTicks,stats.m_Ticks);
+        if (!stats.m_TotalTicks) continue;
+        rows.push_back({stats.m_pClassDef->m_ClassName,stats.m_nObjects,stats.m_nUpdated,
+            stats.m_TotalTicks/stats.m_nFrames,stats.m_MaxTicks,stats.m_Ticks});
+        total_ticks += stats.m_Ticks; updated += stats.m_nUpdated;
+    }
+    g_TotalTicks = std::bit_cast<int32>(total_ticks);
+    std::stable_sort(rows.begin(),rows.end(),[](const Row& first,const Row& second) { return first.average < second.average; });
+    // No registry pointers survive into diagnostic callbacks.
+    dsi_PrintString("Class                (OBJECTS) Updated   Average ticks   Max   Frame");
+    for (const auto& row : rows)
+        dsi_ServerError("%-30.30s| %3u | %3u | %6u | %6u | %6u",row.name.c_str(),row.objects,row.updated,row.average,row.maximum,row.ticks);
+    dsi_ServerError("FRAME TOTALS: objects %zu, updated %u, ticks %u",objects,updated,total_ticks);
 }
 
 void CServerMgr::UpdateSounds(float fFrameTime)
@@ -1751,70 +1231,19 @@ void CServerMgr::UpdateSounds(float fFrameTime)
 		LTLink* pNext = pCur->m_pNext;
 
 		// A killed sound stops timing unless something still owns it.
-		if (!pSound->m_bKill || pSound->m_Unknown28)
+		if (!pSound->m_bKill || pSound->m_ListenerCount)
 			pSound->UpdateTimer(fFrameTime);
 
 		pCur = pNext;
 	}
 }
 
-void sm_UpdateClients(CServerMgr* pMgr)
-{
-	LTLink* pListHead;
-	LTLink* pCur;
-
-	pListHead = &pMgr->m_ClientList.m_Head;
-	pCur = pListHead->m_pNext;
-	while (pCur != pListHead)
-	{
-		sm_UpdateClient(pMgr, (Client*)pCur->m_pData);
-		pCur = pCur->m_pNext;
-	}
-}
-
-// 0x10032dab — a sound instance lets go of its slot. The manager's table
-// entry goes back first; the mixer handle is simply forgotten.
-//
-// Defined above its first caller and `inline`: lithtech.exe has NO standalone
-// copy of this body and expands it at all three call sites -- here,
-// sm_FlushList44 (0x004765a8, the `mov 0xc(%esi),%eax` / `call 0x00473130`
-// pair inline) and sm_EndWorldD -- while server.dll keeps 0x10032dab and
-// calls it at every one. A member defined out-of-class is never an /Ob1
-// candidate and VC6's inliner only looks forward, so both the keyword and
-// the position are needed; /Os declines the 34-byte body, /Ot takes it.
-// (`m_pUnknown0c` is uint16*, so the overload picked is servermgr.h's
-// `sm_Free28(CServerMgr*, void*)` here exactly as it was further down.)
-inline void SoundInstance::Term()
-{
-	if (m_pUnknown0c)
-		sm_Free28(g_pServerMgr, m_pUnknown0c);
-
-	m_hSample = LTNULL;
-	m_pUnknown0c = LTNULL;
-}
-
-// 0x10029b24 — the object a sound is following. An attached sound holds a
-// reference record and reads the object out of it; a client-local one holds
-// the object directly. Anything else is not following an object at all.
-//
-// `inline` and defined here, above RemoveDeadSounds, for the same reason as
-// Term() just above: lithtech.exe has no standalone copy and expands it in
-// RemoveDeadSounds (0x474166: `testb $0x8,0x34(%esi)`, `mov 0x38(%esi)`,
-// `mov 0x4(%eax)`, no call), while server.dll keeps 0x10029b24 and calls it.
-inline LTObject* SoundInstance::GetObject()
-{
-	if (m_PlaySoundFlags & PLAYSOUND_ATTACHED)
-	{
-		if (!m_pObjectRef)
-			return LTNULL;
-
-		return m_pObjectRef->m_pObject;
-	}
-
-	if (m_PlaySoundFlags & PLAYSOUND_CLIENTLOCAL)
-		return m_pObject;
-
-	return LTNULL;
+void sm_UpdateClients(CServerMgr* manager) {
+    struct Context { CServerMgr* manager; ServerCallbackGuard guard; } context{manager,ServerCallbackGuard(manager->m_Lifetime)};
+    client_Visit(manager->m_ClientList,[](void* context, Client& client) {
+        auto& state = *static_cast<Context*>(context);
+        if (state.guard.unchanged()) sm_UpdateClient(state.manager,&client);
+    },&context);
 }
 
 void CServerMgr::RemoveDeadSounds()
@@ -1828,7 +1257,7 @@ void CServerMgr::RemoveDeadSounds()
 
 		LTLink* pNext = pCur->m_pNext;
 
-		if (pSound->m_bKill && pSound->m_Unknown2c == 0 && !pSound->m_Unknown28)
+		if (pSound->m_bKill && pSound->m_Unknown2c == 0 && !pSound->m_ListenerCount)
 		{
 			// An attached sound tells its object it is going away.
 			if (pSound->m_PlaySoundFlags & PLAYSOUND_ATTACHED)
@@ -1845,34 +1274,36 @@ void CServerMgr::RemoveDeadSounds()
 
 			pSound->Term();
 
-			// Hand the instance straight back to its bank.
-			*(void**)pSound = m_Bank28.m_pFreeList;
-			m_Bank28.m_pFreeList = pSound;
+			m_SoundInstances.Free(pSound);
 		}
 
 		pCur = pNext;
 	}
 }
 
-void sm_DrainObjectQueue(CServerMgr* pMgr)
+// Return a queue link before running game code: destructors may drain or
+// append to this same queue, and may retire its other object identities.
+static void sm_UnqueueObject(CServerMgr* manager, LTObject* object) {
+    auto* head = &manager->m_Link83c;
+    for (auto* link = head->m_pNext; link != head;) {
+        auto* next = link->m_pNext;
+        if (link->m_pData == object) {
+            dl_Remove(link); link->m_pPrev = SM_FREE_LINKS; SM_FREE_LINKS = link;
+        }
+        link = next;
+    }
+}
+void sm_DrainObjectQueue(CServerMgr* manager)
 {
-	LTLink* pCur;
-
-	pCur = pMgr->m_Link83c.m_pNext;
-	while (pCur != &pMgr->m_Link83c)
-	{
-		LTObject* pObject = (LTObject*)pCur->m_pData;
-		sm_RemoveObjectFromWorld(pMgr, pObject->m_pSData->m_pBaseClass);
-
-		LTLink* pNext = pCur->m_pNext;
-
-		// The spent link goes back to the global pool through its prev slot.
-		dl_Remove(pCur);
-		pCur->m_pPrev = SM_FREE_LINKS;
-		SM_FREE_LINKS = pCur;
-
-		pCur = pNext;
-	}
+    ServerCallbackGuard server(manager->m_Lifetime);
+    while (manager->m_Link83c.m_pNext != &manager->m_Link83c) {
+        auto* link = manager->m_Link83c.m_pNext;
+        auto* object = static_cast<LTObject*>(link->m_pData);
+        sm_UnqueueObject(manager,object);
+        if (manager->m_Unknown390.m_Allocated.contains(object) && object->m_pSData && object->m_pSData->m_pBaseClass)
+            sm_RemoveObjectFromWorld(manager,object->m_pSData->m_pBaseClass);
+        if (!server.unchanged()) return;
+    }
 }
 
 void sm_ClearChangedObjects(CServerMgr* pMgr)
@@ -1927,7 +1358,7 @@ void sm_ApplyChangeFlags(CServerMgr* pMgr)
 			pObject = pMgr->m_pChangedObjects;
 			while (pObject)
 			{
-				pClient->m_pObjInfos[pObject->m_ObjectID].m_ChangeFlags |=
+				pClient->m_ObjInfos[pObject->m_ObjectID].m_ChangeFlags |=
 					pObject->m_pSData->m_ClientChangeFlags;
 				pObject = pObject->m_pSData->m_pNextChanged;
 			}
@@ -1944,8 +1375,8 @@ void sm_ApplyChangeFlags(CServerMgr* pMgr)
 			pSound = pMgr->m_pChangedSounds;
 			while (pSound)
 			{
-				uint32 nIndex = ((uint32*)pSound->m_pUnknown0c)[2];
-				pClient->m_pObjInfos[(uint16)nIndex].m_ChangeFlags |= pSound->m_Unknown2c;
+				uint32 nIndex = pSound->m_pUnknown0c->m_nIndex;
+				pClient->m_ObjInfos[(uint16)nIndex].m_ChangeFlags |= pSound->m_Unknown2c;
 				pSound = pSound->m_pNextChanged;
 			}
 		}
@@ -1957,16 +1388,12 @@ void sm_ApplyChangeFlags(CServerMgr* pMgr)
 
 void sm_SendClientUpdates(CServerMgr* pMgr)
 {
-	LTLink* pListHead;
-	LTLink* pCur;
-
-	pListHead = &pMgr->m_ClientList.m_Head;
-	pCur = pListHead->m_pNext;
-	while (pCur != pListHead)
-	{
-		sm_WriteClientUpdate(pMgr, (Client*)pCur->m_pData);
-		pCur = pCur->m_pNext;
-	}
+    struct Context { CServerMgr* manager; ServerCallbackGuard guard; } context{pMgr,ServerCallbackGuard(pMgr->m_Lifetime)};
+    client_Visit(pMgr->m_ClientList,[](void* opaque, Client& client) {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.guard.unchanged()) sm_WriteClientUpdate(state.manager,&client);
+    },&context);
+    if (!context.guard.unchanged()) return;
 
 	pMgr->m_Unknown7fc = 0;
 	pMgr->m_Unknown800 = 0;
@@ -1974,83 +1401,56 @@ void sm_SendClientUpdates(CServerMgr* pMgr)
 
 void sm_FlushObjectQueue(CServerMgr* pMgr)
 {
+	ServerCallbackGuard operation(pMgr->m_Lifetime);
 	sm_UpdateClients(pMgr);
+	if (!operation.unchanged()) return;
 	sm_ApplyChangeFlags(pMgr);
 
 	// Processing a queued object can queue more, so drain until dry.
-	while (pMgr->m_Link83c.m_pNext != &pMgr->m_Link83c)
+	while (pMgr->m_Link83c.m_pNext != &pMgr->m_Link83c) {
 		sm_DrainObjectQueue(pMgr);
+		if (!operation.unchanged()) return;
+	}
 
 	sm_SendClientUpdates(pMgr);
 }
 
-void sm_UpdateClient(CServerMgr* pMgr, Client* pClient)
-{
-	if (pClient->m_State == 1)
-		sm_SetClientState(pMgr, pClient, 3);
-	else if (pClient->m_State == 2)
-		sm_UpdateClientState2(pMgr, pClient);
-
-	sm_FlushClientPackets(pMgr, pClient);
+void sm_UpdateClient(CServerMgr* manager, Client* client) {
+    if (!client || client->m_Removing) return;
+    const auto lifetime = client->m_Lifetime;
+    ServerCallbackGuard server(manager->m_Lifetime);
+    if (client->m_State == 1) sm_SetClientState(manager,client,3);
+    else if (client->m_State == 2) sm_UpdateClientState2(manager,client);
+    if (server.unchanged() && *lifetime && !client->m_Removing) sm_FlushClientPackets(manager,client);
 }
 
-int sm_ProcessPackets(CServerMgr* pMgr)
-{
-	CMessageRef msg;
-	CAbstractIO* pIO;
-	int nResult;
-
-	msg.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
-	if (pIO)
-		pIO->Release();
-
-	pMgr->m_NetMgr.StartGettingPackets();
-
-	while (pMgr->m_NetMgr.GetPacket(msg.m_pMsg))
-	{
-		int nPacketID = msg.m_pMsg->m_pData[0] & 0x3f;
-
-		// The handler SLOT, not the index, is what the loop keeps: both
-		// shipped builds materialise `&g_PacketHandlers[nPacketID]` in a
-		// callee-saved register and reach the handler through it --
-		// `lea 0x100587ac(,%eax,4),%esi ... call *(%esi)` at 0x10029e65 /
-		// 0x10029e88, and `lea 0x4b44bc(,%edx,4),%edi ... call *(%edi)` at
-		// 0x00468e92 / 0x00468eb5. Indexing the array twice gets there at
-		// /O1 (the address is the common subexpression either way, which is
-		// why server.dll already matched) but NOT at /O2, where /Ot keeps
-		// the INDEX in edi instead and re-indexes at the call. Naming the
-		// slot leaves only one candidate.
-		PacketHandlerFn* ppHandler = &g_PacketHandlers[nPacketID];
-
-		if (*ppHandler)
-		{
-			Client* pClient;
-			if (msg.m_pMsg->m_pConnection)
-				pClient = sm_FindClientByConnection(pMgr, msg.m_pMsg->m_pConnection);
-			else
-				pClient = LTNULL;
-
-			nResult = (*ppHandler)(pMgr, msg.m_pMsg, pClient);
-			if (nResult)
-			{
-#ifdef NOLFSRC_DEBUG
-				NOLFSRC_LOG(("packet %d: its handler failed (%d), the server stops", nPacketID, nResult));
-#endif
-				pMgr->m_NetMgr.EndGettingPackets();
-				return nResult;
-			}
-		}
-		else
-		{
-			// No handler: hand the raw packet to its client, if we know one.
-			Client* pClient = sm_FindClientByConnection(pMgr, msg.m_pMsg->m_pConnection);
-			if (pClient)
-				xfer_HandleMessage((CClientFiles*)pClient->m_pUnknown18C, msg.m_pMsg);
-		}
-	}
-
-	pMgr->m_NetMgr.EndGettingPackets();
-	return 0;
+int sm_ProcessPackets(CServerMgr* manager) {
+    ServerCallbackGuard operation(manager->m_Lifetime);
+    CMessageRef message;
+    CAbstractIO* io = nullptr;
+    message.Init(msg_AllocPacket(&io,0x1000,0x1000));
+    if (io) io->Release();
+    if (!message.m_pMsg) return 1;
+    manager->m_NetMgr.StartGettingPackets();
+    struct Finish {
+        CServerMgr* manager; ServerCallbackGuard guard;
+        ~Finish() { if (guard.alive()) manager->m_NetMgr.EndGettingPackets(); }
+    } finish{manager,operation};
+    while (manager->m_NetMgr.GetPacket(message.m_pMsg)) {
+        if (!operation.unchanged()) return 1;
+        if (!message.m_pMsg->m_DataLen) continue;
+        const auto packet_id = message.m_pMsg->m_pData[0] & 0x3f;
+        auto* client = message.m_pMsg->m_pConnection ? sm_FindClientByConnection(manager,message.m_pMsg->m_pConnection) : nullptr;
+        if (auto handler = g_PacketHandlers[packet_id]) {
+            const auto result = handler(manager,message.m_pMsg,client);
+            if (!operation.unchanged()) return 1;
+            if (result) return result;
+        } else if (client) {
+            xfer_HandleMessage(client->m_FileTransfer.get(),message.m_pMsg);
+            if (!operation.unchanged()) return 1;
+        }
+    }
+    return operation.unchanged() ? 0 : 1;
 }
 
 Client* sm_FindClientByConnection(CServerMgr* pMgr, NetConnection* pConn)
@@ -2068,36 +1468,26 @@ Client* sm_FindClientByConnection(CServerMgr* pMgr, NetConnection* pConn)
 	return LTNULL;
 }
 
-int sm_SetClientState(CServerMgr* pMgr, Client* pClient, int nState)
-{
-	if (pClient->m_State == nState)
-		return 1;
-
-	if (nState == 3)
-	{
-		// Entering the world can be refused.
-		if (sm_PrepClientEnterWorld(pMgr, pClient))
-		{
-			sm_ClientEnterWorld2(pMgr, pClient);
-			return 1;
-		}
-
-		return 0;
-	}
-
-	if (pClient->m_State == 3)
-		sm_ClientExitWorld(pMgr, pClient);
-
-	pClient->m_State = nState;
-	return 1;
+int sm_SetClientState(CServerMgr* manager, Client* client, int state) {
+    if (!manager || !client) return 0;
+    if (client->m_State == state) return 1;
+    const auto lifetime = client->m_Lifetime;
+    const auto previous = client->m_State;
+    if (state == 3) {
+        if (client->m_Removing || !sm_PrepClientEnterWorld(manager,client)) return 0;
+        const auto result = sm_ClientEnterWorld2(manager,client);
+        return *lifetime && result == LT_OK;
+    }
+    if (previous == 3) sm_ClientExitWorld(manager,client);
+    if (!*lifetime) return 0;
+    if (client->m_State == previous) client->m_State = state;
+    return 1;
 }
 
 // Both defined at the foot of this file, under the signatures the shipped
 // bodies actually have rather than the ones servermgr.h declares.
 LTBOOL sm_FinishUpdatePacket(CUpdateContext* pCtx, class ServerMessage* pMsg,
                              int nA, int nThreshold);                       // 0x100278ad
-void   sm_VisGatherObjects(LTLink* pListHead, LTObject*** pppList,
-                           uint32* pnCount);                                // 0x100283ff
 
 // 0x100285de — whether this client's update can be skipped this frame: a
 // backed-up queue either way, or the net layer saying it is saturated.
@@ -2162,24 +1552,6 @@ static int  vq_Accept(void* pUser, void* pObject);
 // back-to-back exactly as shipped and only the radius store gets fillers.
 // Statement order is *not* the lever -- moving the radius assignment
 // anywhere in the list produces identical bytes either way.
-inline CVisQuery::CVisQuery()
-{
-	m_Position.Init();
-
-	m_Radius = 0.0f;
-
-	m_Fn1 = vq_Ignore;
-	m_Fn2 = LTNULL;
-
-	m_pUser = LTNULL;
-	m_pFn20 = vq_IgnoreToo;
-
-	m_Unknown00 = 0;
-
-	m_pFn24 = vq_Accept;
-	m_Unknown28 = 0;
-}
-
 #ifndef LT_SERVER_BUILD
 // sm_WriteObjectUpdate's body, `inline` for lithtech.exe (see the note over
 // sub_10027918 further down). Defined HERE, above both of its callers,
@@ -2202,30 +1574,15 @@ inline void sm_WriteObjectUpdateInline(CUpdateContext* pCtx, LTObject* pObject,
 	if (pInfo->m_ChangeFlags & 0x1000)
 		return;
 
-	if (g_pFillIDList->m_nIDs >= g_pFillIDList->m_nMaxIDs)
-	{
-		uint16* pNew = (uint16*)dalloc(
-			(g_pFillIDList->m_nMaxIDs + 200) * sizeof(uint16));
-
-		memcpy(pNew, g_pFillIDList->m_pIDs,
-			g_pFillIDList->m_nIDs * sizeof(uint16));
-
-		dfree(g_pFillIDList->m_pIDs);
-
-		g_pFillIDList->m_pIDs = pNew;
-		g_pFillIDList->m_nMaxIDs += 200;
-	}
-
-	g_pFillIDList->m_pIDs[g_pFillIDList->m_nIDs] = pObject->m_ObjectID;
-	g_pFillIDList->m_nIDs++;
+	if (!g_pFillIDList->Append(pObject->m_ObjectID)) return;
 
 	nSize = 100;
 
 	nFlags = pInfo->m_ChangeFlags;
 
-	if ((nFlags & 1) && pObject->m_pSData->m_Unknown2c)
+	if ((nFlags & 1) && pObject->m_pSData->m_SFXMessage.m_pMsg)
 	{
-		nSize = ((ServerMessage*)pObject->m_pSData->m_Unknown2c)->m_Unknown34
+		nSize = ((ServerMessage*)pObject->m_pSData->m_SFXMessage.m_pMsg)->m_Unknown34
 			+ 100;
 	}
 
@@ -2347,16 +1704,17 @@ void sm_WriteClientUpdate(CServerMgr* pMgr, Client* pClient)
 
 	ctx.m_pMgr = pMgr;
 	ctx.m_pClient = pClient;
+    ctx.m_ClientLifetime = pClient->m_Lifetime;
 
 	{
 		CAbstractIO* pIO;
-		((CMsgCursorView*)&ctx.m_Cursors[1])->Init(ctx.m_Msg1.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000)));
+		ctx.m_Cursors[1].Init(ctx.m_Msg1.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000)));
 		if (pIO)
 			pIO->Release();
 	}
 	{
 		CAbstractIO* pIO;
-		((CMsgCursorView*)&ctx.m_Cursors[0])->Init(ctx.m_Msg2.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000)));
+		ctx.m_Cursors[0].Init(ctx.m_Msg2.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000)));
 		if (pIO)
 			pIO->Release();
 	}
@@ -2374,9 +1732,9 @@ void sm_WriteClientUpdate(CServerMgr* pMgr, Client* pClient)
 	ClientIDList* pOldList = &pClient->m_IDLists[pClient->m_CurIDList];
 	ClientIDList* pNewList = &pClient->m_IDLists[pClient->m_CurIDList == 0];
 	g_pFillIDList = pNewList;
-	for (i = 0; i < pOldList->m_nIDs; i++)
-		pClient->m_pObjInfos[pOldList->m_pIDs[i]].m_ChangeFlags &= ~0x1000;
-	pNewList->m_nIDs = 0;
+	for (i = 0; i < pOldList->m_IDs.size(); i++)
+		pClient->m_ObjInfos[pOldList->m_IDs[i]].m_ChangeFlags &= ~0x1000;
+	pNewList->Clear();
 
 #ifdef LT_SERVER_BUILD
 	cnt_StartCounter(&counter2);
@@ -2386,7 +1744,6 @@ void sm_WriteClientUpdate(CServerMgr* pMgr, Client* pClient)
 	query.m_Position = pClient->m_Position;
 	query.m_Radius = 10000.0f;
 	query.m_Fn1 = sm_VisCallbackA;
-	query.m_Fn2 = (int (*)(void*, void*))sm_VisGatherObjects;
 	query.m_pUser = &ctx;
 	((IObjectQuery*)&pMgr->m_Unknown210)->FindObjects(&query);
 
@@ -2425,14 +1782,14 @@ void sm_WriteClientUpdate(CServerMgr* pMgr, Client* pClient)
 	}
 
 	if (pViewed)
-		pViewed->m_pSData->m_pBaseClass->EngineMessageFn(MID_GETFORCEUPDATEOBJECTS, &forceUpdate, 0.0f);
+		pMgr->m_ClassMgr.message(pViewed->m_pSData->m_pBaseClass,MID_GETFORCEUPDATEOBJECTS, &forceUpdate, 0.0f);
 
 	for (i = 0; i < forceUpdate.m_nObjects; i++)
 	{
 		LTObject* pObject = (LTObject*)forceUpdate.m_Objects[i];
 		if (pObject)
 		{
-			CObjInfo* pInfo = &pClient->m_pObjInfos[pObject->m_ObjectID];
+			CObjInfo* pInfo = &pClient->m_ObjInfos[pObject->m_ObjectID];
 			if (!(pInfo->m_ChangeFlags & 0x1000))
 #ifdef LT_SERVER_BUILD
 				sm_WriteObjectUpdate(&ctx, pObject, pInfo);
@@ -2442,21 +1799,20 @@ void sm_WriteClientUpdate(CServerMgr* pMgr, Client* pClient)
 		}
 	}
 
-	// Flush the client's queued messages into the guaranteed stream.
-	pCur = pClient->m_List3CC.m_Head.m_pNext;
-	while (pCur != &pClient->m_List3CC.m_Head)
-	{
-		LTLink* pNext = pCur->m_pNext;
-		CQueuedMsg* pRec = (CQueuedMsg*)pCur->m_pData;
-
-		sm_FinishUpdatePacket(&ctx, ctx.m_Msg1.m_pMsg, 8, 0x23);
-		sm_WriteQueuedMessage(pMgr, pRec, pClient, ctx.m_Msg1.m_pMsg);
-
-		dl_RemoveAt(&pClient->m_List3CC, pCur);
-		pRec->Release();
-
-		pCur = pNext;
-	}
+    // Keep the batch alive across sends and retain unsent records for retry.
+    std::vector<std::shared_ptr<const SoundRecord>> queued;
+    try { queued = pClient->m_QueuedSounds; }
+    catch (const std::bad_alloc&) { return; }
+    const auto client_lifetime = pClient->m_Lifetime;
+    for (auto it = queued.rbegin(); it != queued.rend(); ++it) {
+        if (!*client_lifetime || pClient->m_Removing || pClient->m_State != 3) return;
+        if (std::find(pClient->m_QueuedSounds.begin(),pClient->m_QueuedSounds.end(),*it) == pClient->m_QueuedSounds.end()) continue;
+        sm_FinishUpdatePacket(&ctx,ctx.m_Msg1.m_pMsg,8,0x23);
+        if (!*client_lifetime || pClient->m_Removing || pClient->m_State != 3) return;
+        if (sound_WriteQueued(**it,*pClient,*ctx.m_Msg1.m_pMsg,pMgr->m_World.PositionReference()) != LT_OK) return;
+        const auto sent = std::find(pClient->m_QueuedSounds.begin(),pClient->m_QueuedSounds.end(),*it);
+        if (sent != pClient->m_QueuedSounds.end()) pClient->m_QueuedSounds.erase(sent);
+    }
 
 	sm_WriteRemovedObjects(&ctx, ctx.m_Msg1.m_pMsg);
 	sm_FinishUpdatePacket(&ctx, ctx.m_Msg1.m_pMsg, 8, 0x10);
@@ -2533,29 +1889,36 @@ LTRESULT sm_RemoveObjectFromSky(CServerMgr* pMgr, LTObject* pObject)
 
 LTRESULT sm_RemoveObjectFromWorld(CServerMgr* pMgr, BaseClass* pClass)
 {
+    if (!pMgr || !pClass) return LT_INVALIDPARAMS;
 	LTObject* pObject = (LTObject*)pClass->m_hObject;
 	if (!pObject)
 		RETURN_ERROR(1, "sm_RemoveObjectFromWorld", LT_ERROR);
 
+    if (!pMgr->m_Unknown390.m_Allocated.contains(pObject)) return LT_INVALIDPARAMS;
+    ServerCallbackGuard server(pMgr->m_Lifetime);
+    ObjectCallbackGuard lifetime(*pObject);
+    sm_UnqueueObject(pMgr,pObject);
 	if (pObject->m_pSData)
 	{
+        if (pObject->m_pSData->m_Removing) return LT_OK;
+        if (pObject->m_pSData->m_pOwningClient) return LT_TRIEDTOREMOVECLIENTOBJECT;
+        const auto previous_flags = pObject->m_ChangeFlags;
+        pObject->m_pSData->m_Removing = true;
 		pObject->m_ChangeFlags |= 1;
 
 		// Unless the world is going down whole, attached children get told.
 		if (~pMgr->m_Unknown1a0 & 1)
 		{
-			Attachment* pAttachment = pObject->m_pAttachments;
-			while (pAttachment)
-			{
-				LTObject* pChild = sm_FindObjectByID(pMgr, pAttachment->m_nChildID);
-				if (pChild)
-				{
-					pChild->m_pSData->m_pBaseClass->EngineMessageFn(
-						MID_PARENTATTACHMENTREMOVED, LTNULL, 0.0f);
-				}
-
-				pAttachment = pAttachment->m_pNext;
-			}
+            if (!am_VisitChildren(&pMgr->m_Unknown390,pObject,[](void* context,LTObject& child) {
+                if (child.m_pSData && child.m_pSData->m_pBaseClass)
+                    static_cast<CServerMgr*>(context)->m_ClassMgr.message(child.m_pSData->m_pBaseClass,MID_PARENTATTACHMENTREMOVED,nullptr,0);
+                return true;
+            },pMgr)) {
+                pObject->m_pSData->m_Removing = false;
+                pObject->m_ChangeFlags = previous_flags;
+                return LT_OUTOFMEMORY;
+            }
+            if (!server.unchanged() || !lifetime.same_data()) return LT_OK;
 		}
 
 		if (pObject->m_ChangeFlags & 0x100)
@@ -2566,10 +1929,14 @@ LTRESULT sm_RemoveObjectFromWorld(CServerMgr* pMgr, BaseClass* pClass)
 		}
 
 		// A client's own object refuses to go.
-		if (pObject->m_pSData->m_pOwningClient)
-			RETURN_ERROR(1, "sm_RemoveObjectFromWorld", LT_TRIEDTOREMOVECLIENTOBJECT);
+		if (pObject->m_pSData->m_pOwningClient) {
+            pObject->m_pSData->m_Removing = false;
+            pObject->m_ChangeFlags = (pObject->m_ChangeFlags & ~1u) | (previous_flags & 1u);
+            return LT_TRIEDTOREMOVECLIENTOBJECT;
+        }
 
 		sm_BreakAttachments(pMgr, pObject, 0, 1);
+        if (!server.unchanged() || !lifetime.same_data()) return LT_OK;
 
 		if (pObject->m_pSData->m_Unknown28)
 		{
@@ -2582,20 +1949,31 @@ LTRESULT sm_RemoveObjectFromWorld(CServerMgr* pMgr, BaseClass* pClass)
 
 		obj_UnlinkTrackersA(pObject);
 		obj_UnlinkTrackersB(pObject);
-		obj_FreeData(pObject);
+		obj_ReleaseMemory(pObject);
+		// Trackers the game added live in the game object destroyed next.
+		if (pObject->m_ObjectType == OT_MODEL)
+			static_cast<ModelInstance*>(pObject)->DetachExternalTrackers();
 		sm_ObjectRemoved(pMgr, pObject);
+        if (!server.unchanged() || !lifetime.alive()) return LT_OK;
 
 		pObject->m_pSData = LTNULL;
 	}
 
 	sm_RemoveFromWorldTree(pMgr, pObject);
-	g_Unknown58bec -= 0x1fc;
+	g_Unknown58bec -= sizeof(LTObject);
+	sm_RemoveObjectAttachments(pMgr,pObject);
 
 	return un390_RemoveObject(&pMgr->m_Unknown390, pObject);
 }
 
 LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 {
+    if (!pMgr || !pClient || pClient->m_Removing || pClient->m_State != 2) return LT_INVALIDPARAMS;
+    ServerActivity activity(pMgr->m_Lifetime);
+    if (!activity.available() || pMgr->m_Terminating || pMgr->m_EndingWorld) return LT_NOTINITIALIZED;
+    ServerCallbackGuard operation(pMgr->m_Lifetime);
+    const auto client_lifetime = pClient->m_Lifetime;
+    const auto unchanged = [&] { return operation.unchanged() && *client_lifetime && !pClient->m_Removing && pClient->m_State == 2; };
 	CMessageRef msg;
 	LTLink* pListHead;
 	LTLink* pCur;
@@ -2612,13 +1990,14 @@ LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 			if (pIO)
 				pIO->Release();
 		}
+		if (!msg.m_pMsg) return LT_OUTOFMEMORY;
 
 		for (i = 0; i < pMgr->m_nFileTrees; i++)
 		{
-			CFileList* pList = pMgr->m_pFileTrees[i]->m_pList;
-			for (j = 0; j < pList->m_nFiles; j++)
+			CFileList* pList = pMgr->m_pFileTrees[i]->m_pWorldBsp;
+			for (j = 0; j < pList->m_nChunks; j++)
 			{
-				if (((CFileRec*)(pList->m_pFiles + j * 0x24))->m_nFlags)
+				if (pList->m_pChunks[j].m_Flags)
 				{
 					{
 						ServerMessage* pMsg = msg.m_pMsg;
@@ -2627,16 +2006,20 @@ LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 					}
 					msg.m_pMsg->WriteWord((uint16)i);
 					msg.m_pMsg->WriteWord((uint16)j);
-					msg.m_pMsg->WriteByte((uint8)((CFileRec*)(pList->m_pFiles + j * 0x24))->m_nFlags);
+					msg.m_pMsg->WriteByte((uint8)pList->m_pChunks[j].m_Flags);
 					sm_SendToClient(pMgr, pClient, 0x13, msg.m_pMsg, 0, 0x80);
+					if (!unchanged()) return LT_ERROR;
 				}
 			}
 		}
 
 		sm_SendWorldInfo(pMgr, pClient);
-		pClient->m_Unknown10C = 0;
+		if (!unchanged()) return LT_ERROR;
+		pClient->m_nLightChanges = 0;
 		sm_SendObjectInfo2(pMgr, pClient);
+		if (!unchanged()) return LT_ERROR;
 		sm_SendSkyInfo(pMgr, pClient);
+		if (!unchanged()) return LT_ERROR;
 
 		pClient->m_Unknown3BC = 2;
 	}
@@ -2650,34 +2033,28 @@ LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 			if (pIO)
 				pIO->Release();
 		}
+		if (!msg.m_pMsg) return LT_OUTOFMEMORY;
 
-		BaseClass* pClass = pMgr->m_ClassMgr.m_pServerShell->OnClientEnterWorld(
-			(HCLIENT)pClient, pClient->m_pClientData, pClient->m_ClientDataLen);
-		if (!pClass)
-		{
-			dsi_PrintString("Error: ServerShell::OnClientEnterWorld returned LTNULL!");
-			return LT_ERROR;
-		}
+        if (pClient->m_EnteringWorld || pClient->m_ExitingWorld || !pMgr->m_ClassMgr.m_pServerShell) return LT_ERROR;
+        const auto lifetime = pClient->m_Lifetime;
+        const auto state = pClient->m_State;
+        const auto data = pClient->RetainData();
+        pClient->m_EnteringWorld = true;
+        struct Entry {
+            Client* client; std::shared_ptr<bool> lifetime;
+            ~Entry() { if (*lifetime) client->m_EnteringWorld = false; }
+        } entry{pClient,lifetime};
+        BaseClass* pClass = pMgr->m_ClassMgr.shell([&](IServerShell& shell) { return shell.OnClientEnterWorld(
+            pClient->Handle(), data->empty() ? nullptr : data->data(), static_cast<uint32>(data->size())); });
+        if (!operation.unchanged() || !*lifetime) return LT_ERROR;
+        if (pClient->m_Removing || pClient->m_State != state || !pClass || !pMgr->m_ClassMgr.owns(pClass)) return LT_ERROR;
+        auto* object = pClass->m_hObject;
+        if (!pMgr->m_Unknown390.m_Allocated.contains(object) || !object->m_pSData ||
+            (object->m_pSData->m_pOwningClient && object->m_pSData->m_pOwningClient != pClient)) return LT_ERROR;
+        pClient->m_pUnknown3AC = object;
+        object->m_pSData->m_pOwningClient = pClient;
 
-		pClient->m_pUnknown3AC = (LTObject*)pClass->m_hObject;
-		pClient->m_pUnknown3AC->m_pSData->m_pOwningClient = pClient;
-
-		// The object is spoken for now: pull its pending-announce record.
-		pListHead = &pMgr->m_List8ec.m_Head;
-		pCur = pListHead->m_pNext;
-		while (pCur != pListHead)
-		{
-			CUnknown8ECRec* pRec = (CUnknown8ECRec*)pCur->m_pData;
-			if (pRec->m_nObjectID == pClient->m_pUnknown3AC->m_ObjectID)
-			{
-				pClient->m_pUnknown3AC->m_ChangeFlags &= ~0x80;
-				dl_RemoveAt(&pMgr->m_List8ec, &pRec->m_Link);
-				dfree(pRec);
-				break;
-			}
-
-			pCur = pCur->m_pNext;
-		}
+        pMgr->m_ClientReferences.RemoveFor(pClient->m_pUnknown3AC);
 
 		if (pClient->m_pViewClient == LTNULL)
 		{
@@ -2694,10 +2071,11 @@ LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 			// as the wrapper.
 			((CPacket*)msg.m_pMsg)->WriteType(pClient->m_pUnknown3AC->m_ObjectID);
 			sm_SendToClient(pMgr, pClient, 7, msg.m_pMsg, 1, 0x80);
+			if (!unchanged()) return LT_ERROR;
 		}
 
-		pClient->m_IDLists[1].m_nIDs = 0;
-		pClient->m_IDLists[0].m_nIDs = 0;
+		pClient->m_IDLists[1].Clear();
+		pClient->m_IDLists[0].Clear();
 
 		// Every updating object starts with its fresh change flags...
 		pListHead = &pMgr->m_List8dc.m_Head;
@@ -2705,7 +2083,7 @@ LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 		while (pCur != pListHead)
 		{
 			LTObject* pObject = (LTObject*)pCur->m_pData;
-			pInfo = &pClient->m_pObjInfos[pObject->m_ObjectID];
+			pInfo = &pClient->m_ObjInfos[pObject->m_ObjectID];
 			pInfo->m_ChangeFlags = sm_GetObjectChangeFlags(pMgr, pObject);
 			pCur = pCur->m_pNext;
 		}
@@ -2715,7 +2093,7 @@ LTRESULT sm_UpdateClientState2(CServerMgr* pMgr, Client* pClient)
 		while (pCur != &pMgr->m_List54.m_Head)
 		{
 			SoundInstance* pSound = (SoundInstance*)pCur->m_pData;
-			pInfo = &pClient->m_pObjInfos[*(uint32*)&pSound->m_pUnknown0c[4]];
+			pInfo = &pClient->m_ObjInfos[pSound->m_pUnknown0c->m_nIndex];
 			// Change flags first: /O1 normalises the pair to (byte, word)
 			// -- server.dll stores 0x2 with `andb $0` BEFORE the word --
 			// while /O2 keeps source order, and lithtech.exe has the word
@@ -2745,8 +2123,9 @@ void sm_ErrorHook(char* pString)
 
 // 0x10031f2f — take a link out of wherever it is and put it on the manager's
 // spare list.
-void sm_Free28(CServerMgr* pMgr, LTLink* pLink)
+void sm_Free28(CServerMgr* pMgr, void* record)
 {
+	auto* pLink = static_cast<CObjectIDRec*>(record);
 	LTLink* pHead;
 
 	pLink->m_pPrev->m_pNext = pLink->m_pNext;
@@ -2782,40 +2161,15 @@ LTObject* sm_FindObjectByID(CServerMgr* pMgr, uint16 nID)
 // MagSqr does not, which is the shape the engine's own ltvector.h gives:
 // operator- carries its body in the class, Mag/MagSqr only their declarations
 // (the same split SPhysicsLT::SetVelocity shows for Dist/DistSqr).
-float IWorldBsp::GetBoxDiagonalSqr()
-{
-	return (m_vBoxMax - m_vBoxMin).MagSqr();
-}
+
 
 // Save and restore both open the stream here and hand it to the object
 // serializer; the interface half is only the open, the check and the close.
-LTRESULT si_SaveObjects(char* pszSaveFileName, ObjectList* pList,
-                        uint32 dwParam, uint32 flags)
-{
-	ILTStream* pStream = streamsim_Open(pszSaveFileName, "wb");
-	if (!pStream)
-		RETURN_ERROR(2, "ILTPhysics::SaveObjects", LT_ERROR);
-
-	sav_SaveObjects(g_pServerMgr, pStream, pList, dwParam, flags);
-	pStream->Release();
-	return LT_OK;
+LTRESULT si_SaveObjects(char* filename, ObjectList* list, uint32 parameter, uint32 flags) {
+    return sav_SaveFile(g_pServerMgr,filename,list,parameter,flags);
 }
-
-// The restore half is saveio.cpp's sm_RestoreObjects (server 0x1001027c,
-// lithtech.exe 0x00432200), declared there on its own view of the manager.
-class SavServerMgr;
-LTRESULT sm_RestoreObjects(SavServerMgr* pMgr, ILTStream* pStream,
-                           uint32 dwParam, uint32 flags);
-
-LTRESULT si_RestoreObjects(char* pszRestoreFileName, uint32 dwParam, uint32 flags)
-{
-	ILTStream* pStream = streamsim_Open(pszRestoreFileName, "rb");
-	if (!pStream)
-		RETURN_ERROR(2, "ILTPhysics::RestoreObjects", LT_ERROR);
-
-	LTRESULT dResult = sm_RestoreObjects((SavServerMgr*)g_pServerMgr, pStream, dwParam, flags);
-	pStream->Release();
-	return dResult;
+LTRESULT si_RestoreObjects(char* filename, uint32 parameter, uint32 flags) {
+    return sav_RestoreFile(g_pServerMgr,filename,parameter,flags);
 }
 
 // The world is started at the manager's own idea of the time, not the
@@ -3020,7 +2374,7 @@ ObjectList* sm_FindObjectsTouchingSphere(LTVector* pPosition, float radius)
 	vMax = *pPosition + radius;
 
 	((IObjectQuery*)&g_pServerMgr->m_Unknown210)->FindObjectsInBox(
-		&vMin, &vMax, (int (*)(LTObject*, void*))sm_SphereGather, &query, 0);
+		&vMin, &vMax, [](LTObject* object, void* user) { sm_SphereGather(object, user); return 1; }, &query, 0);
 
 #ifdef LT_SERVER_BUILD
 	g_FindSphereTicks += cnt_EndCounter(&counter);
@@ -3097,7 +2451,7 @@ LTBOOL si_GetPointShade(LTVector* pPoint, LTVector* pColor)
 {
 	uint8 color[4];
 
-	w_GetPointShade(g_pServerMgr->m_ShadeState, pPoint, color);
+	w_GetPointShade(&g_pServerMgr->m_ShadeState, pPoint, color);
 
 	pColor->x = color[2];
 	pColor->y = color[1];
@@ -3130,79 +2484,16 @@ LTBOOL si_GetPointShade(LTVector* pPoint, LTVector* pColor)
 // readers during its precreate, then throw the list away again. The list is
 // the same one si_FindProp walks, which is why it hangs off the manager
 // rather than being passed anywhere.
-LPBASECLASS si_CreateObjectProps(HCLASS hClass, ObjectCreateStruct* pStruct, char* pszProps)
-{
-	CommandParser parser;
-	LPBASECLASS   pObject;
-	ObjectProp*   pProp;
-	ObjectProp*   pNext;
-	LTObject*     pNewObj;
-	LTRESULT      dResult;
-	int           i;
-	int           nLen;
-
-	parser.m_pPos = LTNULL;
-
-	pObject = sm_AllocateObjectInline(g_pServerMgr, ((CClassInfo*)hClass)->m_pClassDef);
-	g_pServerMgr->m_pCurProps = LTNULL;
-
-	if (pszProps)
-	{
-		parser.m_pPos = pszProps;
-
-		while (parser.Next())
-		{
-			if (parser.m_nArgs > 0)
-			{
-				pProp = (ObjectProp*)sm_sb_Allocate(&g_pServerMgr->m_PropBank);
-
-				pProp->m_Type = PT_STRING;
-				pProp->m_Name[0] = 0;
-				pProp->m_String[0] = 0;
-
-				strncpy(pProp->m_Name, parser.m_ArgPointers[0], sizeof(pProp->m_Name) - 1);
-				pProp->m_Name[sizeof(pProp->m_Name) - 1] = 0;
-
-				nLen = 0;
-				for (i = 1; i < parser.m_nArgs; i++)
-				{
-					nLen += strlen(parser.m_ArgPointers[i]);
-					if (nLen > 100)
-						break;
-
-					if (i != 1)
-						strcat(pProp->m_String, " ");
-
-					strcat(pProp->m_String, parser.m_ArgPointers[i]);
-				}
-
-				pProp->m_pNext = g_pServerMgr->m_pCurProps;
-				g_pServerMgr->m_pCurProps = pProp;
-			}
-		}
-	}
-
-	pObject->EngineMessageFn(MID_PRECREATE, pStruct, PRECREATE_STRINGPROP);
-
-	dResult = sm_CreateObjectInWorld(g_pServerMgr, pObject,
-	                                 ((CClassInfo*)hClass)->m_pClassDef, pStruct,
-	                                 0xffff, PRECREATE_STRINGPROP, &pNewObj);
-
-	pProp = g_pServerMgr->m_pCurProps;
-	while (pProp)
-	{
-		pNext = pProp->m_pNext;
-		sb_Free(&g_pServerMgr->m_PropBank, pProp);
-		pProp = pNext;
-	}
-
-	g_pServerMgr->m_pCurProps = LTNULL;
-
-	if (!dResult)
-		return pObject;
-
-	sm_FreeObjectInline(g_pServerMgr, ((CClassInfo*)hClass)->m_pClassDef, pObject);
-	return LTNULL;
+LPBASECLASS si_CreateObjectProps(HCLASS hClass, ObjectCreateStruct* pStruct, char* pszProps) {
+    auto* manager = g_pServerMgr;
+    if (!manager || !pStruct) return nullptr;
+    try {
+        auto properties = std::make_shared<ObjectProperties>(std::string_view(pszProps ? pszProps : ""));
+        return manager->CreateObjectWithProperties(hClass, pStruct, std::move(properties), PRECREATE_STRINGPROP);
+    } catch (const std::exception& error) {
+        nolf::platform::log("object properties", error.what());
+        return nullptr;
+    }
 }
 
 // Both container walks run the same list — the inter-object links hanging off
@@ -3376,10 +2667,10 @@ LTBOOL si_GetModelFilenames(LTObject* hObj, char* pFilename, int fileBufLen,
 		pFilename[0] = 0;
 	}
 
-	if (hObj->m_pSData->m_pSkinFile)
+	if (hObj->m_pSData->m_SkinFiles[0])
 	{
 		strncpy(pSkinName,
-		        fs_GetFileName(&g_pServerMgr->m_FileMgr, hObj->m_pSData->m_pSkinFile),
+		        fs_GetFileName(&g_pServerMgr->m_FileMgr, hObj->m_pSData->m_SkinFiles[0]),
 		        skinBufLen - 1);
 	}
 	else
@@ -3399,12 +2690,7 @@ int si_Parse(char* pCommand, char** pNewCommandPos, char* argBuffer,
 // ---- teleport, blocking priority and the sprite clip poly ---------------- //
 
 // The sprite's clip poly sits past the end of LTObject (name ours).
-class SpriteObject : public LTObject
-{
-public:
-	uint8 m_pad_1b4[0x1bc - 0x1b4];
-	HPOLY m_ClipPoly;                        // 0x1bc
-};
+using SpriteObject = CObjSprite;
 
 LTRESULT si_TeleportObject(LTObject* hObj, LTVector* pNewPos)
 {
@@ -3479,23 +2765,19 @@ LTRESULT si_CacheFile(uint32 fileType, char* pFilename)
 	return sm_CacheFile(g_pServerMgr, fileType, pFilename);
 }
 
-void si_KickClient(Client* pClient, uint32 nReasonCode)
-{
-	if (!pClient)
-		return;
-
-	g_pServerMgr->m_NetMgr.Disconnect(pClient->m_pConnection, 6, nReasonCode);
+static Client* si_FindClient(HCLIENT handle) {
+    return g_pServerMgr ? client_Find(g_pServerMgr->m_ClientList,handle) : nullptr;
+}
+void si_KickClient(HCLIENT handle, uint32 reason) {
+    if (auto* client = si_FindClient(handle); client && !client->m_Removing)
+        g_pServerMgr->m_NetMgr.Disconnect(client->m_pConnection,6,reason);
 }
 
 // The one check site in the file that reports at level 0, and the one whose
 // name literal carries no class prefix.
-LTRESULT si_SetClientViewPos(Client* pClient, LTVector* pPos)
-{
-	if (!pClient)
-		RETURN_ERROR(0, "SetClientViewPos", LT_INVALIDPARAMS);
-
-	pClient->m_Position = *pPos;
-	return LT_OK;
+LTRESULT si_SetClientViewPos(HCLIENT handle, LTVector* position) {
+    auto* client = si_FindClient(handle);
+    return client ? client->SetViewPosition(position) : LT_INVALIDPARAMS;
 }
 
 void si_RunGameConString(char* pString)
@@ -3522,12 +2804,9 @@ HCONVAR si_GetGameConVar(char* pName)
 // The command states are double-buffered per client — one 0xff-byte page per
 // buffer, the live one indexed by the counter after them — which is what the
 // multiply by 0xff says.
-LTBOOL si_IsCommandOn(Client* pClient, int command)
-{
-	if (!pClient || command >= MAX_CLIENTCOMMANDS)
-		return LTFALSE;
-
-	return pClient->m_CommandStates[pClient->m_nCurCommands][command];
+LTBOOL si_IsCommandOn(HCLIENT handle, int command) {
+    auto* client = si_FindClient(handle);
+    return client && client->CommandOn(command);
 }
 
 ObjectList* si_CreateObjectList()
@@ -3574,7 +2853,7 @@ void si_RemoveObjectFromList(ObjectList* pList, HOBJECT hObj)
 // the writer can reach it without going back through the manager.
 void CServerMgr::InitMessageOwner(ServerMessage* pMsg)
 {
-	pMsg->m_Write.m_pObjectIO = (CMsgObjectIO*)m_Unknown804;
+	pMsg->m_Write.m_pObjectIO = m_Unknown804;
 }
 
 // Changing the global light is a change every client has to hear about, so it
@@ -3619,189 +2898,71 @@ LTBOOL si_CastRay(IntersectQuery* pQuery, IntersectInfo* pInfo)
 // down the PT_ list, which is what identifies each reader.
 
 // 0x100304ac — the list walk the readers share (name ours).
-ObjectProp* si_FindProp(char* pPropName)
-{
-	ObjectProp* pProp = g_pServerMgr->m_pCurProps;
-
-	while (pProp)
-	{
-		if (strcmp(pProp->m_Name, pPropName) == 0)
-			return pProp;
-
-		pProp = pProp->m_pNext;
-	}
-
-	return LTNULL;
+const ObjectProperty* si_FindProp(char* name) {
+    return name && g_pServerMgr && g_pServerMgr->m_Properties ? g_pServerMgr->m_Properties->find(name) : nullptr;
 }
-
-LTRESULT si_GetPropString(char* pPropName, char* pRet, int maxLen)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_STRING)
-		return LT_NOTFOUND;
-
-	strncpy(pRet, pProp->m_String, maxLen - 1);
-	return LT_OK;
+LTRESULT si_GetPropString(char* name, char* output, int capacity) {
+    if (!output || capacity <= 0) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_STRING) return LT_NOTFOUND;
+    std::snprintf(output, static_cast<std::size_t>(capacity), "%s", property->text.c_str());
+    return LT_OK;
 }
-
-// One reader serves PT_VECTOR and PT_COLOR, which is why the table stores its
-// address twice.
-LTRESULT si_GetPropVector(char* pPropName, LTVector* pRet)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || (pProp->m_Type != PT_VECTOR && pProp->m_Type != PT_COLOR))
-		return LT_NOTFOUND;
-
-	*pRet = *(LTVector*)pProp->m_Vec;
-	return LT_OK;
+LTRESULT si_GetPropVector(char* name, LTVector* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || (property->type != PT_VECTOR && property->type != PT_COLOR)) return LT_NOTFOUND;
+    *output = property->value.m_Vec; return LT_OK;
 }
-
-LTRESULT si_GetPropReal(char* pPropName, float* pRet)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_REAL)
-		return LT_NOTFOUND;
-
-	*pRet = pProp->m_Float;
-	return LT_OK;
+LTRESULT si_GetPropReal(char* name, float* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_REAL) return LT_NOTFOUND;
+    *output = property->value.m_Float; return LT_OK;
 }
-
-LTRESULT si_GetPropFlags(char* pPropName, uint32* pRet)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_FLAGS)
-		return LT_NOTFOUND;
-
-	*pRet = (uint32)pProp->m_Float;
-	return LT_OK;
+LTRESULT si_GetPropFlags(char* name, uint32* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_FLAGS) return LT_NOTFOUND;
+    const double value = property->value.m_Float;
+    if (value < 0 || value > static_cast<double>(UINT32_MAX)) return LT_INVALIDPARAMS;
+    *output = static_cast<uint32>(value); return LT_OK;
 }
-
-LTRESULT si_GetPropBool(char* pPropName, LTBOOL* pRet)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_BOOL)
-		return LT_NOTFOUND;
-
-	*pRet = pProp->m_Bool;
-	return LT_OK;
+LTRESULT si_GetPropBool(char* name, LTBOOL* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_BOOL) return LT_NOTFOUND;
+    *output = property->value.m_Bool; return LT_OK;
 }
-
-LTRESULT si_GetPropLongInt(char* pPropName, long* pRet)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_LONGINT)
-		return LT_NOTFOUND;
-
-	*pRet = (long)pProp->m_Float;
-	return LT_OK;
+LTRESULT si_GetPropLongInt(char* name, long* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_LONGINT) return LT_NOTFOUND;
+    *output = property->value.m_Long; return LT_OK;
 }
-
-LTRESULT si_GetPropRotation(char* pPropName, LTRotation* pRet)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_ROTATION)
-		return LT_NOTFOUND;
-
-	// The angles go through a local float array filled element by element.
-	// An aggregate local is what makes VC6 load all three onto the x87 stack
-	// in member order before popping them into the argument slots (server
-	// 0x100305b5..0x100305cb); passing m_Vec[0..2] straight, via float
-	// locals, via a float* local, or via a float-returning inline all
-	// evaluate one argument at a time instead. The FOURTH element is the
-	// /O2 frame: lithtech 0x470a60 reserves 0x10 bytes and uses only
-	// three slots. An LTVector or float[3] gives the same /O1 bytes but a
-	// 0xc frame at /O2.
-	float v[4];
-	v[0] = pProp->m_Vec[0];
-	v[1] = pProp->m_Vec[1];
-	v[2] = pProp->m_Vec[2];
-	rot_SetupEuler(v[0], v[1], v[2], pRet);
-	return LT_OK;
+LTRESULT si_GetPropRotation(char* name, LTRotation* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_ROTATION) return LT_NOTFOUND;
+    *output = property->value.m_Rotation; return LT_OK;
 }
-
-LTRESULT si_GetPropRotationEuler(char* pPropName, LTVector* pAngles)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (!pProp || pProp->m_Type != PT_ROTATION)
-		return LT_NOTFOUND;
-
-	// The angles go through an LTRotation local and out through Init():
-	// that is the 0x10 frame (0x100305e0, 0x00470ac4), and it is what keeps
-	// only the first angle on the x87 stack while the other two are integer-
-	// copied into their slots and reloaded (0x100305f5..0x10030612). A float
-	// v[4] with three member stores got the frame but not the traffic.
-	LTRotation r;
-	r.m_Quat[0] = pProp->m_Vec[0];
-	r.m_Quat[1] = pProp->m_Vec[1];
-	r.m_Quat[2] = pProp->m_Vec[2];
-	pAngles->Init(r.m_Quat[0], r.m_Quat[1], r.m_Quat[2]);
-	return LT_OK;
+LTRESULT si_GetPropRotationEuler(char* name, LTVector* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property || property->type != PT_ROTATION) return LT_NOTFOUND;
+    *output = property->value.m_Vec; return LT_OK;
 }
-
-// The one reader that answers whatever type the property happens to be: it
-// clears the caller's record and then fills whichever fields the type maps
-// to, through the four setters that know the mapping. The bool case computes
-// its float and falls into the same call the numeric cases make.
-LTRESULT si_GetPropGeneric(char* pPropName, GenericProp* pProp)
-{
-	ObjectProp* pFound = si_FindProp(pPropName);
-
-	if (!pFound)
-		return LT_NOTFOUND;
-
-	gp_Clear(pProp);
-
-	switch (pFound->m_Type)
-	{
-		case PT_STRING:
-			gp_SetString(pProp, pFound->m_String);
-			break;
-
-		case PT_VECTOR:
-		case PT_COLOR:
-			gp_SetVector(pProp, (LTVector*)pFound->m_Vec);
-			break;
-
-		case PT_REAL:
-		case PT_FLAGS:
-		case PT_LONGINT:
-			gp_SetFloat(pProp, pFound->m_Float);
-			break;
-
-		case PT_BOOL:
-			gp_SetFloat(pProp, pFound->m_Bool);
-			break;
-
-		case PT_ROTATION:
-			gp_SetRotation(pProp, (LTVector*)pFound->m_Vec);
-			break;
-
-		default:
-			return LT_NOTFOUND;
-	}
-
-	return LT_OK;
+LTRESULT si_GetPropGeneric(char* name, GenericProp* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property) return LT_NOTFOUND;
+    *output = property->value; return LT_OK;
 }
-
-LTRESULT si_DoesPropExist(char* pPropName, int* pPropType)
-{
-	ObjectProp* pProp = si_FindProp(pPropName);
-
-	if (pProp)
-	{
-		*pPropType = pProp->m_Type;
-		return LT_OK;
-	}
-
-	return LT_NOTFOUND;
+LTRESULT si_DoesPropExist(char* name, int* output) {
+    if (!output) return LT_INVALIDPARAMS;
+    const auto* property = si_FindProp(name);
+    if (!property) return LT_NOTFOUND;
+    *output = property->type; return LT_OK;
 }
 
 HOBJECT si_ObjectToHandle(LPBASECLASS pObject)
@@ -3835,161 +2996,60 @@ LPBASECLASS si_HandleToObject(LTObject* hObject)
 // more than shipped); written as an if/else chain the FIRST arm hosts it
 // inline and the count check jumps backwards into it, which is what shipped.
 // (The shared-exit host: which arm carries the common tail.)
-HCLIENT si_GetNextClient(Client* pPrev)
-{
-	LTLink* pCur;
-
-	if (pPrev)
-	{
-		pCur = pPrev->m_Link.m_pNext;
-		if (pCur == &g_pServerMgr->m_ClientList.m_Head)
-			return LTNULL;
-
-		return (HCLIENT)pCur->m_pData;
-	}
-	else
-	{
-		if (g_pServerMgr->m_ClientList.m_nElements == 0)
-			return LTNULL;
-
-		return (HCLIENT)g_pServerMgr->m_ClientList.m_Head.m_pNext->m_pData;
-	}
+HCLIENT si_GetNextClient(HCLIENT previous) {
+    return g_pServerMgr ? client_Next(g_pServerMgr->m_ClientList,previous) : nullptr;
 }
 
-HCLIENTREF si_GetNextClientRef(HCLIENTREF hRef)
-{
-	CServerMgr* pMgr = g_pServerMgr;
-	LTLink*     pCur = (LTLink*)hRef;
-
-	if (!pCur)
-		pCur = &pMgr->m_List8ec.m_Head;
-
-	pCur = pCur->m_pNext;
-	if (pCur == &pMgr->m_List8ec.m_Head)
-		return LTNULL;
-
-	return (HCLIENTREF)pCur->m_pData;
+HCLIENTREF si_GetNextClientRef(HCLIENTREF previous) {
+    return g_pServerMgr ? g_pServerMgr->m_ClientReferences.Next(previous) : nullptr;
+}
+uint32 si_GetClientRefInfoFlags(HCLIENTREF handle) {
+    if (!g_pServerMgr) return 0;
+    const auto* entry = g_pServerMgr->m_ClientReferences.Find(handle);
+    return entry && (entry->flags & 2) ? CIF_LOCAL : 0;
+}
+LTBOOL si_GetClientRefName(HCLIENTREF handle, char* name, int capacity) {
+    if (g_pServerMgr) return g_pServerMgr->m_ClientReferences.CopyName(handle,name,capacity);
+    if (name && capacity > 0) name[0] = 0;
+    return LTFALSE;
+}
+HOBJECT si_GetClientRefObject(HCLIENTREF handle) {
+    if (!g_pServerMgr) return nullptr;
+    const auto* entry = g_pServerMgr->m_ClientReferences.Find(handle);
+    return entry ? entry->object : nullptr;
 }
 
-// Bit 1 of the record is CIF_LOCAL, answered as a test-and-select rather
-// than a shift: VC6 turns the select into `shr 1; and 1` itself, and it is
-// that conversion which keeps the zero-extension (server 0x10030cb5 movzbl,
-// lithtech 0x004713b9 `mov dword; and 0ffh`). The field is a uint32 (see
-// servermgr.h): as a uint8, /O2 loads it `xor ecx,ecx; mov cl,...`.
-uint32 si_GetClientRefInfoFlags(HCLIENTREF hClient)
-{
-	if (!hClient)
-		return 0;
-
-	if (((CUnknown8ECRec*)hClient)->m_Flags & 2)
-		return CIF_LOCAL;
-	else
-		return 0;
+uint32 si_GetClientID(HCLIENT handle) {
+    auto* client = si_FindClient(handle);
+    return client ? client->m_ClientID : uint32(0xffffffff);
 }
 
-LTBOOL si_GetClientRefName(HCLIENTREF hClient, char* pName, int maxLen)
-{
-	if (!hClient)
-	{
-		pName[0] = 0;
-		return LTFALSE;
-	}
-
-	strncpy(pName, ((CUnknown8ECRec*)hClient)->m_Name, maxLen - 1);
-	return LTTRUE;
-}
-
-HOBJECT si_GetClientRefObject(HCLIENTREF hClient)
-{
-	if (!hClient)
-		return LTNULL;
-
-	return sm_FindObjectByID(g_pServerMgr, ((CUnknown8ECRec*)hClient)->m_nObjectID);
-}
-
-uint32 si_GetClientID(Client* pClient)
-{
-	if (!pClient)
-		return 0xffffffff;
-
-	return pClient->m_ClientID;
-}
-
-LTBOOL si_GetClientName(Client* pClient, char* pName, int maxLen)
-{
-	if (!pClient)
-		return LTFALSE;
-
-	strncpy(pName, pClient->m_pName, maxLen - 1);
-	return LTTRUE;
+LTBOOL si_GetClientName(HCLIENT handle, char* name, int capacity) {
+    auto* client = si_FindClient(handle);
+    if (client) return client->CopyName(name,capacity);
+    if (name && capacity > 0) name[0] = 0;
+    return LTFALSE;
 }
 
 // The public CIF_ bits and the internal client flags agree on three values
 // and disagree on the other three, so both directions are written out one
 // bit at a time rather than masked wholesale.
-void si_SetClientInfoFlags(Client* pClient, uint32 dwClientFlags)
-{
-	if (!pClient)
-		return;
-
-	pClient->m_ClientFlags &= ~(CLIENTFLAG_FULLRES | CLIENTFLAG_SENDCOBJROTATION |
-	                            CLIENTFLAG_FORCENEXTUPDATE | CLIENTFLAG_AUTOACTIVATE);
-
-	if (dwClientFlags & CIF_FULLRES)
-		pClient->m_ClientFlags |= CLIENTFLAG_FULLRES;
-
-	if (dwClientFlags & CIF_SENDCOBJROTATION)
-		pClient->m_ClientFlags |= CLIENTFLAG_SENDCOBJROTATION;
-
-	if (dwClientFlags & CIF_FORCENEXTUPDATE)
-		pClient->m_ClientFlags |= CLIENTFLAG_FORCENEXTUPDATE;
-
-	if (dwClientFlags & CIF_AUTOACTIVATEOBJECTS)
-		pClient->m_ClientFlags |= CLIENTFLAG_AUTOACTIVATE;
+void si_SetClientInfoFlags(HCLIENT handle, uint32 flags) {
+    if (auto* client = si_FindClient(handle)) client->SetInfoFlags(flags);
 }
 
-uint32 si_GetClientInfoFlags(Client* pClient)
-{
-	uint32 dwFlags;
-
-	if (!pClient)
-		return 0;
-
-	dwFlags = 0;
-
-	if (pClient->m_ClientFlags & CLIENTFLAG_LOCAL)
-		dwFlags = CIF_LOCAL;
-
-	if (pClient->m_ClientFlags & CLIENTFLAG_PLAYBACK)
-		dwFlags |= CIF_PLAYBACK;
-
-	if (pClient->m_ClientFlags & CLIENTFLAG_FULLRES)
-		dwFlags |= CIF_FULLRES;
-
-	if (pClient->m_ClientFlags & CLIENTFLAG_SENDCOBJROTATION)
-		dwFlags |= CIF_SENDCOBJROTATION;
-
-	if (pClient->m_ClientFlags & CLIENTFLAG_FORCENEXTUPDATE)
-		dwFlags |= CIF_FORCENEXTUPDATE;
-
-	if (pClient->m_ClientFlags & CLIENTFLAG_AUTOACTIVATE)
-		dwFlags |= CIF_AUTOACTIVATEOBJECTS;
-
-	return dwFlags;
+uint32 si_GetClientInfoFlags(HCLIENT handle) {
+    auto* client = si_FindClient(handle);
+    return client ? client->InfoFlags() : 0;
 }
 
-void si_SetClientUserData(Client* pClient, void* pData)
-{
-	if (pClient)
-		pClient->m_pUserData = pData;
+void si_SetClientUserData(HCLIENT handle, void* data) {
+    if (auto* client = si_FindClient(handle)) client->m_pUserData = data;
 }
 
-void* si_GetClientUserData(Client* pClient)
-{
-	if (!pClient)
-		return LTNULL;
-
-	return pClient->m_pUserData;
+void* si_GetClientUserData(HCLIENT handle) {
+    auto* client = si_FindClient(handle);
+    return client ? client->m_pUserData : nullptr;
 }
 
 LTRESULT si_GetLastCollision(CollisionInfo *pInfo);                                                  // 0x198
@@ -4183,27 +3243,27 @@ void si_SetupInterface(CLTServer* pServer)
 // could have written it.
 LTRESULT si_GetGameInfo(void** ppData, uint32* pLen)
 {
-	*ppData = g_pServerMgr->m_pGameInfo;
-	*pLen = g_pServerMgr->m_GameInfoLen;
+    if (!ppData || !pLen) return LT_INVALIDPARAMS;
+    if (!g_pServerMgr) { *ppData = nullptr; *pLen = 0; return LT_NOTINITIALIZED; }
+	*ppData = g_pServerMgr->m_GameInformation.empty() ? nullptr : g_pServerMgr->m_GameInformation.data();
+	*pLen = static_cast<uint32>(g_pServerMgr->m_GameInformation.size());
 	return LT_OK;
 }
 
 HCLASS si_GetClass(char* pName)
 {
-	void* hElement = dhash_FindElement(g_pServerMgr->m_ClassMgr.m_hClassHash, pName, strlen(pName));
-	if (hElement)
-		return (HCLASS)dhash_GetData(hElement);
-
-	return LTNULL;
+	return pName ? reinterpret_cast<HCLASS>(g_pServerMgr->m_ClassMgr.find(pName)) : LTNULL;
 }
 
 LTRESULT si_GetStaticObject(HCLASS hClass, HOBJECT* obj)
 {
+	if (!obj) return LT_INVALIDPARAMS;
 	*obj = LTNULL;
-	if (!hClass)
+	auto* record = g_pServerMgr->m_ClassMgr.record(hClass);
+	if (!record)
 		RETURN_ERROR(1, "ILTPhysics::GetStaticObject", LT_INVALIDPARAMS);
 
-	LTObject* pObject = ((CClassInfo*)hClass)->m_pStaticObject;
+	LTObject* pObject = record->m_pStaticObject;
 	if (pObject)
 	{
 		*obj = pObject;
@@ -4222,32 +3282,22 @@ LTRESULT si_GetStaticObject(HCLASS hClass, HOBJECT* obj)
 
 HCLASS si_GetObjectClass(LTObject* pObj)
 {
-	if (!pObj)
+	if (!pObj || !g_pServerMgr->m_Unknown390.m_Allocated.contains(pObj) || !pObj->m_pSData ||
+		!g_pServerMgr->m_ClassMgr.owns(pObj->m_pSData->m_pClass))
 		RETURN_ERROR_VALUE_L(1, "ILTPhysics::GetObjectClass", LTNULL, LTNULL);
 
-	return (HCLASS)pObj->m_pSData->m_pClass->m_Stats[g_pServerMgr->m_ClassMgr.m_nIndex];
+	return (HCLASS)pObj->m_pSData->m_pClass->m_pInternal[g_pServerMgr->m_ClassMgr.m_nIndex];
 }
 
 LTBOOL si_IsKindOf(HCLASS hClass, HCLASS hTest)
 {
-	ClassDef* pDef;
-
-	if (!hClass || !hTest)
-		return LTFALSE;
-
-	// A plain `while (pDef)` with hTest's class read inside the test: the
-	// guard doubles as the null check on hClass's def (0x1003036d), the
-	// invariant load is hoisted below it (0x10030374 / 0x00470747), and the
-	// rotated loop falls straight into the FALSE return. A separate
-	// `if (!pDef)` plus a pTest local loaded first put the load above the
-	// guard on /O2 and a forward `je; jmp` exit on /O1.
-	pDef = ((CClassInfo*)hClass)->m_pClassDef;
-	while (pDef)
+	const auto* record = g_pServerMgr->m_ClassMgr.record(hClass);
+	const auto* test = g_pServerMgr->m_ClassMgr.record(hTest);
+	if (!record || !test) return LTFALSE;
+	for (auto* pDef = record->m_pClassDef; pDef; pDef = pDef->m_ParentClass)
 	{
-		if (pDef == ((CClassInfo*)hTest)->m_pClassDef)
+		if (pDef == test->m_pClassDef)
 			return LTTRUE;
-
-		pDef = pDef->m_ParentClass;
 	}
 
 	return LTFALSE;
@@ -4268,38 +3318,8 @@ LTRESULT si_SetPortalFlags(char* pPortalName, uint32 flags)
 	return sm_SetPortalFlags(g_pServerMgr, pPortalName, flags);
 }
 
-LTRESULT si_GetNextPoly(HPOLY* hPoly)
-{
-	if (!hPoly)
-		RETURN_ERROR(1, "ILTPhysics::GetNextPoly", LT_INVALIDPARAMS);
-
-	CServerMgr* pMgr = g_pServerMgr;
-	if (!pMgr->m_pWorldFile)
-		RETURN_ERROR(1, "ILTPhysics::GetNextPoly", LT_NOTINITIALIZED);
-
-	HPOLY hCur = *hPoly;
-	if (hCur == INVALID_HPOLY)
-	{
-		// The "before the first poly" marker: world 0, index 0xffff.
-		*hPoly = 0xffff;
-	}
-	else
-	{
-		uint32 iWorld = hCur >> 16;
-		uint32 iPoly = (hCur & 0xffff) + 1;
-
-		if (iPoly >= pMgr->m_pFileTrees[iWorld]->m_pList->m_nPolies)
-		{
-			iWorld++;
-			iPoly = 0;
-		}
-		if (iWorld >= pMgr->m_nFileTrees)
-			return LT_FINISHED;
-
-		*hPoly = (iWorld << 16) | (iPoly & 0xffff);
-	}
-
-	return LT_OK;
+LTRESULT si_GetNextPoly(HPOLY* hPoly) {
+    return g_pServerMgr ? g_pServerMgr->m_World.NextPoly(hPoly) : LT_NOTINITIALIZED;
 }
 
 int si_IntRandom(int min, int max)
@@ -4313,7 +3333,7 @@ int si_IntRandom(int min, int max)
 // second argument, which read as Monolith ignoring it.
 LTFLOAT si_RandomScale(LTFLOAT scale)
 {
-	return scale * (rand() * (1.0f / 32767.0f));
+	return scale * (float(rand()) / float(RAND_MAX));
 }
 
 void sm_BroadcastPrintf(char* pMsg, ...);
@@ -4324,19 +3344,21 @@ void si_BPrint(char* pMsg, ...)
 	va_list marker;
 
 	va_start(marker, pMsg);
-	_vsnprintf(msg, sizeof(msg) - 1, pMsg, marker);
+	vsnprintf(msg, sizeof(msg) - 1, pMsg, marker);
 	sm_BroadcastPrintf(msg);
 }
 
 LTRESULT si_GetSkyDef(SkyDef* pDef)
 {
-	memcpy(pDef, &g_pServerMgr->m_SkyDef, sizeof(SkyDef));
+	if (!pDef) return LT_INVALIDPARAMS;
+	*pDef = g_pServerMgr->m_SkyDef;
 	return LT_OK;
 }
 
 LTRESULT si_SetSkyDef(SkyDef* pDef)
 {
-	memcpy(&g_pServerMgr->m_SkyDef, pDef, sizeof(SkyDef));
+	if (!pDef || !nolf::valid_sky(*pDef)) return LT_INVALIDPARAMS;
+	g_pServerMgr->m_SkyDef = *pDef;
 	sm_MarkSkyChanged(g_pServerMgr);
 	return LT_OK;
 }
@@ -4381,20 +3403,15 @@ LTRESULT si_SetGlobalLightObject(HOBJECT hObj)
 	return LT_OK;
 }
 
-LTRESULT si_AttachClient(Client* pParent, Client* pChild)
-{
-	if (!pParent || !pChild)
-		RETURN_ERROR(1, "ILTPhysics::AttachClient", LT_INVALIDPARAMS);
-
-	return sm_AttachClient(g_pServerMgr, pParent, pChild);
+LTRESULT si_AttachClient(HCLIENT parent_handle, HCLIENT child_handle) {
+    auto* parent = si_FindClient(parent_handle);
+    auto* child = si_FindClient(child_handle);
+    return parent && child ? sm_AttachClient(g_pServerMgr,parent,child) : LT_INVALIDPARAMS;
 }
 
-LTRESULT si_DetachClient(Client* pClient)
-{
-	if (!pClient)
-		RETURN_ERROR(1, "ILTPhysics::DetachClient", LT_INVALIDPARAMS);
-
-	return sm_DetachClient(g_pServerMgr, pClient);
+LTRESULT si_DetachClient(HCLIENT handle) {
+    auto* client = si_FindClient(handle);
+    return client ? sm_DetachClient(g_pServerMgr,client) : LT_INVALIDPARAMS;
 }
 
 LTRESULT si_GetLastCollision(CollisionInfo* pInfo)
@@ -4419,27 +3436,34 @@ LTRESULT si_GetLastCollision(CollisionInfo* pInfo)
 
 LTRESULT si_PlaySound(PlaySoundInfo* pPlaySoundInfo)
 {
+    if (!g_pServerMgr) return LT_NOTINITIALIZED;
 	HLTSOUND hResult;
 	return g_pServerMgr->PlaySound(pPlaySoundInfo, hResult);
 }
 
 LTRESULT si_GetSoundDuration(HLTSOUND hSound, LTFLOAT* fDuration)
 {
+    if (!g_pServerMgr) return LT_NOTINITIALIZED;
+    if (!fDuration) return LT_INVALIDPARAMS;
 	return g_pServerMgr->GetSoundDuration(hSound, *fDuration);
 }
 
 LTRESULT si_IsSoundDone(HLTSOUND hSound, LTBOOL* bDone)
 {
+    if (!g_pServerMgr) return LT_NOTINITIALIZED;
+    if (!bDone) return LT_INVALIDPARAMS;
 	return g_pServerMgr->IsSoundDone(hSound, *bDone);
 }
 
 LTRESULT si_KillSound(HLTSOUND hSound)
 {
+    if (!g_pServerMgr) return LT_NOTINITIALIZED;
 	return g_pServerMgr->KillSound(hSound);
 }
 
 LTRESULT si_KillSoundLoop(HLTSOUND hSound)
 {
+    if (!g_pServerMgr) return LT_NOTINITIALIZED;
 	return g_pServerMgr->KillSoundLoop(hSound);
 }
 
@@ -4457,82 +3481,6 @@ void si_BreakInterObjectLink(LTObject* pOwner, LTObject* pLinked)
 		return;
 
 	sm_BreakInterObjectLink(g_pServerMgr, pOwner, pLinked, 0);
-}
-
-LTRESULT si_CreateAttachment(LTObject* hParent, LTObject* hChild, char* pSocketName,
-                             LTVector* pOffset, LTRotation* pRotationOffset,
-                             Attachment** pAttachment)
-{
-	int iNode;
-	Attachment* pAttach;
-
-	if (!hParent || !hChild)
-		RETURN_ERROR(1, "ILTPhysics::CreateAttachment", LT_INVALIDPARAMS);
-
-	iNode = -1;
-	if (hParent->m_ObjectType == OT_MODEL && pSocketName)
-	{
-		Model* pModel = ((ModelInstance*)hParent)->m_AnimTracker.m_TimeRef.m_pModel;
-		if (!pModel)
-			RETURN_ERROR(1, "ILTPhysics::CreateAttachment", LT_INVALIDDATA);
-
-		// Sockets first; a node index is biased past them.
-		if (!pModel->FindSocket(pSocketName, (HMODELSOCKET*)&iNode))
-		{
-			if (!pModel->FindNode(pSocketName, (HMODELNODE*)&iNode))
-				RETURN_ERROR(1, "ILTPhysics::CreateAttachment", LT_NODENOTFOUND);
-			iNode += pModel->m_Sockets.m_nElements;
-		}
-	}
-
-	LTRESULT dResult = am_CreateAttachment(&g_pServerMgr->m_Unknown390, hParent,
-		hChild->m_ObjectID, iNode, pOffset, pRotationOffset, &pAttach);
-	if (dResult != LT_OK)
-		return dResult;
-
-	sm_SetObjectChangeFlag(g_pServerMgr, hParent, 0x100);
-	if (pAttachment)
-		*pAttachment = pAttach;
-	return LT_OK;
-}
-
-LTRESULT si_RemoveAttachment(Attachment* hAttachment)
-{
-	if (!hAttachment)
-		RETURN_ERROR(1, "ILTPhysics::RemoveAttachment", LT_INVALIDPARAMS);
-
-	LTObject* pParent = sm_FindObjectByID(g_pServerMgr, hAttachment->m_nParentID);
-	if (!pParent)
-		RETURN_ERROR(1, "ILTPhysics::RemoveAttachment", LT_ERROR);
-
-	if (am_RemoveAttachment(&g_pServerMgr->m_Unknown390, pParent, hAttachment) == LT_OK)
-	{
-		sm_SetObjectChangeFlag(g_pServerMgr, pParent, 0x100);
-		return LT_OK;
-	}
-
-	RETURN_ERROR(1, "ILTPhysics::RemoveAttachment", LT_NOTFOUND);
-}
-
-LTRESULT si_FindAttachment(LTObject* hParent, LTObject* hChild, Attachment** pAttachment)
-{
-	if (!hParent || !hChild || !pAttachment)
-		RETURN_ERROR(1, "ILTPhysics::FindAttachment", LT_INVALIDPARAMS);
-
-	*pAttachment = LTNULL;
-	Attachment* pCur = hParent->m_pAttachments;
-	while (pCur)
-	{
-		if ((LTObject*)sm_FindObjectByID(g_pServerMgr, pCur->m_nChildID) == hChild)
-		{
-			*pAttachment = pCur;
-			return LT_OK;
-		}
-		pCur = pCur->m_pNext;
-	}
-
-	// Not an error worth printing: the silent not-found return.
-	return LT_NOTFOUND;
 }
 
 // The color change-flag thunk both color setters share (name ours).
@@ -4679,7 +3627,7 @@ void si_SetDeactivationTime(LTObject* hObj, LTFLOAT fDeactivationTime)
 	if (hObj->m_ChangeFlags & 0x20)
 		sm_SetObjectState(g_pServerMgr, hObj, hObj->m_ChangeFlags & 0x18);
 
-	if ((g_bAutoDeactivate && hObj->m_Unknown58 == -1) || !g_pServerMgr->m_pWorldFile)
+	if ((g_bAutoDeactivate && !g_pServerMgr->m_Unknown210.Contains(hObj)) || !g_pServerMgr->m_pWorldFile)
 		g_pServerMgr->m_Unknown210.BumpObject(hObj, 0);
 }
 
@@ -4709,7 +3657,7 @@ void si_SetObjectPos(LTObject* hObj, LTVector* pos)
 	if (!hObj)
 		return;
 
-	sm_MoveObject((IWorldSim*)g_pServerMgr, hObj, pos, 0xf);
+	sm_MoveObject(g_pServerMgr, hObj, pos, 0xf);
 }
 
 void si_SetObjectState(LTObject* hObj, int state)
@@ -4800,7 +3748,7 @@ static inline void sm_InitMoveState(WMMoveState* pState, void* pContainer,
                                     uint32 nPriority)
 {
 	pState->m_pContainer = (CUnknown210*)pContainer;
-	pState->m_pUnknown04 = (CUnknown6A8Obj*)pUnknown04;
+	pState->m_pUnknown04 = static_cast<IObjectMover*>(pUnknown04);
 	pState->m_pObj       = pObj;
 	pState->m_nUnknown0C = nPriority;
 	pState->m_pPushList = 0;
@@ -4967,23 +3915,6 @@ void sm_SFXSendToOwner(LTObject* pObj, SFXSendInfo* pInfo)
 	}
 }
 
-void sm_SFXGatherOwned(LTLink* pListHead, LTObject*** pppList, uint32* pnCount)
-{
-	LTLink* pCur = pListHead->m_pNext;
-	while (pCur != pListHead)
-	{
-		LTObject* pObj = (LTObject*)pCur->m_pData;
-		if (!pObj->m_pSData)
-			return;
-		if (pObj->m_pSData->m_pOwningClient)
-		{
-			(*pppList)[*pnCount] = pObj;
-			(*pnCount)++;
-		}
-		pCur = pCur->m_pNext;
-	}
-}
-
 LTRESULT sm_SendSFXMessage(CServerMgr* pMgr, int nPacketID, ServerMessage* pMsg,
                            LTObject* pObj, LTVector* pPos, uint32 flags)
 {
@@ -5012,10 +3943,9 @@ LTRESULT sm_SendSFXMessage(CServerMgr* pMgr, int nPacketID, ServerMessage* pMsg,
 	// argument ahead of pPos (server.dll is identical either way).
 	info.m_Flags = flags;
 	query.m_Position = *pPos;
-	query.m_pUser = (CUpdateContext*)&info;
+	query.m_pUser = &info;
 	query.m_Radius = 10000.0f;
-	query.m_Fn1 = (void (*)(void*, void*))sm_SFXSendToOwner;
-	query.m_Fn2 = (int (*)(void*, void*))sm_SFXGatherOwned;
+	query.m_Fn1 = [](LTObject* object, void* user) { sm_SFXSendToOwner(static_cast<LTObject*>(object), static_cast<SFXSendInfo*>(user)); };
 
 	((IObjectQuery*)&pMgr->m_Unknown210)->FindObjects(&query);
 	return LT_OK;
@@ -5105,7 +4035,7 @@ LTRESULT sm_CacheFile(CServerMgr* pMgr, uint32 fileType, char* pFilename)
 				}
 				else if (pFile)
 				{
-					sm_BroadcastCacheFile(pMgr, 0, pFile->m_FileID);
+					sm_BroadcastCacheFile(pMgr, 0, pFile->m_nFileID);
 				}
 			}
 			else
@@ -5123,7 +4053,7 @@ LTRESULT sm_CacheFile(CServerMgr* pMgr, uint32 fileType, char* pFilename)
 
 			if (pFile)
 			{
-				sm_BroadcastCacheFile(pMgr, fileType, pFile->m_FileID);
+				sm_BroadcastCacheFile(pMgr, fileType, pFile->m_nFileID);
 			}
 		}
 		break;
@@ -5135,13 +4065,13 @@ LTRESULT sm_CacheFile(CServerMgr* pMgr, uint32 fileType, char* pFilename)
 
 			if (pMgr->m_Unknown1a0 & 0x10)
 			{
-				CCacheRec* pRec = pMgr->AddCachedFile(pFile);
-				if (pRec)
-					pRec->m_bWanted = 1;
+                try { pMgr->m_Sounds.MarkWanted(*pFile); }
+                catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
+                catch (const std::exception&) { return LT_ERROR; }
 			}
 			else if (pFile)
 			{
-				sm_BroadcastCacheFile(pMgr, 3, pFile->m_FileID);
+				sm_BroadcastCacheFile(pMgr, 3, pFile->m_nFileID);
 			}
 		}
 		break;
@@ -5169,21 +4099,15 @@ LTRESULT sm_CacheFile(CServerMgr* pMgr, uint32 fileType, char* pFilename)
 // three callee-saved registers rotate — ebx/esi/edi hold the head, the next
 // link and the manager instead of the manager, the head and the next link.
 // Same lever as sub_1002af00 and sm_EndWorldB.
-void sm_EndWorldA(CServerMgr* pMgr)
-{
-	LTLink* pHead = &pMgr->m_List8dc.m_Head;
-	LTLink* pCur = pHead->m_pNext;
-
-	while (pCur != pHead)
-	{
-		LTLink*   pNext = pCur->m_pNext;
-		LTObject* pObject = (LTObject*)pCur->m_pData;
-
-		if (pObject->m_ChangeFlags & 0x80)
-			sm_RemoveObjectFromWorld(pMgr, pObject->m_pSData->m_pBaseClass);
-
-		pCur = pNext;
-	}
+void sm_EndWorldA(CServerMgr* manager) {
+    struct Context { CServerMgr* manager; ServerCallbackGuard guard; } context{manager,ServerCallbackGuard(manager->m_Lifetime)};
+    object_Visit(manager->m_List8dc,[](void* pointer,LTObject& object) {
+        auto& context = *static_cast<Context*>(pointer);
+        if (!context.guard.unchanged()) return false;
+        if ((object.m_ChangeFlags & 0x80) && object.m_pSData && object.m_pSData->m_pBaseClass)
+            sm_RemoveObjectFromWorld(context.manager,object.m_pSData->m_pBaseClass);
+        return context.guard.unchanged();
+    },&context);
 }
 
 // 0x1002aec2 — the other list holds records the manager owns outright, so
@@ -5191,23 +4115,7 @@ void sm_EndWorldA(CServerMgr* pMgr)
 // (name ours).
 //
 // Head-first, cursor through the head, for the same reason sm_EndWorldA is.
-void sm_EndWorldB(CServerMgr* pMgr)
-{
-	LTLink* pHead = &pMgr->m_List8ec.m_Head;
-	LTLink* pCur = pHead->m_pNext;
-
-	while (pCur != pHead)
-	{
-		LTLink* pNext = pCur->m_pNext;
-
-		dfree(pCur->m_pData);
-
-		pCur = pNext;
-	}
-
-	dl_InitList(&pMgr->m_List8ec);
-}
-
+void sm_EndWorldB(CServerMgr* manager) { manager->m_ClientReferences.Clear(); }
 
 // 0x1002abf8 — an object goes back to its class's bank. The game's destructor
 // runs first, through the class definition's own pointer, because the object
@@ -5215,27 +4123,24 @@ void sm_EndWorldB(CServerMgr* pMgr)
 // list rather than back to the allocator (name ours).
 void sm_FreeObject(CServerMgr* pMgr, ClassDef* pClassDef, LPBASECLASS pObject)
 {
-	CClassStats* pStats =
-		(CClassStats*)pClassDef->m_pInternal[pMgr->m_ClassMgr.m_nIndex];
-
-	pClassDef->m_DestructFn(pObject);
-
-	sb_Free(&pStats->m_Bank, pObject);
+	(void)pClassDef;
+	pMgr->m_ClassMgr.destroy(pObject);
 }
 
 
 // 0x1003401a — a client's name into the caller's buffer. The manager is not
 // touched: a client already knows its own name.
-void CServerMgr::GetClientName(Client* pClient, char* pName, int maxChars)
-{
-	strncpy(pName, pClient->m_pName, maxChars);
+void CServerMgr::GetClientName(Client* client, char* name, int capacity) {
+    if (client) client->CopyName(name,capacity);
+    else if (name && capacity > 0) name[0] = 0;
 }
 
 // 0x100277c2 — everything the client still has queued goes out now, at
 // whatever the manager's current time is (name ours).
 void sm_FlushClientPackets(CServerMgr* pMgr, Client* pClient)
 {
-	xfer_Update((CClientFiles*)pClient->m_pUnknown18C, pMgr->m_Unknown6d4);
+	// Simulation clears/rebases its delta independently of transport time.
+	xfer_Update(pClient->m_FileTransfer.get(), pMgr->m_NetMgr.m_FrameTime);
 }
 
 
@@ -5244,13 +4149,9 @@ void sm_FlushClientPackets(CServerMgr* pMgr, Client* pClient)
 // Every one of these publishes the manager through the globals first: the
 // net layer can reach them at times when nothing else has.
 
-LTBOOL CServerMgr::_v04(void* pA, void* pB)
-{
-	SetupGlobals();
-
-	sm_AddClientForConnection(this, (NetConnection*)pA, (int)pB);
-
-	return LTTRUE;
+LTBOOL CServerMgr::_v04(NetConnection* connection, uint32 flags) {
+    SetupGlobals();
+    return sm_AddClientForConnection(this,connection,static_cast<int>(flags)) != nullptr;
 }
 
 void CServerMgr::_v08(NetConnection* pConn)
@@ -5264,18 +4165,23 @@ void CServerMgr::_v08(NetConnection* pConn)
 // then to the game; either may be absent, and neither answer is looked at.
 void CServerMgr::ProcessPacket(CPacket* pPacket, uint8* senderAddr, uint16 senderPort)
 {
+	ServerActivity activity(m_Lifetime);
+	if (!activity.available() || !pPacket || !senderAddr || !pPacket->m_DataLen ||
+        pPacket->m_DataLen > pPacket->m_Data.GetSize()) return;
+    ServerCallbackGuard operation(m_Lifetime);
 	if (m_pAppHandler)
 	{
 		m_pAppHandler->ProcessPacket((char*)pPacket->m_Data.m_pArray,
 		                             pPacket->m_DataLen,
 		                             senderAddr, senderPort);
 	}
+	if (!operation.unchanged()) return;
 
 	if (m_ClassMgr.m_pServerShell)
 	{
-		m_ClassMgr.m_pServerShell->ProcessPacket((char*)pPacket->m_Data.m_pArray,
+		m_ClassMgr.shell([&](IServerShell& shell) { return shell.ProcessPacket((char*)pPacket->m_Data.m_pArray,
 		                                         pPacket->m_DataLen,
-		                                         senderAddr, senderPort);
+		                                         senderAddr, senderPort); });
 	}
 }
 
@@ -5284,9 +4190,11 @@ void CServerMgr::ProcessPacket(CPacket* pPacket, uint8* senderAddr, uint16 sende
 
 // 0x100338b8 — the shell caches what it wants, and everything nothing is
 // using afterwards is let go. The flag says the caching is over.
-LTRESULT sm_CacheShellFiles(CServerMgr* pMgr)
+LTRESULT sm_CacheFiles(CServerMgr* pMgr)
 {
-	pMgr->m_ClassMgr.m_pServerShell->CacheFiles();
+	ServerCallbackGuard operation(pMgr->m_Lifetime);
+	pMgr->m_ClassMgr.shell([&](IServerShell& shell) { return shell.CacheFiles(); });
+	if (!operation.unchanged()) return LT_ERROR;
 
 	pMgr->m_Unknown1a0 &= ~0x10;
 
@@ -5301,6 +4209,7 @@ LTRESULT sm_CacheShellFiles(CServerMgr* pMgr)
 // Types with nothing to do have no handler and the answer is nothing.
 uint32 sm_RemoveFromWorldTree(CServerMgr* pMgr, LTObject* pObject)
 {
+	if (pObject->m_ObjectType >= NUM_OBJECTTYPES) return LT_INVALIDPARAMS;
 	uint32 (*pFn)(CServerMgr*, LTObject*) =
 		g_ObjTypeHandlers[pObject->m_ObjectType].m_pRemove;
 
@@ -5312,27 +4221,9 @@ uint32 sm_RemoveFromWorldTree(CServerMgr* pMgr, LTObject* pObject)
 
 // 0x1003471d — the queued-object list goes back to the manager's own bank,
 // one node at a time, and the list is left empty (name ours).
-void sm_ReturnList44(CServerMgr* pMgr)
-{
-	LTLink* pCur;
-	LTLink* pHead;
-	LTLink* pNext;
-
-	sm_FlushList44(pMgr);
-
-	pCur = pMgr->m_List44.m_Head.m_pNext;
-	pHead = &pMgr->m_List44.m_Head;
-
-	while (pCur != pHead)
-	{
-		pNext = pCur->m_pNext;
-
-		sb_Free(&pMgr->m_Bank0C, pCur->m_pData);
-
-		pCur = pNext;
-	}
-
-	dl_InitList(&pMgr->m_List44);
+void sm_FreeList44(CServerMgr* pMgr) {
+    sm_FlushList44(pMgr);
+    pMgr->m_Sounds.Clear();
 }
 
 // 0x1003512f — the worker thread's own construction; the base runs first and
@@ -5351,29 +4242,18 @@ LTBOOL CServerThread::Init(CServerMgr* pMgr)
 }
 
 
-// 0x10029bc4 — a queued message goes out unless something already dealt with
-// it. The manager is accepted and not read (name ours).
-void sm_WriteQueuedMessage(CServerMgr* pMgr, CQueuedMsg* pRec, Client* pClient,
-                           ServerMessage* pMsg)
-{
-	if (pRec->m_Unknown00 == 0)
-		sm_WriteQueuedMessageBody((SoundRecord*)pRec, pClient, pMsg);
-}
-
 // 0x10016971 — the notification slot's default is to ignore the event. Three
 // bytes, `ret 0xc`: the arguments are accepted and none of them is read, and
 // nothing is put in eax either, so a caller that looks at the result of this
 // override reads whatever the last call left behind.
-void CBaseMgr::_v10(int nEvent, char* pName, int n)
-{
-}
+
 
 
 // 0x1002d34a — a one-line forward, and the only reason it exists is that the
 // worker takes the manager by argument where the caller has it in `this`.
 // The worker (0x1002d355) is what actually builds the object; nothing names
 // either it or what it builds, so both keep their addresses.
-class CUnknown928Obj* sub_1002d355(CServerMgr* pMgr);
+CUnknown928Obj* sub_1002d355(CServerMgr* pMgr);
 
 CUnknown928Obj* sm_CreateUnknown928(CServerMgr* pMgr)
 {
@@ -5403,13 +4283,6 @@ void sm_DropConnection(CServerMgr* pMgr, NetConnection* pConn)
 // The model instance's own model pointer, which is serverengine.h's
 // ModelInstanceObj::m_pModel; declared here so this file need not pull that
 // header in.
-class CModelInstView
-{
-public:
-	uint8        m_pad_00[0x1dc];
-	class Model* m_pModel;                   // +0x1dc
-};
-
 // 0x10027be0 — does this object owe the clients an update at all? Change
 // flag 4 has to be set, and unless FLAG_FORCECLIENTUPDATE overrides it the
 // object also has to be one the clients can perceive: visible, or solid or
@@ -5422,6 +4295,7 @@ public:
 // while server.dll's /Os declines every site and keeps 0x10027be0.
 inline int sub_10027be0(CServerMgr* pMgr, LTObject* pObject)
 {
+    if (!pObject || !pObject->m_pSData || pObject->m_pSData->m_Removing) return 0;
 	uint32 nFlags = pObject->m_Flags;
 
 	if (!(nFlags & FLAG_FORCECLIENTUPDATE))
@@ -5430,7 +4304,7 @@ inline int sub_10027be0(CServerMgr* pMgr, LTObject* pObject)
 			return 0;
 
 		if (pObject->m_ObjectType == OT_NORMAL &&
-			pObject->m_pSData->m_Unknown2c == 0)
+			pObject->m_pSData->m_SFXMessage.m_pMsg == 0)
 			return 0;
 	}
 
@@ -5438,7 +4312,7 @@ inline int sub_10027be0(CServerMgr* pMgr, LTObject* pObject)
 		return 0;
 
 	if (pObject->m_ObjectType == OT_MODEL &&
-		((CModelInstView*)pObject)->m_pModel == pMgr->m_pPlaceholderModel)
+		static_cast<ModelInstance*>(pObject)->m_AnimTracker.m_TimeRef.m_pModel == pMgr->m_pPlaceholderModel)
 		return 0;
 
 	return 1;
@@ -5448,17 +4322,17 @@ inline int sub_10027be0(CServerMgr* pMgr, LTObject* pObject)
 // state its change flags now ask for. The deactivation time is the interval;
 // a zero or negative one is copied through unchanged, which is why one arm
 // stores through the FPU and the other with an integer `mov`.
-void sub_100348cc(LTObject* pObject)
+void sub_100348cc(CServerMgr* manager, LTObject* pObject)
 {
 	SObjData* pSData = pObject->m_pSData;
 
 	if (pSData->m_DeactivationTime > 0.0f)
-		pSData->m_UpdateTimer = g_pServerMgr->m_FrameTime + pSData->m_DeactivationTime;
+		pSData->m_UpdateTimer = manager->m_FrameTime + pSData->m_DeactivationTime;
 	else
 		pSData->m_UpdateTimer = pSData->m_DeactivationTime;
 
 	if (pObject->m_ChangeFlags & 0x20)
-		sm_SetObjectState(g_pServerMgr, pObject, pObject->m_ChangeFlags & 0x18);
+		sm_SetObjectState(manager, pObject, pObject->m_ChangeFlags & 0x18);
 }
 
 // An object the sweep may deactivate is told so through its own vptr, slot 2.
@@ -5466,14 +4340,6 @@ void sub_100348cc(LTObject* pObject)
 // for every other use of it in this file, so the one virtual call reached
 // from here goes through a view of the same object rather than making the
 // whole class polymorphic (name ours; only the slot index is established).
-class IObjectDeactivate
-{
-public:
-	virtual void _v00() = 0;
-	virtual void _v04() = 0;
-	virtual void _v08() = 0;
-};
-
 // 0x10027c3c — one candidate object out of the visibility gather. Three tests
 // have to pass before anything happens, and they are asked in the cheapest
 // order: a field on the context, then the worker, then a second context field.
@@ -5484,26 +4350,16 @@ public:
 // thing being written to, and the second's +0x00 is what the worker is handed.
 // Left named as declared; the argument roles are recorded here rather than
 // renamed, because what either structure is has not been established.
-void sm_VisCallbackA(void* pUser, void* pObject)
-{
-	if (((uint32*)pUser)[0x54 / 4] != 0)
-		return;
-
-	if (!sub_10027be0(*(CServerMgr**)pObject, (LTObject*)pUser))
-		return;
-
-	if (((uint32*)pObject)[0x1c / 4] == 0)
-		return;
-
-	// A DWORD clear of change flag 0x200: lithtech.exe (0x00464f42) ands
-	// m_ChangeFlags itself, reusing the register the expanded `& 4` test
-	// loaded; server.dll's /O1 narrows the same statement to the `andb
-	// $0xfd,0x121` at 0x10027c60.
-	((LTObject*)pUser)->m_ChangeFlags &= ~0x200;
-
-	sub_100348cc((LTObject*)pUser);
+void sm_VisCallbackA(LTObject* object, void* pointer) {
+    auto& context = *static_cast<CUpdateContext*>(pointer);
+    if (!context.ClientAlive() || object->m_Unknown54 || !sub_10027be0(context.m_pMgr,object)) return;
+    ObjectCallbackGuard guard(*object);
+    if (context.m_bLocal) {
+        object->m_ChangeFlags &= ~0x200;
+        sub_100348cc(context.m_pMgr,object);
+    }
+    if (context.ClientAlive() && guard.unchanged()) context.MarkVisible(*object);
 }
-
 
 // 0x1002a11e — hand one arrived message to the game's shell (name ours). The
 // enumeration gives this 188 bytes; the `ret` is at 0x1002a166, so it is 73
@@ -5562,21 +4418,10 @@ int sub_1002a0d0(CServerMgr* pMgr, ServerMessage* pMsg, Client* pClient)
 // console's (cc_RunConsoleString, sharedcommon.cpp). The string is read in
 // place off the packet (servermsg.cpp's CMsgStringReader, 0x1002609f), and
 // the read comes first: the second argument is evaluated before the first.
-class CMsgStringReader
-{
-public:
-	char* ReadStringInPlace();               // 0x1002609f
-};
-
-int cc_RunConsoleString(ConsoleState* pState, char* pString);   // 0x10028fc6
-
-int sub_1002a0f2(CServerMgr* pMgr, ServerMessage* pMsg, Client* pClient)
-{
-	if (pClient->m_ClientFlags & 2)
-		return cc_RunConsoleString(&pMgr->m_ConsoleState,
-			((CMsgStringReader*)pMsg)->ReadStringInPlace());
-
-	return 0;
+int sub_1002a0f2(CServerMgr* manager, ServerMessage* packet, Client* client) {
+    if (!manager || !packet || !client || !(client->m_ClientFlags & CLIENTFLAG_LOCAL)) return LT_OK;
+    auto* command = packet->ReadStringInPlace();
+    return command ? cc_RunConsoleString(&manager->m_ConsoleState,command) : LT_INVALIDPARAMS;
 }
 
 LTRESULT sm_GiveMessageToShell(CServerMgr* pMgr, ServerMessage* pMsg,
@@ -5588,7 +4433,7 @@ LTRESULT sm_GiveMessageToShell(CServerMgr* pMgr, ServerMessage* pMsg,
 	// shipped LT_OK sits at the very end with both tests jumping to it and
 	// the body falling into it. As guards it goes inline in the middle
 	// instead.
-	if (hClient && pMgr->m_ClassMgr.m_pServerShell)
+	if (hClient && pMsg && pMsg->CanRead(1) && pMgr->m_ClassMgr.m_pServerShell)
 	{
 		pMgr->InitMessageOwner(pMsg);
 
@@ -5598,8 +4443,8 @@ LTRESULT sm_GiveMessageToShell(CServerMgr* pMgr, ServerMessage* pMsg,
 		nMsgId = ReadByteFromEndInline(pMsg);
 #endif
 
-		pMgr->m_ClassMgr.m_pServerShell->OnMessage(
-			hClient, nMsgId, (HMESSAGEREAD)&pMsg->m_Write);
+		pMgr->m_ClassMgr.shell([&](IServerShell& shell) { return shell.OnMessage(
+			hClient, nMsgId, (HMESSAGEREAD)&pMsg->m_Write); });
 	}
 
 	return LT_OK;
@@ -5615,12 +4460,15 @@ LTRESULT sm_GiveMessageToShell(CServerMgr* pMgr, ServerMessage* pMsg,
 // 0x00469390 row.
 int sub_1002a167(CServerMgr* pMgr, ServerMessage* pMsg, Client* pClient)
 {
-	if (!((CPacket*)pMsg)->ReadType((uint8*)0))
-		pClient->m_Unknown3BC = 1;
-	else
-		pClient->m_Unknown3BC = 3;
-
-	return 0;
+    (void)pMgr;
+    if (!pMsg || !pClient || pClient->m_State != 2 || !pMsg->CanRead(1) ||
+        pMsg->m_DataLen-pMsg->m_Pos != 1) return LT_OK;
+    const auto stage = pMsg->m_pData[pMsg->m_Pos];
+    if (stage == 0 && pClient->m_Unknown3BC == 0) pClient->m_Unknown3BC = 1;
+    else if (stage == 1 && pClient->m_Unknown3BC == 2) pClient->m_Unknown3BC = 3;
+    else return LT_OK;
+    ++pMsg->m_Pos;
+    return LT_OK;
 }
 
 #ifdef LT_SERVER_BUILD
@@ -5640,28 +4488,13 @@ int sub_1002a167(CServerMgr* pMgr, ServerMessage* pMsg, Client* pClient)
 // servermsg.h types ReadData's length uint32; the call here loads it as
 // sixteen bits (`mov (%esi),%cx`), as netmgr.cpp's view of the same function
 // does (link/aliases.rsp joins the two).
-class ServerMessageTypeView
-{
-public:
-	void ReadData(void* pData, uint16 nBytes);   // 0x100260d9
-};
-
-int sub_1002a193(CServerMgr* pMgr, ServerMessage* pMsg, Client* pClient)
-{
-	pClient->m_ClientDataLen = ((CPacket*)pMsg)->ReadType((uint16*)0);
-
-	if (pClient->m_ClientDataLen)
-	{
-		pClient->m_pClientData = new uint8[pClient->m_ClientDataLen];
-
-		((ServerMessageTypeView*)pMsg)->ReadData(pClient->m_pClientData,
-			(uint16)pClient->m_ClientDataLen);
-	}
-
-	pClient->m_ClientFlags |= 0x100;
-
-	return 0;
+int sub_1002a193(CServerMgr* manager, ServerMessage* packet, Client* client) {
+    if (!manager || !packet || !client) return LT_OK;
+    const auto result = client->ReceiveData(*packet);
+    if (result != LT_OK && client->m_pConnection) manager->m_NetMgr.Disconnect(client->m_pConnection,6,result);
+    return LT_OK;
 }
+
 #endif
 
 
@@ -5675,12 +4508,11 @@ LTRESULT sm_UpdateObjectBBox(CServerMgr* pMgr, LTObject* pObj)
 {
 	if (!sm_CanDeactivate(pObj))
 	{
-		if (pObj->m_Unknown58 == 0xffffffff)
-			pMgr->m_Unknown210.BumpObject(pObj, 0);
+        pMgr->m_Unknown210.BumpObject(pObj,0);
 	}
 	else
 	{
-		((IObjectDeactivate*)pObj)->_v08();
+		pObj->_v08();
 	}
 
 	return LT_OK;
@@ -5710,22 +4542,33 @@ static int vq_Accept(void* pUser, void* pObject)
 	return 1;
 }
 
-// CVisQuery's constructor is DEFINED ABOVE sm_WriteClientUpdate, `inline`,
-// for the same reason sm_SkipClientUpdate is -- see the note there.
 
-
-// 0x10032e2f — drain whatever the loader thread sent back, on the thread
-// that asked. The message is a 32-byte local constructed once and refilled
-// by every take, so the loop reuses one frame slot rather than allocating;
-// the queue is the outgoing one, which from the manager's side is the
-// inbound direction.
-void CServerMgr::ProcessThreadMessages()
-{
-	LThreadMessage msg;
-
-	while (m_Thread.m_OutgoingQueue.GetMessage(&msg, 0) == LT_OK)
-		OnModelLoaded(&msg);
+// Complete owned tickets on the owner thread, including queue-allocation fallback.
+void CServerMgr::ProcessThreadMessages() {
+    ServerCallbackGuard operation(m_Lifetime);
+    m_FileMgr.dispatch_notifications();
+    if (!operation.unchanged()) return;
+    LThreadMessage message;
+    while (m_Thread.m_OutgoingQueue.GetMessage(&message,0) == LT_OK) {
+        m_FileMgr.dispatch_notifications();
+        if (!operation.unchanged()) return;
+        OnModelLoaded(&message);
+        if (!operation.unchanged()) return;
+    }
+    for (const auto& [ticket,name] : m_Models.Ready()) {
+        CFileRef* file = nullptr;
+        m_FileMgr.identify(name,0,&file);
+        if (!operation.unchanged()) return;
+        LThreadMessage completion;
+        completion.m_Data[3] = reinterpret_cast<uintptr_t>(file);
+        completion.m_Data[5] = ticket;
+        OnModelLoaded(&completion);
+        if (!operation.unchanged()) return;
+    }
+    m_FileMgr.dispatch_notifications();
+    if (!operation.unchanged()) return;
 }
+
 
 
 // 0x1002ba90 — hand the object's new file names to whatever knows about that
@@ -5733,6 +4576,7 @@ void CServerMgr::ProcessThreadMessages()
 LTRESULT w_ApplyObjectFilenames(CServerMgr* pMgr, LTObject* pObj,
                                 ObjectCreateStruct* pStruct)
 {
+	if (pObj->m_ObjectType >= NUM_OBJECTTYPES) return LT_INVALIDPARAMS;
 	uint32 (*pFn)(CServerMgr*, LTObject*, ObjectCreateStruct*) =
 		g_ObjTypeHandlers[pObj->m_ObjectType].m_pApplyFilenames;
 
@@ -5788,7 +4632,7 @@ void sm_FlushList44(CServerMgr* pMgr)
 		pNext = pCur->m_pNext;
 
 		pSound->Term();
-		sb_Free(&pMgr->m_Bank28, pSound);
+		pMgr->m_SoundInstances.Free(pSound);
 
 		pCur = pNext;
 	}
@@ -5797,118 +4641,7 @@ void sm_FlushList44(CServerMgr* pMgr)
 }
 
 
-// The cache record with the one member servermgr.h does not model: the
-// reset at 0x100356e9 is a thiscall (the shipped sweep loads the record into
-// ecx and pushes nothing), and it clears a count at +0x14 and a float at
-// +0x10. Named by what it does; nothing in the image names the record.
-class CCacheRecView
-{
-public:
-	void Reset();                            // 0x100356e9
-	// 0x1003567c — fill the record in from the file, the opened source and
-	// the handle's second dword; nonzero if it took (name ours).
-	int  Init(void* hFile, class ICacheSource* pSource, void* pParam);
-
-	LTLink m_Link;                           // +0x00
-	void*  m_hFile;                          // +0x0c
-	float  m_f10;                            // +0x10
-	uint32 m_n14;                            // +0x14
-	uint32 m_bWanted;                        // +0x18
-};
-
-// 0x100356e9 — the two counters a fresh (or recycled) record starts from.
-// Source order is only visible at /O2: /O1 rewrites the integer zero as
-// `andl $0x0,0x14(%ecx)` and schedules that ahead of the `fldz/fstps`
-// whatever order they are written in (0x100356e9), while /O2 folds both to
-// one `xor %eax,%eax` and keeps them as spelled -- and lithtech.exe stores
-// +0x10 first (0x0047d302).
-void CCacheRecView::Reset()
-{
-	m_f10 = 0.0f;
-	m_n14 = 0;
-}
-
-// The 0x38-byte description 0x100392a9 fills in from the opened source (it
-// memsets exactly 0x38 bytes before parsing). Only two fields are read here,
-// and the division of one by the other plus a tenth of a second says what
-// they are: a byte total over a byte rate is a duration. Names ours.
-struct CCacheSourceInfo
-{
-	uint8  m_pad_00[0x08];
-	uint32 m_nBytesPerSec;                   // +0x08
-	uint8  m_pad_0c[0x18 - 0x0c];
-	uint32 m_nDataSize;                      // +0x18
-	uint8  m_pad_1c[0x38 - 0x1c];
-};
-
-// 0x100392a9 — parse the opened source's header into that description;
-// nonzero if it made sense of it (name ours).
-int fs_GetSourceInfo(class ICacheSource* pSource, CCacheSourceInfo* pInfo);
-
-// 0x1003567c — fill the record in from the file. The third argument is
-// validated and never read; the shipped code checks it and nothing else.
-//
-// The failure return sits at the very end with the success return jumping
-// over it, which is the AND-merged shape: one positive guard around the
-// whole body rather than three guarded returns.
-int CCacheRecView::Init(void* hFile, ICacheSource* pSource, void* pParam)
-{
-	CCacheSourceInfo info;
-
-	if (hFile && pSource && pParam)
-	{
-		Reset();
-
-		m_hFile = hFile;
-
-		if (fs_GetSourceInfo(pSource, &info))
-		{
-			m_bWanted = 0;
-			m_n14 = 0;
-			m_f10 = (float)info.m_nDataSize / info.m_nBytesPerSec + 0.1f;
-
-			return 1;
-		}
-	}
-
-	return 0;
-}
-
-// 0x10034757 — the cache-pass sweep: every record nobody asked for this
-// pass is unlinked, reset and returned to the bank at 0x0c.
-//
-// Another misnamed declaration in servermgr.h: the list is m_List44 (the
-// records AddCachedFile at 0x1003448f builds, 0x1c bytes out of m_Bank0C
-// with the wanted flag at +0x18), and the sweep has nothing to do with
-// sounds. Kept under the declared name.
-//
-// The record's own LTLink is at offset 0 and its m_pData points back at the
-// record, which is why the unlink operates on the record address rather
-// than on the link the walk is holding.
-void sm_FreeUnusedSounds(CServerMgr* pMgr)
-{
-	LTLink* pCur;
-	LTLink* pHead;
-
-	pCur = pMgr->m_List44.m_Head.m_pNext;
-	pHead = &pMgr->m_List44.m_Head;
-
-	while (pCur != pHead)
-	{
-		CCacheRecView* pRec = (CCacheRecView*)pCur->m_pData;
-		pCur = pCur->m_pNext;
-
-		if (pRec->m_bWanted == 0)
-		{
-			dl_RemoveAt(&pMgr->m_List44, (LTLink*)pRec);
-
-			pRec->Reset();
-
-			sb_Free(&pMgr->m_Bank0C, pRec);
-		}
-	}
-}
-
+void sm_FreeUnusedSounds(CServerMgr* pMgr) { pMgr->m_Sounds.Collect(); }
 
 // 0x10009d1e — the world's object store is shut down through its own vtable
 // (slot 1) and then forgotten.
@@ -5917,60 +4650,6 @@ void sm_FreeUnusedSounds(CServerMgr* pMgr)
 // bytes servermgr.h gives the class; Term (0x10009be5) reaches +0x1d4. The
 // class is therefore much bigger than the header models, so the member is
 // reached through a view here rather than declared.
-class IWorldObjectStore
-{
-public:
-	virtual void _v00() = 0;
-	virtual void Term() = 0;                 // slot 1
-};
-
-class CServerWorldView
-{
-public:
-	// Only the address of each sub-object is reached; what they are is not
-	// established, so they are named by offset.
-	uint8   m_pad_00[0x04];
-	uint32  m_Collection04;                  // 0x04  SetSize(0, alloc) at teardown
-	uint32  m_Unknown08;                     // 0x08  the four the light-array
-	uint32  m_Unknown0c;                     // 0x0c  teardown clears by hand
-	uint32  m_Unknown10;                     // 0x10
-	uint32  m_Unknown14;                     // 0x14
-	uint8   m_pad_18[0x6c - 0x18];
-	uint32  m_Unknown6c;                     // 0x6c
-	uint8   m_pad_70[0xe8 - 0x70];
-	LTLink  m_List0E8;                       // 0xe8  bare head; its payloads
-	                                         //       are deleted one by one
-	uint8   m_pad_f4[0xfc - 0xf4];
-	uint32  m_Unknown0fc;                    // 0xfc
-	uint8   m_pad_100[0x184 - 0x100];
-	IWorldObjectStore* m_pObjects;           // 0x184
-	uint32  m_Collection188;                 // 0x188
-	void**  m_pUnknown18c;                   // 0x18c  array, count below
-	uint32  m_nUnknown190;                   // 0x190
-	uint8   m_pad_194[0x1b0 - 0x194];
-	void*   m_pUnknown1b0;                   // 0x1b0  net_Free'd
-	uint8   m_pad_1b4[0x1b8 - 0x1b4];
-	void*   m_pUnknown1b8;                   // 0x1b8  dfree'd
-	uint8   m_pad_1bc[0x1d0 - 0x1bc];
-	LTLink  m_Children;                      // 0x1d0  child worlds
-	LTLink  m_Link1dc;                       // 0x1dc  this world's own link
-	uint32  m_bIsChild;                      // 0x1e8  nonzero takes the short
-	                                         //        teardown
-};
-
-void CServerWorld::TermObjects()
-{
-	uint32 i;
-	CServerWorldView* pThis = (CServerWorldView*)this;
-
-	if (pThis->m_pObjects)
-	{
-		pThis->m_pObjects->Term();
-		pThis->m_pObjects = LTNULL;
-	}
-}
-
-
 // 0x10028a35 is CPacket::WriteType instantiated for *float* — not for a
 // generic four-byte value: the store is `flds`/`fstps`, which only the float
 // specialisation emits, and `push $4; pop %ebx` is sizeof(float). packet.h
@@ -5996,26 +4675,7 @@ void sm_Unknown27c71(CServerMgr* pMgr, Client* pClient, ServerMessage* pMsg)
 // masks the caller's flags to 0xc0, refuses a connection whose queues are
 // over the limit, and answers 0/1. Reached through a view of the embedded
 // manager; the name is ours, from the arguments.
-class CNetMgrSendView
-{
-public:
-	// 0x10021c55 — DEFINED IN netmgr.cpp, which is the TU the address falls
-	// in; this is only the declaration. It was reconstructed here as well
-	// before dupes.py noticed the two, and the signature has to match
-	// netmgr.cpp's exactly or the two TUs name different symbols.
-	LTBOOL SendToConnection(class ServerMessage* pMsg, class NetConnection* pConn,
-	                        int nFlags);
 
-	// 0x10022990, the send this one gates. servermgr.h has CNetMgr::SendPacket
-	// returning void; the gate returns whatever it answers straight out, so
-	// the view's copy is typed to carry that. Its third argument is a *byte*:
-	// the shipped call pushes the dword slot the byte was stored into with
-	// no zero extension, which only a byte-sized parameter allows.
-	// Typed LTBOOL to agree with netmgr.cpp, which established the return
-	// (servermgr.h still has it as void; see the note there).
-	LTBOOL SendPacket(class ServerMessage* pMsg, class NetConnection* pConn,
-	                  uint8 nOldByte);
-};
 
 // 0x100297b8 — stamp the packet id into the payload's first byte and hand
 // the message to every client that is actually in the world. The id is
@@ -6036,7 +4696,7 @@ void sm_BroadcastToClients(CServerMgr* pMgr, int nPacketID, ServerMessage* pMsg)
 
 		if (pClient->m_pConnection && pClient->m_State == 3)
 		{
-			((CNetMgrSendView*)&pMgr->m_NetMgr)->SendToConnection(
+			(&pMgr->m_NetMgr)->SendToConnection(
 				pMsg, pClient->m_pConnection, 0x80);
 		}
 
@@ -6066,18 +4726,20 @@ void sm_BroadcastToClients(CServerMgr* pMgr, int nPacketID, ServerMessage* pMsg)
 // insert is dl_Insert and not dl_AddHead.
 void sm_RemoveObject(CServerMgr* pServerMgr, HOBJECT hObj)
 {
+    if (!pServerMgr || !pServerMgr->m_Unknown390.m_Allocated.contains(hObj) || !hObj->m_pSData || hObj->m_pSData->m_Removing) return;
 	if (~pServerMgr->m_Unknown1a0 & 1)
 	{
 		if (~hObj->m_ChangeFlags & 1)
 		{
 			LTLink* pLink = g_ObjQueueBank.Allocate();
+            if (!pLink) { pServerMgr->m_ErrorCode = LT_OUTOFMEMORY; return; }
 
 			pLink->m_pData = hObj;
 			dl_Insert(&pServerMgr->m_Link83c, pLink);
 
 			hObj->m_ChangeFlags |= 1;
 
-			obj_FreeData(hObj);
+			obj_ReleaseMemory(hObj);
 
 			hObj->m_ChangeFlags &= ~4;
 		}
@@ -6085,98 +4747,19 @@ void sm_RemoveObject(CServerMgr* pServerMgr, HOBJECT hObj)
 }
 
 
-// The queued message with the members servermgr.h does not model: a list at
-// +0x140 whose nodes' payloads go back to the manager's bank at 0x864, and
-// the reference count at +0x150 the release counts down. The record itself
-// comes out of the bank at 0x9d4.
-class CQueuedMsgView
-{
-public:
-	uint8  m_pad_00[0x140];
-	LTList m_List140;                        // +0x140
-	uint32 m_RefCount;                       // +0x150
-};
-
-// 0x10031d47 — the last reference to a queued message empties it and returns
-// both its nodes' payloads and itself to their banks. The manager is reached
-// through the global rather than being carried on the record.
-void CQueuedMsg::Release()
-{
-	CQueuedMsgView* pThis = (CQueuedMsgView*)this;
-
-	if (--pThis->m_RefCount == 0)
-	{
-		LTLink* pCur = pThis->m_List140.m_Head.m_pNext;
-		LTLink* pHead = &pThis->m_List140.m_Head;
-
-		while (pCur != pHead)
-		{
-			LTLink* pNext = pCur->m_pNext;
-
-			sb_Free(&g_pServerMgr->m_Bank864, pCur->m_pData);
-
-			pCur = pNext;
-		}
-
-		dl_InitList(&pThis->m_List140);
-
-		sb_Free(&g_pServerMgr->m_Bank9D4, pThis);
-	}
-}
-
-
-// 0x10034702 — every cache record's wanted flag is cleared, so a fresh pass
-// can mark the ones that still matter. A thiscall on the manager with no
-// arguments, which CServerMgr does not declare; reached through a view.
-class CCachePassView
-{
-public:
-	void ClearWantedFlags();                 // 0x10034702
-
-	uint8  m_pad_00[0x44];
-	LTList m_List44;                         // +0x44
-};
-
-void CCachePassView::ClearWantedFlags()
-{
-	LTLink* pCur;
-	LTLink* pNext;
-	LTLink* pHead;
-
-	pCur = m_List44.m_Head.m_pNext;
-	pHead = &m_List44.m_Head;
-
-	while (pCur != pHead)
-	{
-		pNext = pCur->m_pNext;
-
-		((CCacheRecView*)pCur->m_pData)->m_bWanted = 0;
-
-		pCur = pNext;
-	}
-}
-
-// 0x1003385a — open a caching pass: forget last pass's count, clear every
-// cache record's wanted flag, clear bit 0 of every model reference's flags,
-// and set or clear the "shell is caching" bit from the argument.
-//
-// LTRESULT, not the void servermgr.h declares: the body ends `xor %eax,%eax`
-// on its single exit, which is LT_OK. Renamed here for that reason — see the
-// report; the header's sm_StartWorldA cannot be defined with this body.
-LTRESULT sm_StartCachePass(CServerMgr* pMgr, int bCaching)
+LTRESULT sm_StartWorldA(CServerMgr* pMgr, int bCaching)
 {
 	void* hElement;
 
-	pMgr->m_Unknown920 = 0;
+	pMgr->m_CachedFiles.clear();
 
-	((CCachePassView*)pMgr)->ClearWantedFlags();
+	pMgr->m_Sounds.BeginPass();
 
 	hElement = dhash_GetFirst(pMgr->m_hModelHash);
 	while (hElement)
 	{
-		uint32* pRef = (uint32*)dhash_GetData(dhash_GetNext(&hElement));
-
-		pRef[0x20 / 4] &= ~1;
+		auto* model = static_cast<Model*>(dhash_GetData(dhash_GetNext(&hElement)));
+        model->m_Flags &= ~1u;
 	}
 
 	if (bCaching)
@@ -6188,72 +4771,9 @@ LTRESULT sm_StartCachePass(CServerMgr* pMgr, int bCaching)
 }
 
 
-// 0x1000e632 and 0x1000e641 — what a packet queue still owes: whether
-// anything is waiting, and whether anything is still unacknowledged (names
-// ours, from where the answers are used).
-// Nothing in the image names the queue; the two dwords the answers come
-// straight out of are reached through a view (offsets ours). Both are cdecl
-// with one argument and both duplicate their epilogue, so each is a positive
-// guard with the zero return after it, not a `return p ? ... : 0`.
-class CPacketQueueView
-{
-public:
-	uint8  m_pad_00[0x48];
-	uint32 m_nQueued;                        // +0x48
-	uint32 m_nUnacked;                       // +0x4c
-};
-
-int msg_HasQueuedPackets(void* pQueue)
-{
-	if (pQueue)
-		return ((CPacketQueueView*)pQueue)->m_nQueued;
-
-	return 0;
+int sm_PrepClientEnterWorld(CServerMgr* manager, Client* client) {
+    return client && client->ReadyForWorld(manager->m_Unknown198 != 0);
 }
-
-int msg_HasUnackedPackets(void* pQueue)
-{
-	if (pQueue)
-		return ((CPacketQueueView*)pQueue)->m_nUnacked;
-
-	return 0;
-}
-
-// 0x10027533 — may this client be let into the world yet? Not while the
-// manager is between worlds, and not unless the client has asked (bit 8).
-// A client that has already been told (bit 1) is ready; otherwise its packet
-// queue has to have drained, and bit 0 decides how thoroughly.
-//
-// The queue pointer's address is named in a local, which is why the two
-// pushes reload through one register rather than each recomputing the member
-// address.
-int sm_PrepClientEnterWorld(CServerMgr* pMgr, Client* pClient)
-{
-	if (pMgr->m_Unknown198)
-	{
-		return 0;
-	}
-	else
-	{
-		uint32 nFlags = pClient->m_ClientFlags;
-
-		if (!(nFlags & 0x100))
-			return 0;
-
-		if (nFlags & 2)
-			return 1;
-
-		if (nFlags & 1)
-		{
-			void** ppQueue = &pClient->m_pUnknown18C;
-
-			return !(msg_HasQueuedPackets(*ppQueue) || msg_HasUnackedPackets(*ppQueue));
-		}
-
-		return !msg_HasQueuedPackets(pClient->m_pUnknown18C);
-	}
-}
-
 
 // 0x1000e845 — how much room is left in the message: m_MaxDataLen (+0x36)
 // minus the write position (+0x38) minus a seven-byte header reserve,
@@ -6265,137 +4785,18 @@ int sm_PrepClientEnterWorld(CServerMgr* pMgr, Client* pClient)
 // comparison below reads as "does the message still fit". netmgr.cpp's
 // declaration of the same address as GetSpaceLeft is the accurate one and
 // is what the definition carries.
-class CMsgLenView
-{
-public:
-	int GetSpaceLeft();                      // 0x1000e845
-	int GetSpaceLeftCall();                  // stand-in, see below
-
-	uint8  m_pad_00[0x36];
-	uint16 m_MaxDataLen;                     // +0x36
-	uint16 m_Pos;                            // +0x38
-};
-
-// Image seam (measured): lithtech.exe expands this at every site but one
-// (the lone call to 0x00463730 is at 0x00463584, sm_SendObjectInfo2), so
-// /O2 must see an inline body; server.dll calls 0x1000e845 from all six of
-// its callers here, and making it inline there costs five of them.
-#ifndef LT_SERVER_BUILD
-inline
-#endif
-int CMsgLenView::GetSpaceLeft()
-{
-	int nLeft = m_MaxDataLen - m_Pos - 7;
-
-	if (nLeft < 0)
-		nLeft = 0;
-
-	return nLeft;
-}
-
-// STAND-IN for the one lithtech.exe site that CALLS GetSpaceLeft
-// (0x00463584, the model-hash loop of sm_SendObjectInfo2) while the next
-// site in the same function expands it (0x0046361b): an out-of-line copy of
-// the body, which is what 0x00463730 is. What really kept the original from
-// expanding that site is not visible in the bytes. server.dll calls the one
-// function everywhere, so there it simply forwards.
-#ifndef LT_SERVER_BUILD
-int CMsgLenView::GetSpaceLeftCall()
-{
-	int nLeft = m_MaxDataLen - m_Pos - 7;
-
-	if (nLeft < 0)
-		nLeft = 0;
-
-	return nLeft;
-}
-#else
-inline int CMsgLenView::GetSpaceLeftCall()
-{
-	return GetSpaceLeft();
-}
-#endif
-
 // 0x100277e2 — whatever the manager owes a packet before it goes out (two
 // arguments, the manager and the message; named by address, nothing in the
 // image says more).
-// The packet trace stream. The object at CServerMgr+0x808 is what
-// streamsim_Open (0x10035a8d) hands back — an ILTStream — and only Write is
-// reached here, at slot 9 (0x24) counting the SDK's virtual destructor as
-// slot 0. servermgr.h models the member as a two-slot CUnknown808Obj, so the
-// call goes through this view.
-class ITraceStream
-{
-public:
-	virtual void _v00() = 0;                 // 0x00  ~ILTStream
-	virtual void _v04() = 0;                 // 0x04  Release
-	virtual void _v08() = 0;                 // 0x08  Read
-	virtual void _v0c() = 0;                 // 0x0c  ReadString
-	virtual void _v10() = 0;                 // 0x10  ErrorStatus
-	virtual void _v14() = 0;                 // 0x14  SeekTo
-	virtual void _v18() = 0;                 // 0x18  GetPos
-	virtual void _v1c() = 0;                 // 0x1c  GetLen
-	virtual void _v20() = 0;                 // 0x20  WriteStream
-	virtual LTRESULT Write(const void* pData, uint32 nSize) = 0;   // 0x24
-};
-
-// 0x10058474 gates the trace entirely; 0x10051c64 gates only the marker at
-// the end of each packet (names by address).
 extern uint32 g_bPacketTrace58474;
 extern uint32 g_bTraceMarker51c64;
-
-// 0x100518a0 — the mode string streamsim_Open is given, the same one
-// fs_CopyStreamToFile uses (serverengine.h). In .data, not .rdata, so it is
-// a writable array rather than a pooled literal.
-extern char g_szStreamWriteMode[];
-
-// 0x100277e2 — dump the packet about to go out to "packet.trc", byte by
-// byte, and mark the end of it with "*END*". The stream is opened on first
-// use and kept on the manager.
-//
-// The five marker bytes are five separate `char` locals, not a string: each
-// one's address is passed on its own and the shipped build parks two of them
-// in the dead parameter slots and three in the single dword of frame it
-// reserves. A `char[5]` would be one contiguous run and one `lea` per
-// element from a common base.
-//
-// They are declared in the reverse of the order they are written, and that
-// is the whole difference between a near and a match here: the slots each
-// one gets are fixed by the order they are *used*, but the initialiser
-// stores come out in declaration order, so declaring them forwards gives
-// five right slots with the stores emitted backwards.
-void sub_100277e2(CServerMgr* pMgr, ServerMessage* pMsg)
-{
-	uint32 i;
-
-	if (!g_bPacketTrace58474)
-		return;
-
-	if (!pMgr->m_pUnknown808)
-	{
-		pMgr->m_pUnknown808 =
-			(CUnknown808Obj*)streamsim_Open("packet.trc", g_szStreamWriteMode);
-
-		if (!pMgr->m_pUnknown808)
-			return;
-	}
-
-	for (i = 0; i < pMsg->m_Unknown34; i++)
-	{
-		((ITraceStream*)pMgr->m_pUnknown808)->Write(&pMsg->m_pData[i], 1);
-	}
-
-	if (g_bTraceMarker51c64)
-	{
-		ITraceStream* pStream = (ITraceStream*)pMgr->m_pUnknown808;
-		char c5 = '*', c4 = 'D', c3 = 'N', c2 = 'E', c1 = '*';
-
-		pStream->Write(&c1, 1);
-		pStream->Write(&c2, 1);
-		pStream->Write(&c3, 1);
-		pStream->Write(&c4, 1);
-		pStream->Write(&c5, 1);
-	}
+void sub_100277e2(CServerMgr* manager, ServerMessage* packet) {
+    if (!g_bPacketTrace58474 || !manager || !packet) return;
+    if (!manager->m_pPacketTrace) manager->m_pPacketTrace = streamsim_Open("packet.trc","wb");
+    auto* stream = manager->m_pPacketTrace;
+    if (!stream || stream->ErrorStatus() != LT_OK) return;
+    if (stream->Write(packet->m_pData,packet->m_Unknown34) != LT_OK) return;
+    if (g_bTraceMarker51c64) stream->Write("*END*",5);
 }
 
 // 0x100278ad — close the update packet off and start the next one, unless it
@@ -6410,7 +4811,7 @@ void sub_100277e2(CServerMgr* pMgr, ServerMessage* pMsg)
 LTBOOL sm_FinishUpdatePacket(CUpdateContext* pCtx, ServerMessage* pMsg,
                              int nA, int nThreshold)
 {
-	if (nThreshold != -1 && ((CMsgLenView*)pMsg)->GetSpaceLeft() >= nThreshold)
+	if (nThreshold != -1 && (static_cast<ServerMessage*>(pMsg))->GetSpaceLeft() >= nThreshold)
 		return LTFALSE;
 
 	{
@@ -6440,17 +4841,6 @@ LTBOOL sm_FinishUpdatePacket(CUpdateContext* pCtx, ServerMessage* pMsg,
 // 0x1000e3f9 once more, through a two-string fixed prototype: the unfreed-
 // sound warning batches its stack cleanup with fs_GetFilename's, which is
 // what says this site was not compiled varargs (see dsi_PrintStat).
-void dsi_PrintFileName(char* pFormat, char* pFilename);
-
-// The sound instance's file handle, which servermgr.h leaves in the padding
-// at +0x14. Named from the only use: the unfreed-sound warning resolves it
-// through the file manager.
-class CSoundFileView
-{
-public:
-	uint8 m_pad_00[0x14];
-	void* m_pFile;                           // +0x14
-};
 
 // 0x100347a4 — the world's sounds are taken down one by one, and anything
 // still holding a file at debug level 3 or above is complained about first.
@@ -6471,75 +4861,39 @@ void sm_EndWorldD(CServerMgr* pMgr)
 		pCur = pCur->m_pNext;
 
 		if ((pSound->m_PlaySoundFlags & 0x10) && g_DebugLevel >= 3 &&
-			((CSoundFileView*)pSound)->m_pFile)
+			pSound->m_hFile)
 		{
-			dsi_PrintFileName("Unfreed sound file (server) %s",
+			dsi_ServerError("Unfreed sound file (server) %s",
 				fs_GetFilename(&pMgr->m_FileMgr,
-					((CSoundFileView*)pSound)->m_pFile));
+					pSound->m_hFile));
 		}
 
 		dl_RemoveAt(&pMgr->m_List54, &pSound->m_Link);
 
 		pSound->Term();
 
-		sb_Free(&pMgr->m_Bank28, pSound);
+		pMgr->m_SoundInstances.Free(pSound);
 	}
 }
 
 
-// Two members servermgr.h leaves inside Client's padding: the link an
-// attached client is filed on (+0x164), and the head of the list of clients
-// attached to this one (+0x180). Named from what sm_AttachClient does with
-// them.
-class CClientAttachView
-{
-public:
-	uint8  m_pad_00[0x164];
-	LTLink m_AttachLink;                     // +0x164
-	uint8  m_pad_170[0x180 - 0x170];
-	LTLink m_AttachHead;                     // +0x180
-};
-
-// 0x10027259 — stop a client watching another's view.
-//
-// SHIPPED BUG. The message this sends is a null pointer: the two header
-// words are written to absolute addresses 0x38 and 0x34 (there is no
-// relocation anywhere in this function, so those are literally `(char*)0 +
-// 0x34`), the word write is a thiscall with `xor %ecx,%ecx` for `this`, and
-// the fourth argument handed to sm_SendToClient is a pushed zero. The
-// sibling sm_AttachClient (0x10027155) does the same sequence properly, off
-// a `CMessageRef` it fills from msg_AllocPacket — so what is missing here is
-// exactly that allocation. Reconstructed as it shipped, null and all.
-LTRESULT sm_DetachClient(CServerMgr* pMgr, Client* pClient)
-{
-	ServerMessage* pMsg = LTNULL;
-
-	if (pClient->m_pViewClient)
-	{
-		dl_Remove(&((CClientAttachView*)pClient)->m_AttachLink);
-
-		pClient->m_pViewClient = LTNULL;
-
-		if (pClient->m_pUnknown3AC)
-		{
-			pMsg->m_Unknown38 = 1;
-			pMsg->m_Unknown34 = 1;
-
-			// CPacket::WriteType<uint16>, not the ServerMessage::WriteWord
-			// wrapper servermsg.h names: 0x1000ec3d IS that instantiation
-			// (m_Pos/m_MaxDataLen/m_DataLen, SetAtGrow, and the
-			// "CPacket::WriteType" error), so /O1 calls it either way and
-			// only /O2 can tell the spellings apart -- lithtech.exe carries
-			// the body expanded here (0x00463f54..0x0046403a).
-			((CPacket*)pMsg)->WriteType(pClient->m_pUnknown3AC->m_ObjectID);
-
-			sm_SendToClient(pMgr, pClient, 7, pMsg, 1, 0x80);
-		}
-	}
-
-	return LT_OK;
+LTRESULT sm_DetachClient(CServerMgr* manager, Client* client) {
+    if (!manager || !client) return LT_INVALIDPARAMS;
+    if (!client->Detach()) return LT_OK;
+    if (client->m_pUnknown3AC) {
+        ServerMessage message;
+        message.WriteWord(client->m_pUnknown3AC->m_ObjectID);
+        if (message.m_Flags & PACKETFLAG_WRITEOVERFLOW) return LT_OUTOFMEMORY;
+        sm_SendToClient(manager, client, 7, &message, 1, 0x80);
+    }
+    return LT_OK;
 }
 
+void sub_100272d6(CServerMgr* manager, Client* client) {
+    if (!client) return;
+    while (client->m_AttachHead.m_pNext != &client->m_AttachHead)
+        sm_DetachClient(manager, static_cast<Client*>(client->m_AttachHead.m_pNext->m_pData));
+}
 
 // 0x10033126 — make one object of a class: allocate the game-side instance,
 // let it pre-create itself, then put it in the world. A refused world entry
@@ -6553,81 +4907,44 @@ LTRESULT sm_DetachClient(CServerMgr* pMgr, Client* pClient)
 // bytes, not the 185 its old enumerated extent said) expands the allocation and
 // the free; server.dll calls 0x10001c54 and 0x1002abf8 (see the notes at
 // sm_FreeObjectInline and sm_AllocateObjectInline).
-LPBASECLASS CServerMgr::CreateObject(HCLASS hClass, ObjectCreateStruct* pStruct)
-{
-	LTObject* pObject;
-
-	LPBASECLASS pClass = sm_AllocateObjectInline(this, ((CClassInfo*)hClass)->m_pClassDef);
-
-	pClass->EngineMessageFn(MID_PRECREATE, pStruct, 0.0f);
-
-	if (sm_CreateObjectInWorld(this, pClass, ((CClassInfo*)hClass)->m_pClassDef, pStruct,
-	                           0xffff, 0.0f, &pObject) == LT_OK)
-	{
-		return pClass;
-	}
-
-	sm_FreeObjectInline(this, ((CClassInfo*)hClass)->m_pClassDef, pClass);
-
-	return LTNULL;
+LPBASECLASS CServerMgr::CreateObject(HCLASS hClass, ObjectCreateStruct* pStruct) {
+    return CreateObjectWithProperties(hClass, pStruct, {}, PRECREATE_NORMAL);
 }
-
-
-// The visibility query in flight, published in .data at 0x10058c6c by the
-// world's own walk (0x10038ea0 stores it). Its +0x18 is where the walk keeps
-// the query's user pointer, which is the update context the gather needs;
-// what the rest of the object is has not been established, so only that one
-// field is modelled (names ours).
-class CVisQueryState
+LPBASECLASS CServerMgr::CreateObjectWithProperties(HCLASS hClass, ObjectCreateStruct* pStruct,
+        std::shared_ptr<const ObjectProperties> properties, float reason)
 {
-public:
-	uint8           m_pad_00[0x18];
-	CUpdateContext* m_pUser;                 // +0x18
-};
-
-extern CVisQueryState* g_pVisQueryState;
-
-// 0x100283ff — the second query callback: one leaf's worth of objects, of
-// which the ones this client still owes an update go into the caller's array.
-//
-// servermgr.h declares this as `int sm_VisCallbackB(void* pUser, void* pObject)`,
-// which is wrong twice over. It takes THREE arguments and has exactly the
-// shape sm_SFXGatherOwned (0x10034b0c) has — the same slot's other occupant,
-// assigned to m_Fn2 by sm_SendSFXMessage — so m_Fn2 is a per-list gather and
-// not a per-object callback. And it returns nothing: the shared exit puts
-// nothing in eax. Renamed and given the real signature.
-//
-// The context is not passed in: unlike sm_VisCallbackA, which gets it as its
-// second argument, this one fetches it out of the global the world's walk
-// publishes, and holds it in a local that has to spill because all three
-// callee-saved registers are already busy.
-
-void sm_VisGatherObjects(LTLink* pListHead, LTObject*** pppList, uint32* pnCount)
-{
-	CUpdateContext* pCtx = g_pVisQueryState->m_pUser;
-
-	LTLink* pCur = pListHead->m_pNext;
-	while (pCur != pListHead)
-	{
-		LTObject* pObj = (LTObject*)pCur->m_pData;
-
-		if (!pObj->m_pSData)
-			return;
-
-		if (sub_10027be0(pCtx->m_pMgr, pObj))
-		{
-			(*pppList)[*pnCount] = pObj;
-			(*pnCount)++;
-		}
-
-		pCur = pCur->m_pNext;
-	}
+    ServerActivity activity(m_Lifetime);
+    if (!activity.available()) return nullptr;
+    if (!pStruct || !m_Initialized || !m_bWorldLoaded || m_Terminating || m_EndingWorld || !m_Lifetime->alive) return nullptr;
+    const auto* record = m_ClassMgr.record(hClass);
+    if (!record || (record->m_pClassDef->m_ClassFlags & CF_NORUNTIME)) return nullptr;
+    auto* definition = record->m_pClassDef;
+    ObjectCreateStruct create = *pStruct;
+    std::snprintf(create.m_ClassName,sizeof(create.m_ClassName),"%s",definition->m_ClassName);
+    ServerCallbackGuard server(m_Lifetime);
+    struct PropertyScope {
+        CServerMgr* manager; ServerCallbackGuard guard;
+        std::shared_ptr<const ObjectProperties> previous;
+        ~PropertyScope() { if (guard.unchanged()) manager->m_Properties = std::move(previous); }
+    } scope{this, server, std::exchange(m_Properties, std::move(properties))};
+    auto* game = m_ClassMgr.allocate(definition);
+    if (!server.unchanged() || !game) return nullptr;
+    try {
+        const auto accepted = m_ClassMgr.message(game,MID_PRECREATE,&create,reason);
+        if (!server.unchanged()) return nullptr;
+        if (accepted) {
+            LTObject* object = nullptr;
+            if (sm_CreateObjectInWorld(this,game,definition,&create,0xffff,reason,&object) == LT_OK && server.unchanged()) return game;
+        }
+    } catch (const std::exception& error) { nolf::platform::log("object creation",error.what()); }
+    if (server.unchanged()) m_ClassMgr.destroy(game);
+    return nullptr;
 }
 
 
 // 0x10034973 — what the ping walk does to each object it can see (name
 // ours; it is only ever installed here).
-void sub_10034973(void* pUser, void* pObject);
+
 
 // 0x1003491b — wake everything within ten thousand units of the object, so
 // deactivated objects it might touch come back. Nothing happens while
@@ -6649,9 +4966,11 @@ void sm_PingObjects(CServerMgr* pMgr, LTObject* pObj)
 		return;
 
 	query.m_Position = pObj->m_Pos;
-	query.m_pUser = LTNULL;
-	query.m_Radius = 10000.0f;
-	query.m_Fn1 = sub_10034973;
+    query.m_pUser = pMgr;
+    query.m_Radius = 10000.0f;
+    query.m_Fn1 = [](LTObject* object,void* context) {
+        if (!object->m_Unknown54 && object->m_pSData) sub_100348cc(static_cast<CServerMgr*>(context),object);
+    };
 
 	((IObjectQuery*)&pMgr->m_Unknown210)->FindObjects(&query);
 }
@@ -6660,65 +4979,27 @@ void sm_PingObjects(CServerMgr* pMgr, LTObject* pObj)
 // The class record's flag word, which servermgr.h leaves in CClassInfo's
 // padding at +0x08. Bit 2 marks a class the world teardown leaves alone
 // unless it is told to remove everything (name ours, from that one use).
-class CClassFlagsView
-{
-public:
-	uint8  m_pad_00[0x08];
-	uint32 m_Flags;                          // +0x08
-};
-
-// 0x100325bd — empty the world of objects. The queued-object list is drained
-// first, and then the live-object list is walked from its head every time
-// round, because removing an object unlinks the node the walk was holding.
-// The flag at bit 0 of 0x1a0 is what stops sm_RemoveObject re-queueing while
-// this runs.
-void sm_RemoveObjects(CServerMgr* pMgr, int bRemoveAll)
-{
-	LTLink* pHead;
-	LTLink* pCur;
-
-	pMgr->m_Unknown1a0 |= 1;
-
-	sm_DrainObjectQueue(pMgr);
-
-	pCur = pMgr->m_List8dc.m_Head.m_pNext;
-	pHead = &pMgr->m_List8dc.m_Head;
-
-	while (pCur != pHead)
-	{
-		SObjData* pSData = ((LTObject*)pCur->m_pData)->m_pSData;
-
-		if (bRemoveAll)
-		{
-			sm_RemoveObjectFromWorld(pMgr, pSData->m_pBaseClass);
-		}
-		else if (!(((CClassFlagsView*)pSData->m_pClass)->m_Flags & 4))
-		{
-			sm_RemoveObjectFromWorld(pMgr, pSData->m_pBaseClass);
-		}
-
-		pCur = pMgr->m_List8dc.m_Head.m_pNext;
-	}
-
-	pMgr->m_Unknown1a0 &= ~1;
+void sm_RemoveObjects(CServerMgr* manager, int all) {
+    ServerCallbackGuard lifetime(manager->m_Lifetime);
+    manager->m_Unknown1a0 |= 1;
+    sm_DrainObjectQueue(manager);
+    if (!lifetime.unchanged()) return;
+    struct Context { CServerMgr* manager; bool all; ServerCallbackGuard guard; } context{manager,all != 0,lifetime};
+    object_Visit(manager->m_List8dc,[](void* pointer,LTObject& object) {
+        auto& context = *static_cast<Context*>(pointer);
+        if (!context.guard.unchanged()) return false;
+        if (object.m_pSData && object.m_pSData->m_pBaseClass &&
+            (context.all || !object.m_pSData->m_pClass || !(object.m_pSData->m_pClass->m_ClassFlags & CF_STATIC)))
+            sm_RemoveObjectFromWorld(context.manager,object.m_pSData->m_pBaseClass);
+        return context.guard.unchanged();
+    },&context);
+    if (lifetime.unchanged()) manager->m_Unknown1a0 &= ~1u;
 }
-
 
 // ltobject_internal.h declares LTObject's vtable slot 0x34 (index 13) as
 // void; the write gate below tests its answer, so the object is reached
 // through a view that gives the slot a return type. Only that slot is used
 // (name ours, from what it decides).
-class IObjectUpdateGate
-{
-public:
-	virtual void _v00() = 0; virtual void _v04() = 0; virtual void _v08() = 0;
-	virtual void _v0c() = 0; virtual void _v10() = 0; virtual void _v14() = 0;
-	virtual void _v18() = 0; virtual void _v1c() = 0; virtual void _v20() = 0;
-	virtual void _v24() = 0; virtual void _v28() = 0; virtual void _v2c() = 0;
-	virtual void _v30() = 0;
-	virtual int  IsSkipped() = 0;            // 0x34
-};
-
 #ifdef LT_SERVER_BUILD
 // (lithtech.exe's /O2 copy, 0x00464a00, is further down, after
 // sm_WriteObjectUpdate, so that both of its helpers can be expanded.)
@@ -6734,7 +5015,7 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 	if (pObject->m_Unknown54)
 		return;
 
-	if (((IObjectUpdateGate*)pObject)->IsSkipped())
+	if (pObject->_v34())
 		return;
 
 	if (pObject->m_ObjectType == OT_WORLDMODEL &&
@@ -6745,7 +5026,7 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 		return;
 
 	sm_WriteObjectUpdate(pCtx, pObject,
-		&pCtx->m_pClient->m_pObjInfos[pObject->m_ObjectID]);
+		&pCtx->m_pClient->m_ObjInfos[pObject->m_ObjectID]);
 
 	pAttach = pObject->m_pAttachments;
 
@@ -6756,7 +5037,7 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 		if (pChild && sub_10027be0(pCtx->m_pMgr, pChild))
 		{
 			sm_WriteObjectUpdate(pCtx, pChild,
-				&pCtx->m_pClient->m_pObjInfos[pChild->m_ObjectID]);
+				&pCtx->m_pClient->m_ObjInfos[pChild->m_ObjectID]);
 		}
 
 		pAttach = pAttach->m_pNext;
@@ -6770,13 +5051,6 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx);  // defined below
 // heads are reached, and only from here (name ours).
 #define NUM_CHANGEDOBJECT_LISTS 11
 
-class CChangedObjectLists
-{
-public:
-	uint8  m_pad_00[0x220];
-	LTList m_Lists[NUM_CHANGEDOBJECT_LISTS];    // +0x220
-};
-
 // 0x10027e26 — write every object whose state changed into this client's
 // update, eleven buckets' worth. An object flagged 0x200 is moved between
 // the active and inactive halves of the manager's list first, keeping only
@@ -6784,40 +5058,25 @@ public:
 //
 // The bucket counter lives in the dead p390 argument slot, because ebx, esi
 // and edi are all spoken for by the two walks.
-void sm_WriteChangedObjects(CServerMgr* pMgr, CUnknown390* p390,
-                            CUpdateContext* pCtx)
-{
-	LTList* pList = ((CChangedObjectLists*)p390)->m_Lists;
-	int     nLists = NUM_CHANGEDOBJECT_LISTS;
-
-	do
-	{
-		LTLink* pHead = &pList->m_Head;
-		LTLink* pCur = pHead->m_pNext;
-
-		while (pCur != pHead)
-		{
-			LTObject* pObj = (LTObject*)pCur->m_pData;
-			uint32    nFlags = pObj->m_ChangeFlags;
-
-			if (nFlags & 0x200)
-			{
-				nFlags &= ~0x200;
-				pObj->m_ChangeFlags = nFlags;
-
-				sm_SetObjectState(pMgr, pObj, (nFlags & 0x18) | 0x20);
-			}
-
-			sub_10027918(pObj, pCtx);
-
-			pCur = pCur->m_pNext;
-		}
-
-		pList++;
-	}
-	while (--nLists);
+void sm_WriteChangedObjects(CServerMgr* manager, CUnknown390* objects, CUpdateContext* context) {
+    struct Visit { CServerMgr* manager; CUpdateContext* context; } visit{manager,context};
+    for (auto& list : objects->m_Lists) {
+        if (!context->ClientAlive()) return;
+        if (!object_Visit(list,[](void* pointer,LTObject& object) {
+            auto& visit = *static_cast<Visit*>(pointer);
+            if (!visit.context->ClientAlive()) return false;
+            ObjectCallbackGuard guard(object);
+            if (object.m_ChangeFlags & 0x200) {
+                object.m_ChangeFlags &= ~0x200;
+                sm_SetObjectState(visit.manager,&object,(object.m_ChangeFlags & 0x18) | 0x20);
+            }
+            if (!visit.context->ClientAlive()) return false;
+            if (guard.unchanged() && (visit.context->IsVisible(object) || (object.m_Flags & FLAG_FORCECLIENTUPDATE)))
+                sub_10027918(&object,visit.context);
+            return visit.context->ClientAlive();
+        },&visit)) return;
+    }
 }
-
 
 // 0x1002759a — a client is let into the world: it is told the world has
 // started (packet 5), then every console variable by name and value (packet
@@ -6827,7 +5086,7 @@ void sm_WriteChangedObjects(CServerMgr* pMgr, CUnknown390* p390,
 //
 // LTRESULT, not the void servermgr.h declares: the single exit ends
 // `xor %eax,%eax`. Renamed with a 2 suffix for that reason, the way
-// sm_ObjectRemoved2 and sm_UpdateClientState2 are -- the header's
+// sm_ObjectRemoved and sm_UpdateClientState2 are -- the header's
 // declaration cannot be defined with this body.
 //
 // The console-variable pointer lives in the dead pMgr argument slot -- ebx,
@@ -6841,12 +5100,7 @@ LTRESULT sm_SendCacheEntry(CServerMgr* pMgr, Client* pClient, uint32 iEntry);
 // The model reference the manager's hash at 0x918 holds: the cache pass
 // clears bit 0 of its flags at +0x20, and the object-info send writes its
 // file id out of +0x1c as a word (names by offset).
-class CModelRefView
-{
-public:
-	uint8  m_pad_00[0x1c];
-	uint16 m_FileID;                         // +0x1c
-};
+
 
 // 0x10026b4d — tell an entering client what it has to have loaded: the
 // cache list first (section 0 and then whatever sm_SendCacheEntry adds),
@@ -6893,12 +5147,11 @@ LTRESULT sm_SendObjectInfo2(CServerMgr* pMgr, Client* pClient)
 	hIter = dhash_GetFirst(pMgr->m_hModelHash);
 	while (hIter)
 	{
-		CModelRefView* pRef =
-			(CModelRefView*)dhash_GetData(dhash_GetNext(&hIter));
+		auto* model = static_cast<Model*>(dhash_GetData(dhash_GetNext(&hIter)));
 
-		msg.m_pMsg->WriteWord(pRef->m_FileID);
+		msg.m_pMsg->WriteWord(static_cast<uint16>(model->m_FileFlags));
 
-		if (((CMsgLenView*)msg.m_pMsg)->GetSpaceLeftCall() < 0x32)
+		if ((static_cast<ServerMessage*>(msg.m_pMsg))->GetSpaceLeft() < 0x32)
 		{
 			sm_SendToClient(pMgr, pClient, 0x15, msg.m_pMsg, 0, 0x80);
 
@@ -6924,36 +5177,15 @@ LTRESULT sm_SendObjectInfo2(CServerMgr* pMgr, Client* pClient)
 
 	msg.m_pMsg->WriteByte(5);
 
-	pCur = pMgr->m_List44.m_Head.m_pNext;
-	while (pCur != &pMgr->m_List44.m_Head)
-	{
-		CCacheRecView* pRec = (CCacheRecView*)pCur->m_pData;
-
-		pCur = pCur->m_pNext;
-
-		if (pRec)
-		{
-			if (pRec->m_bWanted && pRec->m_hFile)
-			{
-				msg.m_pMsg->WriteWord(
-					((CFileIdentifier*)pRec->m_hFile)->m_FileID);
-			}
-
-			if (((CMsgLenView*)msg.m_pMsg)->GetSpaceLeft() < 0x32)
-			{
-				sm_SendToClient(pMgr, pClient, 0x15, msg.m_pMsg, 0, 0x80);
-
-				{
-					ServerMessage* pMsg = msg.m_pMsg;
-
-					pMsg->m_Unknown38 = 1;
-					pMsg->m_Unknown34 = 1;
-				}
-
-				msg.m_pMsg->WriteByte(5);
-			}
-		}
-	}
+    for (auto fileID : pMgr->m_Sounds.WantedFileIDs()) {
+        msg.m_pMsg->WriteWord(fileID);
+        if (msg.m_pMsg->GetSpaceLeft() < 0x32) {
+            sm_SendToClient(pMgr,pClient,0x15,msg.m_pMsg,0,0x80);
+            msg.m_pMsg->m_Unknown38 = 1;
+            msg.m_pMsg->m_Unknown34 = 1;
+            msg.m_pMsg->WriteByte(5);
+        }
+    }
 
 	sm_SendToClient(pMgr, pClient, 0x15, msg.m_pMsg, 0, 0x80);
 
@@ -6979,11 +5211,7 @@ LTRESULT sm_SendObjectInfo2(CServerMgr* pMgr, Client* pClient)
 // 0x10026137 — append a length-prefixed string to a message's payload; the
 // one writer servermsg.h does not declare (name ours). Declared here rather
 // than beside its other user below, because this is the first use.
-class CMsgStringView
-{
-public:
-	void WriteString(char* pStr);            // 0x10026137
-};
+
 
 #ifndef LT_SERVER_BUILD
 class CServerWorldQ2B;
@@ -7038,8 +5266,8 @@ LTRESULT sm_ClientEnterWorld2(CServerMgr* pMgr, Client* pClient)
 					pMsg->m_Unknown34 = 1;
 				}
 
-				((CMsgStringView*)msg.m_pMsg)->WriteString(pVar->m_pName);
-				((CMsgStringView*)msg.m_pMsg)->WriteString(pVar->m_pStringVal);
+				(msg.m_pMsg)->WriteString(pVar->m_pName);
+				(msg.m_pMsg)->WriteString(pVar->m_pStringVal);
 
 				sm_SendToClient(pMgr, pClient, 0x10, msg.m_pMsg, 0, 0x80);
 			}
@@ -7057,7 +5285,7 @@ LTRESULT sm_ClientEnterWorld2(CServerMgr* pMgr, Client* pClient)
 		// WriteType<uint16>: lithtech.exe expands both writes here, the
 		// float one at 0x004644ed and this one at 0x004645a6.
 		((CPacket*)msg.m_pMsg)->WriteType(
-			((CFileIdentifier*)pMgr->m_hWorldFile)->m_FileID);
+			((CFileIdentifier*)pMgr->m_hWorldFile)->m_nFileID);
 
 		sm_SendToClient(pMgr, pClient, 6, msg.m_pMsg, 0, 0x80);
 
@@ -7080,59 +5308,34 @@ LTRESULT sm_ClientEnterWorld2(CServerMgr* pMgr, Client* pClient)
 void cs_InvalidateAndTerm();              // 0x00414900 (client only)
 #endif
 
-void sm_ClientExitWorld(CServerMgr* pMgr, Client* pClient)
-{
-	CMessageRef msg;
+static void sm_ClearClientObject(CServerMgr* manager, Client* client) {
+    auto* object = client->m_pUnknown3AC;
+    client->m_pUnknown3AC = nullptr;
+    if (object && manager->m_Unknown390.m_Allocated.contains(object) && object->m_pSData &&
+        object->m_pSData->m_pOwningClient == client) object->m_pSData->m_pOwningClient = nullptr;
+}
 
-	{
-		CAbstractIO* pIO;
-		msg.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
-		if (pIO)
-			pIO->Release();
-	}
-
-	pMgr->m_ClassMgr.m_pServerShell->OnClientExitWorld((HCLIENT)pClient);
-
-	{
-		LTObject** ppObj = &pClient->m_pUnknown3AC;
-
-		if (*ppObj)
-			(*ppObj)->m_pSData->m_pOwningClient = LTNULL;
-
-		*ppObj = LTNULL;
-	}
-
-	{
-		ServerMessage* pMsg = msg.m_pMsg;
-
-		pMsg->m_Unknown38 = 1;
-		pMsg->m_Unknown34 = 1;
-	}
-
-	sm_SendToClient(pMgr, pClient, 5, msg.m_pMsg, 0, 0x80);
-
-	// lithtech.exe only (0x004646c8..0x004646d7): a local client's exit also
-	// tears the client-side world down, through clientmgr2.cpp's
-	// cs_InvalidateAndTerm (0x00414900). server.dll has no client shell, and
-	// its copy (0x100276eb) ends at the send.
+void sm_ClientExitWorld(CServerMgr* manager, Client* client) {
+    if (!manager || !client || client->m_ExitingWorld) return;
+    const auto lifetime = client->m_Lifetime;
+    client->m_ExitingWorld = true;
+    if (manager->m_ClassMgr.m_pServerShell) manager->m_ClassMgr.shell([&](IServerShell& shell) { return shell.OnClientExitWorld(client->Handle()); });
+    if (!*lifetime) return;
+    client->m_ExitingWorld = false;
+    sm_ClearClientObject(manager,client);
+    ServerMessage message;
+    if (!(message.m_Flags & PACKETFLAG_WRITEOVERFLOW)) sm_SendToClient(manager,client,5,&message,0,0x80);
 #ifndef LT_SERVER_BUILD
-	if (pClient->m_ClientFlags & CLIENTFLAG_LOCAL)
-		cs_InvalidateAndTerm();
+    if (client->m_ClientFlags & CLIENTFLAG_LOCAL) cs_InvalidateAndTerm();
 #endif
 }
 
-
-// 0x100286a9 — hand the client the sky box and its thirty object slots. One
-// variable serves as both the count written into the message and the loop's
-// own counter, which is why the constant is materialised in a register
-// rather than pushed as an immediate.
-#define MAX_SKYOBJECTS 30
+// 0x100286a9 — hand the client the sky box and its thirty object slots.
+// Sky definition and ordered IDs use the shared fixed-width wire codec.
 
 void sm_SendSkyInfo(CServerMgr* pMgr, Client* pClient)
 {
 	CMessageRef msg;
-	uint16*     pID;
-	int         nObjects;
 
 	{
 		CAbstractIO* pIO;
@@ -7141,23 +5344,10 @@ void sm_SendSkyInfo(CServerMgr* pMgr, Client* pClient)
 			pIO->Release();
 	}
 
-	msg.m_pMsg->WriteData(&pMgr->m_SkyDef, sizeof(SkyDef));
-
-	nObjects = MAX_SKYOBJECTS;
-
-	// Both of this function's writes are WriteType<uint16> expanded in
-	// lithtech.exe (0x00466180 and 0x00466230) and both are calls at /O1.
-	((CPacket*)msg.m_pMsg)->WriteType((uint16)nObjects);
-
-	pID = pMgr->m_SkyObjects;
-
-	do
-	{
-		((CPacket*)msg.m_pMsg)->WriteType(*pID);
-
-		pID++;
-	}
-	while (--nObjects);
+	nolf::SkyInfo sky; sky.definition=pMgr->m_SkyDef;
+	std::copy(std::begin(pMgr->m_SkyObjects),std::end(pMgr->m_SkyObjects),sky.objects.begin());
+	const auto body=nolf::encode_sky(sky);
+	msg.m_pMsg->WriteData(body.data(),static_cast<uint32>(body.size()));
 
 	sm_SendToClient(pMgr, pClient, 0x11, msg.m_pMsg, 0, 0x80);
 }
@@ -7169,11 +5359,7 @@ void sm_SendSkyInfo(CServerMgr* pMgr, Client* pClient)
 // upper half is left as garbage by a 16-bit `dec`. Only that call site can
 // see the difference, so it goes through a view rather than being corrected
 // in the header.
-class CMsgDataView
-{
-public:
-	void WriteData(void* pData, uint16 nBytes);   // 0x1002616a
-};
+
 
 // 0x10029609 — the same broadcast sm_BroadcastToClients (0x100297b8) is,
 // with the send flags handed in and no world-state test on the client: every
@@ -7202,7 +5388,7 @@ void sm_BroadcastPrintf(char* pMsg, ...)
 		return;
 
 	va_start(marker, pMsg);
-	_vsnprintf(sBuffer, sizeof(sBuffer) - 1, pMsg, marker);
+	vsnprintf(sBuffer, sizeof(sBuffer) - 1, pMsg, marker);
 
 	{
 		CAbstractIO* pIO;
@@ -7214,100 +5400,18 @@ void sm_BroadcastPrintf(char* pMsg, ...)
 	// WriteType<uint8> -- 0x1001393e is that instantiation, the same body as
 	// the word one a byte wide; lithtech.exe expands it at 0x00476074.
 	((CPacket*)msg.m_pMsg)->WriteType((uint8)0);
-	((CMsgStringView*)msg.m_pMsg)->WriteString(sBuffer);
+	(msg.m_pMsg)->WriteString(sBuffer);
 
 	sm_BroadcastToClientsEx(g_pServerMgr, 0xd, msg.m_pMsg, 0x80);
 }
 
 
-// 0x1002ad4a — stow the object's SFX message so late-joining clients get it.
-//
-// SObjData+0x2c is a CMessageRef, not the plain word ltobject_internal.h
-// calls m_Unknown2c: the shipped code hands its address to CMessageRef::Init
-// and then writes through the ServerMessage behind it. That also explains
-// what sm_CanDeactivate reads there — an object holding an SFX message is an
-// object the inactive sweep has to leave alone.
-//
-// The payload is copied minus its first byte (the packet id), and the stored
-// message's length is set to match. The pIO out-parameter lands in the dead
-// pObj argument slot, the object itself having been cached in a register.
-#ifndef LT_SERVER_BUILD
-// lithtech.exe only. The /O2 copy (0x0046a47c..0x0046a4f3) resets the stowed
-// message with the store order m_Unknown34, m_MaxDataLen, m_Unknown38,
-// m_Unknown3a, m_MsgFlags, owner -- /O2 keeps integer stores in source order,
-// so that is the order the source has, while servermsg.h's Init writes
-// m_MsgFlags first (invisible at /O1, where the `andl $0` goes to the top
-// anyway) -- and it EXPANDS the packet data's Init: SetSize(0) (0x0040bfe0)
-// twice, the 21-byte reset 0x00433570, then SetSize(n). STAND-IN for the
-// header's ServerMessage::Init / CMsgPacketData::Init at this one site.
-class CSFXPacketDataView
+// Retain the effect payload without its packet ID for late-joining clients.
+void sm_SetObjectSFXMessage(CServerMgr* server, LTObject* object, ServerMessage* source)
 {
-public:
-	LTBOOL SetSize(uint32 nItems, uint32* pBank);        // 0x0040bfe0
-	void   InitArray(uint32 nGrowBy);                    // 0x00433570
-
-	void Init(uint32 nItems, uint32 nGrowBy)
-	{
-		SetSize(0, &g_PacketDataBank);
-		InitArray(nGrowBy);
-		SetSize(nItems, &g_PacketDataBank);
-	}
-};
-
-inline void sm_SFXMsgInit(ServerMessage* pMsg, uint16 nMaxDataLen, uint16 nGrowSize)
-{
-	pMsg->m_Unknown34  = 1;
-	pMsg->m_MaxDataLen = nMaxDataLen;
-	pMsg->m_Unknown38  = 1;
-	pMsg->m_Unknown3a  = 1;
-	pMsg->m_MsgFlags   = 0;
-
-	// The owner store through a volatile lvalue: without it /O2 sinks
-	// this store and the m_MsgFlags one below the m_DataSize load; a
-	// volatile READ of m_DataSize instead (the header's /O1 barrier)
-	// swaps the first two stores here. Measured both.
-	*(ServerMessage* volatile*)&pMsg->m_Write.m_pOwner = pMsg;
-
-	if (nMaxDataLen > pMsg->m_DataSize)
-	{
-		CSFXPacketDataView* pData = (CSFXPacketDataView*)&pMsg->m_PacketData;
-
-		pData->SetSize(0, &g_PacketDataBank);
-		pData->Init(nMaxDataLen, nGrowSize);
-	}
-	else
-	{
-		pMsg->m_DataGrowBy = nGrowSize;
-	}
-}
-#endif
-
-void sm_SetObjectSFXMessage(CServerMgr* pMgr, LTObject* pObj, ServerMessage* pMsg)
-{
-	if (pObj->m_pSData->m_Unknown2c == 0)
-	{
-		CAbstractIO* pIO;
-
-		((CMessageRef*)&pObj->m_pSData->m_Unknown2c)->Init(
-			msg_AllocPacket(&pIO, 0x1000, 0x1000));
-
-		if (pIO)
-			pIO->Release();
-	}
-
-#ifdef LT_SERVER_BUILD
-	((ServerMessage*)pObj->m_pSData->m_Unknown2c)->Init(pMsg->m_Unknown34, 0x1000);
-#else
-	sm_SFXMsgInit((ServerMessage*)pObj->m_pSData->m_Unknown2c, pMsg->m_Unknown34, 0x1000);
-#endif
-
-	memcpy(((ServerMessage*)pObj->m_pSData->m_Unknown2c)->m_pData,
-		pMsg->m_pData + 1, pMsg->m_Unknown34 - 1);
-
-	((ServerMessage*)pObj->m_pSData->m_Unknown2c)->m_Unknown34 =
-		pMsg->m_Unknown34 - 1;
-
-	sm_UpdateObjectBBox(pMgr, pObj);
+    if (!object || !object->m_pSData || !source) return;
+    if (object->m_pSData->m_SFXMessage.CopyFrom(*source, 1) == LT_OK)
+        sm_UpdateObjectBBox(server, object);
 }
 
 
@@ -7336,26 +5440,26 @@ void sm_WriteUpdateHeader(CServerMgr* pMgr, CUpdateContext* pCtx, Client* pClien
 		for (j = 0; j < 2; j++)
 		{
 			ClientPacketSet* pSet = &pClient->m_PacketSets[i][j];
-			ServerMessage* pSetMsg = (ServerMessage*)pSet->m_pPacket;
+			ServerMessage* pSetMsg = (ServerMessage*)pSet->Packet();
 
 			if (pSetMsg->m_Unknown34 - 1 > 0)
 			{
 				if (pSetMsg->m_Unknown34 - 1 <
-					((CMsgLenView*)pMsg)->GetSpaceLeft())
+					(static_cast<ServerMessage*>(pMsg))->GetSpaceLeft())
 				{
-					ServerMessage* pOut = (ServerMessage*)pSet->m_pPacket;
+					ServerMessage* pOut = (ServerMessage*)pSet->Packet();
 
-					((CMsgDataView*)pMsg)->WriteData(pOut->m_pData + 1,
+					(pMsg)->WriteData(pOut->m_pData + 1,
 						pOut->m_Unknown34 - 1);
 				}
 				else
 				{
 					sm_SendToClient(pMgr, pClient, 0xe,
-						(ServerMessage*)pSet->m_pPacket, 1, pSet->m_Unknown08);
+						(ServerMessage*)pSet->Packet(), 1, pSet->m_SendFlags);
 				}
 
 				{
-					ServerMessage* pReset = (ServerMessage*)pSet->m_pPacket;
+					ServerMessage* pReset = (ServerMessage*)pSet->Packet();
 
 					pReset->m_Unknown38 = 1;
 					pReset->m_Unknown34 = 1;
@@ -7383,54 +5487,21 @@ void sm_WriteUpdateHeader(CServerMgr* pMgr, CUpdateContext* pCtx, Client* pClien
 //
 // The pIO out-parameter goes into the dead pParent argument slot, the parent
 // having been cached in esi.
-LTRESULT sm_AttachClient(CServerMgr* pMgr, Client* pParent, Client* pChild)
-{
-	CMessageRef msg;
-
-	if (pParent == pChild)
-		RETURN_ERROR(1, "sm_AttachClient", LT_INVALIDPARAMS);
-
-	{
-		CAbstractIO* pIO;
-		msg.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
-		if (pIO)
-			pIO->Release();
-	}
-
-	sm_DetachClient(pMgr, pChild);
-
-	pChild->m_pViewClient = pParent;
-
-	dl_Insert(&((CClientAttachView*)pParent)->m_AttachHead,
-		&((CClientAttachView*)pChild)->m_AttachLink);
-
-	{
-		LTObject** ppObj = &pParent->m_pUnknown3AC;
-
-		if (*ppObj)
-		{
-			{
-				ServerMessage* pMsg = msg.m_pMsg;
-
-				pMsg->m_Unknown38 = 1;
-				pMsg->m_Unknown34 = 1;
-			}
-
-			// WriteType<uint16>, expanded at 0x00463dea in lithtech.exe.
-			((CPacket*)msg.m_pMsg)->WriteType((*ppObj)->m_ObjectID);
-
-			sm_SendToClient(pMgr, pChild, 7, msg.m_pMsg, 1, 0x80);
-		}
-	}
-
-	return LT_OK;
+LTRESULT sm_AttachClient(CServerMgr* manager, Client* parent, Client* child) {
+    if (!manager || !parent || !child || !child->AttachTo(*parent)) return LT_INVALIDPARAMS;
+    if (parent->m_pUnknown3AC) {
+        ServerMessage message;
+        message.WriteWord(parent->m_pUnknown3AC->m_ObjectID);
+        if (message.m_Flags & PACKETFLAG_WRITEOVERFLOW) return LT_OUTOFMEMORY;
+        sm_SendToClient(manager,child,7,&message,1,0x80);
+    }
+    return LT_OK;
 }
 
 
 // 0x1000e3f9 again, through the three-argument fixed prototype the removal
 // notice was compiled against (its cleanup batches with the two calls that
 // follow it). Name ours.
-void dsi_PrintRemoveClient(char* pFormat, int nClientID, int nRemaining);
 
 // Three more of the client teardown, named by address: 0x100272d6 undoes
 // whatever 0x10027155 did to the clients attached to this one, 0x100273bc
@@ -7462,34 +5533,6 @@ void sub_100273e9(CServerMgr* pMgr, Client* pClient);
 // therefore declines it at this size with this source, and our body is
 // byte-identical at /O1 (0x100273bc, 45 of 45), so neither this function nor
 // its callers can change.
-class CSoundListenerView
-{
-public:
-	void DropListener(uint8* pFlags)         // 0x100273bc
-	{
-		uint32 nFlags = m_PlaySoundFlags;
-
-		if ((nFlags & (PLAYSOUND_ATTACHED | PLAYSOUND_TIME | PLAYSOUND_TIMESYNC)) &&
-			!(nFlags & PLAYSOUND_LOOP))
-		{
-			*pFlags |= 1;
-
-			if (m_nListeners > 0)
-				m_nListeners--;
-
-			if (m_nListeners == 0)
-				m_fTimer = 0.0f;
-		}
-	}
-
-	uint8  m_pad_00[0x20];
-	float  m_fTimer;                         // +0x20
-	uint8  m_pad_24[0x28 - 0x24];
-	uint32 m_nListeners;                     // +0x28
-	uint8  m_pad_2c[0x34 - 0x2c];
-	uint32 m_PlaySoundFlags;                 // +0x34
-};
-
 // 0x10027308 — remove one client. Its view attachment goes first, then the
 // sounds it still owns are taken out of its object table, then the state is
 // reset, the shell told, and the record unlinked and freed.
@@ -7506,10 +5549,12 @@ public:
 // move above is what closes it; the source below is unchanged.
 void sm_RemoveClient(CServerMgr* pMgr, Client* pClient)
 {
+    if (!pMgr || !pClient || pClient->m_Removing) return;
+    pClient->m_Removing = true;
 	LTLink* pCur;
 	LTLink* pHead;
 
-	dsi_PrintRemoveClient("Removing client, id %d, leaving %d.",
+	dsi_ServerError("Removing client, id %d, leaving %d.",
 		pClient->m_ClientID, pMgr->m_ClientList.m_nElements - 1);
 
 	sm_DetachClient(pMgr, pClient);
@@ -7522,10 +5567,10 @@ void sm_RemoveClient(CServerMgr* pMgr, Client* pClient)
 	{
 		SoundInstance* pSound = (SoundInstance*)pCur->m_pData;
 		CObjInfo* pInfo =
-			&pClient->m_pObjInfos[((uint32*)pSound->m_pUnknown0c)[2]];
+			&pClient->m_ObjInfos[pSound->m_pUnknown0c->m_nIndex];
 
 		if (!(pInfo->m_Unknown02 & 1))
-			((CSoundListenerView*)pSound)
+			pSound
 				->DropListener(&pInfo->m_Unknown02);
 
 		pCur = pCur->m_pNext;
@@ -7535,10 +5580,11 @@ void sm_RemoveClient(CServerMgr* pMgr, Client* pClient)
 		pMgr->m_Unknown1a0 &= ~2;
 
 	sm_SetClientState(pMgr, pClient, 0);
+    sm_ClearClientObject(pMgr,pClient);
 
-	pMgr->m_ClassMgr.m_pServerShell->OnRemoveClient((HCLIENT)pClient);
+	if (pMgr->m_ClassMgr.m_pServerShell) pMgr->m_ClassMgr.shell([&](IServerShell& shell) { return shell.OnRemoveClient(pClient->Handle()); });
 
-	dl_RemoveAt(&pMgr->m_ClientList, &pClient->m_Link);
+	pClient->Unregister();
 
 	sub_100273e9(pMgr, pClient);
 }
@@ -7570,26 +5616,27 @@ void sm_RemoveClient(CServerMgr* pMgr, Client* pClient)
 // loses its match, 196 against 229), so there it is forced: its code is the
 // same as when the body is written out at the call site.
 #ifdef LT_SERVER_BUILD
-__forceinline
+NOLF_FORCE_INLINE
 #else
 inline
 #endif
-void sm_FlushPacketSet(Client* pClient, ClientPacketSet* pSet)
+void sm_FlushPacketSet(CServerMgr* manager, Client* pClient, ClientPacketSet* pSet)
 {
-	sm_SendToClient(g_pServerMgr, pClient, 0xe,
-		(ServerMessage*)pSet->m_pPacket, 1, pSet->m_Unknown08);
+	sm_SendToClient(manager, pClient, 0xe,
+		(ServerMessage*)pSet->Packet(), 1, pSet->m_SendFlags);
 
 	{
-		ServerMessage* pReset = (ServerMessage*)pSet->m_pPacket;
+		ServerMessage* pReset = (ServerMessage*)pSet->Packet();
 
 		pReset->m_Unknown38 = 1;
 		pReset->m_Unknown34 = 1;
 	}
 }
 
-LTRESULT sm_QueueMessageToClient2(CServerMgr* pMgr, Client* pClient, int nPacketID,
+LTRESULT sm_QueueMessageToClient(CServerMgr* pMgr, Client* pClient, uint8 nPacketID,
                                   ServerMessage* pMsg, uint32 flags)
 {
+    if (!pMgr || !pClient || !pMsg || (pMsg->m_Flags & PACKETFLAG_WRITEOVERFLOW)) return LT_INVALIDPARAMS;
 	if (!(pClient->m_ClientFlags & CLIENTFLAG_LOCAL) && (flags & 3) &&
 		pMsg->m_Unknown34 <= 0xff)
 	{
@@ -7597,15 +5644,15 @@ LTRESULT sm_QueueMessageToClient2(CServerMgr* pMgr, Client* pClient, int nPacket
 			&pClient->m_PacketSets[(flags >> 7) & 1][(flags >> 1) & 1];
 
 		if (pMsg->m_Unknown34 + 1 >
-			((CMsgLenView*)pSet->m_pPacket)->GetSpaceLeft())
+			(pSet->Packet())->GetSpaceLeft())
 		{
-			sm_FlushPacketSet(pClient, pSet);
+			sm_FlushPacketSet(pMgr, pClient, pSet);
 		}
 
 		if (pMsg->m_Unknown34 + 1 >
-			((CMsgLenView*)pSet->m_pPacket)->GetSpaceLeft())
+			(pSet->Packet())->GetSpaceLeft())
 		{
-			sm_SendToClient(g_pServerMgr, pClient, 0xe, pMsg, 1, flags);
+			sm_SendToClient(pMgr, pClient, 0xe, pMsg, 1, flags);
 		}
 		else
 		{
@@ -7615,18 +5662,18 @@ LTRESULT sm_QueueMessageToClient2(CServerMgr* pMgr, Client* pClient, int nPacket
 			// CPacket::WriteType<uint8> (the "CPacket::WriteType" overrun
 			// report is inline); server.dll calls ServerMessage::WriteByte.
 #ifdef LT_SERVER_BUILD
-			((ServerMessage*)pSet->m_pPacket)->WriteByte((uint8)pMsg->m_Unknown34);
+			((ServerMessage*)pSet->Packet())->WriteByte((uint8)pMsg->m_Unknown34);
 #else
-			((CPacket*)pSet->m_pPacket)->WriteType((uint8)pMsg->m_Unknown34);
+			((CPacket*)pSet->Packet())->WriteType((uint8)pMsg->m_Unknown34);
 #endif
 
-			((CMsgDataView*)pSet->m_pPacket)->WriteData(pMsg->m_pData,
+			(pSet->Packet())->WriteData(pMsg->m_pData,
 				pMsg->m_Unknown34);
 		}
 	}
 	else
 	{
-		sm_SendToClient(g_pServerMgr, pClient, nPacketID, pMsg, 1, flags);
+		sm_SendToClient(pMgr, pClient, nPacketID, pMsg, 1, flags);
 	}
 
 	return LT_OK;
@@ -7644,7 +5691,7 @@ CObjectMapEntry* sm_FindObjectMapEntry(CServerMgr* pMgr, uint16 nID)
 	return LTNULL;
 }
 
-uint32 sm_GetObjectChangeFlags2(CServerMgr* pMgr, class LTObject* pObject);  // 0x1002a264
+uint32 sm_GetObjectChangeFlags(CServerMgr* pMgr, class LTObject* pObject);  // 0x1002a264
 
 // 0x10027d39 — write the ids this client was sent last frame back to it, so
 // it can drop what it will not hear about again. Every id that is still
@@ -7662,13 +5709,13 @@ uint32 sm_GetObjectChangeFlags2(CServerMgr* pMgr, class LTObject* pObject);  // 
 // loses this client as a listener and is marked with the fixed flags 3.
 void sm_WriteIDList(CUpdateContext* pCtx, ClientIDList* pList)
 {
-	uint32   i = pList->m_nIDs;
-	uint16*  pID = pList->m_pIDs;
+	uint32   i = static_cast<uint32>(pList->m_IDs.size());
+	uint16*  pID = pList->m_IDs.data();
 	uint32   nWritten = 0;
 
 	while (i--)
 	{
-		if (!(pCtx->m_pClient->m_pObjInfos[*pID].m_ChangeFlags & 0x1000))
+		if (!(pCtx->m_pClient->m_ObjInfos[*pID].m_ChangeFlags & 0x1000))
 		{
 			{
 				ServerMessage* pMsg = pCtx->m_Msg1.m_pMsg;
@@ -7702,8 +5749,8 @@ void sm_WriteIDList(CUpdateContext* pCtx, ClientIDList* pList)
 				{
 					if (pEntry->m_nFlags == 1)
 					{
-						pCtx->m_pClient->m_pObjInfos[*pID].m_ChangeFlags =
-							(uint16)sm_GetObjectChangeFlags2(pCtx->m_pMgr,
+						pCtx->m_pClient->m_ObjInfos[*pID].m_ChangeFlags =
+							(uint16)sm_GetObjectChangeFlags(pCtx->m_pMgr,
 								(LTObject*)pEntry->m_pRecord);
 					}
 					else
@@ -7714,13 +5761,13 @@ void sm_WriteIDList(CUpdateContext* pCtx, ClientIDList* pList)
 						// lithtech.exe tests memory and reloads for the OR
 						// (0x00465537, 0x0046554c). server.dll is identical
 						// either way.
-						if (!(pCtx->m_pClient->m_pObjInfos[*pID].m_Unknown02 & 1))
+						if (!(pCtx->m_pClient->m_ObjInfos[*pID].m_Unknown02 & 1))
 						{
-							((CSoundListenerView*)pEntry->m_pRecord)
-								->DropListener(&pCtx->m_pClient->m_pObjInfos[*pID].m_Unknown02);
+							static_cast<SoundInstance*>(pEntry->m_pRecord)
+								->DropListener(&pCtx->m_pClient->m_ObjInfos[*pID].m_Unknown02);
 						}
 
-						pCtx->m_pClient->m_pObjInfos[*pID].m_ChangeFlags = 3;
+						pCtx->m_pClient->m_ObjInfos[*pID].m_ChangeFlags = 3;
 					}
 				}
 			}
@@ -7748,30 +5795,16 @@ LTRESULT sub_100264a5(CServerMgr* pMgr, Client* pClient, uint32 iEntry,
 // released at the end, so there is no CMessageRef in this one.
 LTRESULT sm_SendCacheEntry(CServerMgr* pMgr, Client* pClient, uint32 iEntry)
 {
-	CAbstractIO* pIO;
-
-	msg_AllocPacket(&pIO, 0x1000, 0x1000);
-
-	sub_100264a5(pMgr, pClient, iEntry, &pIO, 2, 0);
-	sub_100264a5(pMgr, pClient, iEntry, &pIO, 4, 1);
-	sub_100264a5(pMgr, pClient, iEntry, &pIO, 3, 2);
-	sub_100264a5(pMgr, pClient, iEntry, &pIO, 5, 3);
-
-	if (pIO)
-		pIO->Release();
-
-	return LT_OK;
+    CAbstractIO* io = nullptr;
+    msg_AllocPacket(&io, 0x1000, 0x1000);
+    if (!io) return LT_ERROR;
+    struct Release { CAbstractIO* io; ~Release() { io->Release(); } } release{io};
+    for (const auto [lead, type] : {std::pair{2,0},std::pair{4,1},std::pair{3,2},std::pair{5,3}}) {
+        const auto result = sub_100264a5(pMgr,pClient,iEntry,&io,lead,static_cast<uint16>(type));
+        if (result != LT_OK) return result;
+    }
+    return LT_OK;
 }
-
-// One entry of the file-cache list at CServerMgr+0x91c: what kind of file it
-// is and which file id, four bytes apiece (names ours). The count is at
-// 0x920 and how many the block holds at 0x924.
-class CCacheListEntry
-{
-public:
-	uint16 m_Type;                           // +0x00
-	uint16 m_FileID;                         // +0x02
-};
 
 // 0x100264a5 / 0x004629d0 — the body of the prototype declared above and
 // never defined, the fifth of those this sweep has turned up. Its own caller,
@@ -7831,15 +5864,15 @@ LTRESULT sub_100264a5(CServerMgr* pMgr, Client* pClient, uint32 iEntry,
 	// run is empty. Server keeps it in its own home slot and never spills a
 	// second local; /O2 enregisters it and spills to a fresh slot at
 	// 0x00462b36, which is why the lithtech frame carries two dwords.
+    ServerCallbackGuard server(pMgr->m_Lifetime);
+    const auto client_life = pClient->m_Lifetime;
+    const auto entries = pMgr->m_CachedFiles;
 	LTBOOL bFirst = LTTRUE;
 	uint32 i;
 
-	for (i = iEntry; i < pMgr->m_Unknown920; i++)
+	for (i = iEntry; i < entries.size(); i++)
 	{
-		// 0x100264d0 / 0x00462a00 — m_Unknown91c is reloaded on every
-		// iteration and AGAIN for the id below; the source names the member
-		// at each use rather than caching the base.
-		if (((CCacheListEntry*)pMgr->m_Unknown91c)[i].m_Type == nType)
+		if (entries[i].type == nType)
 		{
 			if (bFirst)
 			{
@@ -7849,18 +5882,19 @@ LTRESULT sub_100264a5(CServerMgr* pMgr, Client* pClient, uint32 iEntry,
 			}
 
 			((ServerMessage*)*ppIO)->WriteWord(
-				((CCacheListEntry*)pMgr->m_Unknown91c)[i].m_FileID);
+				entries[i].file_id);
 
 			// 0x1002650f call / 0x00462a44 expanded. 0x32 is the same
 			// threshold smgr.cpp already uses for the model hash and the
 			// cache-record list.
-			if (((CMsgLenView*)*ppIO)->GetSpaceLeft() < 0x32)
+			if ((static_cast<ServerMessage*>(*ppIO))->GetSpaceLeft() < 0x32)
 			{
 				sm_FlushCacheMsg(pMgr, pClient, ppIO);
+                if (!server.unchanged() || !*client_life) return LT_ERROR;
 
 				// 0x1002653d — the run is re-opened, and bFirst is NOT put
 				// back: the closing send still has to happen.
-				((CPacket*)*ppIO)->WriteType((uint8)nLeadByte);
+				static_cast<ServerMessage*>(*ppIO)->WriteByte(static_cast<uint8>(nLeadByte));
 			}
 		}
 	}
@@ -7869,6 +5903,7 @@ LTRESULT sub_100264a5(CServerMgr* pMgr, Client* pClient, uint32 iEntry,
 	if (!bFirst)
 	{
 		sm_FlushCacheMsg(pMgr, pClient, ppIO);
+		if (!server.unchanged() || !*client_life) return LT_ERROR;
 	}
 
 	return LT_OK;                                    // 0x1002657f / 0x00462b6f
@@ -7881,151 +5916,35 @@ LTRESULT sub_100264a5(CServerMgr* pMgr, Client* pClient, uint32 iEntry,
 //
 // The list grows twenty entries at a time by hand — allocate, copy, free —
 // rather than through any container.
-void sm_BroadcastCacheFile(CServerMgr* pMgr, uint32 fileType, uint16 nFileID)
-{
-	uint32           nEntries;
-	uint32           i;
-
-	nEntries = pMgr->m_Unknown920;
-
-	for (i = 0; i < nEntries; i++)
-	{
-		if (((CCacheListEntry*)pMgr->m_Unknown91c)[i].m_FileID == nFileID)
-			return;
-	}
-
-	if (nEntries == pMgr->m_Unknown924)
-	{
-		uint32 nNew = pMgr->m_Unknown924 + 20;
-		CCacheListEntry* pNew =
-			(CCacheListEntry*)dalloc(nNew * sizeof(CCacheListEntry));
-
-		memcpy(pNew, pMgr->m_Unknown91c,
-			pMgr->m_Unknown924 * sizeof(CCacheListEntry));
-
-		dfree(pMgr->m_Unknown91c);
-
-		pMgr->m_Unknown91c = pNew;
-		pMgr->m_Unknown924 = nNew;
-	}
-
-	((CCacheListEntry*)pMgr->m_Unknown91c)[pMgr->m_Unknown920].m_FileID = nFileID;
-
-	{
-		CCacheListEntry** ppEntries = (CCacheListEntry**)&pMgr->m_Unknown91c;
-
-		(*ppEntries)[pMgr->m_Unknown920].m_Type = (uint16)fileType;
-	}
-
-	pMgr->m_Unknown920++;
-
-	if (pMgr->m_Unknown1a0 & 0x10)
-		return;
-
-	{
-		LTLink* pCur = pMgr->m_ClientList.m_Head.m_pNext;
-		LTLink* pHead = &pMgr->m_ClientList.m_Head;
-
-		while (pCur != pHead)
-		{
-			sm_SendCacheEntry(pMgr, (Client*)pCur->m_pData,
-				pMgr->m_Unknown920 - 1);
-
-			pCur = pCur->m_pNext;
-		}
-	}
+void sm_BroadcastCacheFile(CServerMgr* manager, uint32 file_type, uint16 file_id) {
+    for (const auto& entry : manager->m_CachedFiles) if (entry.file_id == file_id) return;
+    manager->m_CachedFiles.push_back({static_cast<uint16>(file_type),file_id});
+    if (manager->m_Unknown1a0 & 0x10) return;
+    struct Context { CServerMgr* manager; ServerCallbackGuard server; uint32 index; } context{
+        manager,ServerCallbackGuard(manager->m_Lifetime),static_cast<uint32>(manager->m_CachedFiles.size()-1)};
+    client_Visit(manager->m_ClientList,[](void* opaque, Client& client) {
+        auto& state = *static_cast<Context*>(opaque);
+        if (state.server.unchanged()) sm_SendCacheEntry(state.manager,&client,state.index);
+    },&context);
 }
 
-
-// The object's model pointer, which ltobject_internal.h does not reach:
-// +0x1dc, compared against the manager's placeholder to tell a model that is
-// still loading from one that really is there (name ours).
-class CObjectModelView
-{
-public:
-	uint8        m_pad_00[0x1dc];
-	class Model* m_pModel;                   // +0x1dc
-	uint8        m_pad_1e0[0x204 - 0x1e0];
-	// +0x204 — only ever read as "does this container-type object have one";
-	// nonzero makes the change-flag reader set the attachment bit even with
-	// no attachment list (name ours).
-	uint32       m_Unknown204;               // +0x204
-};
-
-// A second object list at CServerMgr+0x5e4, inside the padding servermgr.h
-// leaves after the world-model list. Its objects' model files are cached as
-// type 1 where the main list's are types 0 and 2 (name ours).
-class CServerMgrList5E4View
-{
-public:
-	uint8  m_pad_00[0x5e4];
-	LTLink m_List5E4;                        // +0x5e4
-};
-
-// 0x100338e1 — walk the world's objects and put every model and skin file
-// they name on the cache list. An object still showing the placeholder model
-// is skipped: it has not finished loading, so its file names are not its
-// own yet.
-//
-// Two lists, both naming their head in a local — and the first is a `for`
-// where the second is a `while`. That is the whole difference between this
-// and the 189-of-195 near it used to be: with all three callee-saved
-// registers already spoken for, the head address cannot live in one, and
-// **a `for` loop rematerialises the loop-invariant into BOTH predecessors of
-// the header** (the preheader and the latch, back edge aimed at the test),
-// where the same body written as a `while` keeps one copy inside the header
-// and aims the back edge at that. Six bytes, one `lea 0x5c4(%esi),%eax`,
-// and no register allocation involved. Same lever as CNetMgr::GetPacket's
-// unrotated back edge.
-LTRESULT sm_CacheObjectFiles(CServerMgr* pMgr)
-{
-	LTLink* pCur;
-	LTLink* pHead;
-
-	pHead = pMgr->ObjectListHead();
-
-	for (pCur = pMgr->ObjectListHead()->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-	{
-		LTObject* pObj = (LTObject*)pCur->m_pData;
-
-		if (((CObjectModelView*)pObj)->m_pModel != pMgr->m_pPlaceholderModel)
-		{
-			if (pObj->m_pSData->m_pModelFile)
-			{
-				sm_CacheFile(pMgr, 0,
-					fs_GetFilename(&pMgr->m_FileMgr, pObj->m_pSData->m_pModelFile));
-			}
-
-			if (pObj->m_pSData->m_pSkinFile)
-			{
-				sm_CacheFile(pMgr, 2,
-					fs_GetFilename(&pMgr->m_FileMgr, pObj->m_pSData->m_pSkinFile));
-			}
-		}
-	}
-
-	{
-		pHead = &((CServerMgrList5E4View*)pMgr)->m_List5E4;
-
-		pCur = pHead->m_pNext;
-
-		while (pCur != pHead)
-		{
-			LTObject* pObj = (LTObject*)pCur->m_pData;
-
-			if (pObj->m_pSData->m_pModelFile)
-			{
-				sm_CacheFile(pMgr, 1,
-					fs_GetFilename(&pMgr->m_FileMgr, pObj->m_pSData->m_pModelFile));
-			}
-
-			pCur = pCur->m_pNext;
-		}
-	}
-
-	return LT_OK;
+LTRESULT sm_CacheObjectFiles(CServerMgr* manager) {
+    auto* head = manager->ObjectListHead();
+    for (auto* link = head->m_pNext; link != head; link = link->m_pNext) {
+        auto* object = static_cast<ModelInstance*>(link->m_pData);
+        if (object->m_AnimTracker.GetModel() == manager->m_pPlaceholderModel || !object->m_pSData) continue;
+        auto* data = object->m_pSData;
+        if (data->m_pModelFile) sm_CacheFile(manager,0,fs_GetFilename(&manager->m_FileMgr,data->m_pModelFile));
+        for (auto* skin : data->m_SkinFiles) if (skin) sm_CacheFile(manager,2,fs_GetFilename(&manager->m_FileMgr,skin));
+    }
+    head = &manager->m_Unknown390.m_Lists[OT_SPRITE].m_Head;
+    for (auto* link = head->m_pNext; link != head; link = link->m_pNext) {
+        auto* object = static_cast<LTObject*>(link->m_pData);
+        if (object->m_pSData && object->m_pSData->m_pModelFile)
+            sm_CacheFile(manager,1,fs_GetFilename(&manager->m_FileMgr,object->m_pSData->m_pModelFile));
+    }
+    return LT_OK;
 }
-
 
 // 0x1002a365 — shut every model down at server teardown. Three passes over
 // the model hash: bump every cache count so nothing can go while the sweep
@@ -8035,42 +5954,11 @@ LTRESULT sm_CacheObjectFiles(CServerMgr* pMgr)
 // The delete is a real `delete`: the null test and the `push $1` into vtable
 // slot 0 are VC6's scalar deleting destructor, not something the source
 // wrote.
-void sm_TermModels(CServerMgr* pMgr)
-{
-	void* hIter;
-
-	hIter = dhash_GetFirst(pMgr->m_hModelHash);
-	while (hIter)
-	{
-		Model* pModel = (Model*)dhash_GetData(dhash_GetNext(&hIter));
-
-		pModel->m_CacheCount++;
-	}
-
-	hIter = dhash_GetFirst(pMgr->m_hModelHash);
-	while (hIter)
-	{
-		void*  hElement = dhash_GetNext(&hIter);
-		Model* pModel = (Model*)dhash_GetData(hElement);
-
-		if (--pModel->m_CacheCount == 0)
-		{
-			dhash_Remove(pMgr->m_hModelHash, hElement);
-
-			delete pModel;
-		}
-	}
-
-	hIter = dhash_GetFirst(pMgr->m_hModelHash);
-	while (hIter)
-	{
-		Model* pModel = (Model*)dhash_GetData(dhash_GetNext(&hIter));
-
-		dsi_ServerError("Warning!  Server unable to unload model %s due to reference count!",
-			pModel->GetFilename());
-	}
+void sm_TermModels(CServerMgr* manager) {
+    void* iterator = dhash_GetFirst(manager->m_hModelHash);
+    while (iterator) dhash_Remove(manager->m_hModelHash,dhash_GetNext(&iterator));
+    manager->m_Models.Term();
 }
-
 
 // 0x1002ade4 — move an object between the two halves of the live-object list
 // and tell the game object which way it went. Nothing happens when the state
@@ -8088,22 +5976,22 @@ void sm_SetObjectState(CServerMgr* pMgr, LTObject* pObj, uint32 nStateBits)
 	{
 		pObj->m_ChangeFlags = (nFlags & ~0x38) | nStateBits;
 
-		dl_RemoveAt(&g_pServerMgr->m_List8dc, &pObj->m_pSData->m_StateLink);
+		dl_RemoveAt(&pMgr->m_List8dc, &pObj->m_pSData->m_StateLink);
 
 		if (nStateBits != 0)
 		{
-			dl_AddTail(&g_pServerMgr->m_List8dc, &pObj->m_pSData->m_StateLink,
+			dl_AddTail(&pMgr->m_List8dc, &pObj->m_pSData->m_StateLink,
 				pObj);
 
-			pObj->m_pSData->m_pBaseClass->EngineMessageFn(MID_DEACTIVATING,
+			pMgr->m_ClassMgr.message(pObj->m_pSData->m_pBaseClass,MID_DEACTIVATING,
 				LTNULL, 0.0f);
 		}
 		else
 		{
-			dl_AddHead(&g_pServerMgr->m_List8dc, &pObj->m_pSData->m_StateLink,
+			dl_AddHead(&pMgr->m_List8dc, &pObj->m_pSData->m_StateLink,
 				pObj);
 
-			pObj->m_pSData->m_pBaseClass->EngineMessageFn(MID_ACTIVATING,
+			pMgr->m_ClassMgr.message(pObj->m_pSData->m_pBaseClass,MID_ACTIVATING,
 				LTNULL, 0.0f);
 		}
 	}
@@ -8119,15 +6007,12 @@ void sm_SetObjectState(CServerMgr* pMgr, LTObject* pObj, uint32 nStateBits)
 // ltobject_internal.h has SObjData+0x24 as a `CClassInfo*`; the dword there
 // is pushed straight in as sm_FreeObject's `ClassDef*` with no second load,
 // so it is a ClassDef* and the cast below carries the correction.
-void sub_100334cc(CServerMgr* pMgr, LTObject* pObject)
+void sub_100334cc(CServerMgr* manager, LTObject* object)
 {
-	if (pObject->m_pSData && pObject->m_pSData->m_pBaseClass)
-	{
-		sm_FreeObjectInline(pMgr, (ClassDef*)pObject->m_pSData->m_pClass,
-			pObject->m_pSData->m_pBaseClass);
-
-		pObject->m_pSData->m_pBaseClass = LTNULL;
-	}
+    if (!object->m_pSData) return;
+    auto* game = object->m_pSData->m_pBaseClass;
+    object->m_pSData->m_pBaseClass = nullptr;
+    manager->m_ClassMgr.destroy(game);
 }
 
 // 0x1002af00 — the late-join notice this object still has outstanding, or
@@ -8146,22 +6031,6 @@ void sub_100334cc(CServerMgr* pMgr, LTObject* pObject)
 // the id in dx instead, which is instruction-identical and two registers
 // wrong. (Naming the list in an `LTList*` local and taking both off that
 // reaches the shipped form too.)
-LTLink* sub_1002af00(CServerMgr* pMgr, LTObject* pObject)
-{
-	LTLink* pHead = &pMgr->m_List8ec.m_Head;
-	LTLink* pCur;
-
-	for (pCur = pHead->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-	{
-		CUnknown8ECRec* pRec = (CUnknown8ECRec*)pCur->m_pData;
-
-		if (pRec->m_nObjectID == pObject->m_ObjectID)
-			return &pRec->m_Link;
-	}
-
-	return LTNULL;
-}
-
 // 0x1002ceac — let go of everything the engine-side object data owns; a
 // thiscall on the SObjData with one argument, which ltobject_internal.h does
 // not declare (name ours).
@@ -8175,66 +6044,29 @@ LTLink* sub_1002af00(CServerMgr* pMgr, LTObject* pObject)
 //
 // What the object at +0x2c is is not determined here; only that it is
 // released through slot 2 of its own vtable with nothing pushed.
-class IObjDataOwned
-{
-public:
-	virtual void _v00() = 0;
-	virtual void _v04() = 0;
-	virtual void Release() = 0;              // slot 2
-};
-
-class CSObjDataTermView
-{
-public:
-	// 0x1002ceac. DEFINED IN-CLASS so /Ob1 will expand it: the shipped
-	// client carries this body in line at sm_ObjectRemoved2's tail, with
-	// the `nFlags & 1` arm folded away because the argument is 0. The
-	// server build is /Os and declines the expansion, which is what keeps
-	// the out-of-line copy there.
-	void* Term(int nFlags)                   // 0x1002ceac
-	{
-		if (m_pOwned2c)
-			m_pOwned2c->Release();
-
-		if (nFlags & 1)
-			operator delete(this);
-
-		return this;
-	}
-
-	uint8          m_pad_00[0x2c];
-	IObjDataOwned* m_pOwned2c;               // +0x2c
-};
-
 // ---- putting a created object into the world ----------------------------- //
 
 // The record sm_ClaimObjectID hands back; only the id at its +0x08 is read
 // here, and it is a dword the object's uint16 id is truncated from (name by
 // offset).
-class CObjectIDRec
-{
-public:
-	uint8  m_pad_00[0x08];
-	uint32 m_nID;                            // +0x08
-};
+
 
 // 0x1002585f — take an LTObject of the type the create struct asks for out
 // of the object manager's per-type bank, and 0x100332e8 — fill it in from
 // the create struct and thread it into the world. 0x1001eae7 is what a
 // world model or a container needs doing to it once its box is known. Names
 // by address.
-LTRESULT sub_1002585f(class CUnknown390* p390, ObjectCreateStruct* pStruct,
-                      LTObject** ppObject);
+
 LTRESULT sub_100332e8(CServerMgr* pMgr, ObjectCreateStruct* pStruct,
                       struct ClassDef* pClassDef, LTObject* pLTObject,
                       LPBASECLASS pObject, class SObjData** ppSData);
-void     sub_1001eae7(LTObject* pObject);
+void     obj_RetransformWorldModelDims(LTObject* pObject);
 
 // 0x10031dfa — spritecontrol.cpp's name for the id-map claim, and 0x100333fc
-// — sm_ObjectRemoved2 below, both declared here because this is the first
+// — sm_ObjectRemoved below, both declared here because this is the first
 // use of either in the file.
 int      sm_ClaimObjectID(CServerMgr* pMgr, void** ppRec, uint16 nID);
-LTRESULT sm_ObjectRemoved2(CServerMgr* pMgr, LTObject* pObject);
+LTRESULT sm_ObjectRemoved(CServerMgr* pMgr, LTObject* pObject);
 
 // 0x100334fe — the middle third of creating an object: the engine-side
 // LTObject is allocated, filled in, given an id, activated and handed back.
@@ -8260,85 +6092,59 @@ LTRESULT sm_ObjectRemoved2(CServerMgr* pMgr, LTObject* pObject);
 // (0x100335a3 jumping into 0x100335f8's `mov %ebx,%eax`) merges them
 // itself. An earlier `goto` into one shared tail with the claim nested under
 // the filename result matched server.dll but left lithtech 33 bytes short.
-LTRESULT sm_CreateObjectInWorld(CServerMgr* pMgr, LPBASECLASS pObject,
-                                ClassDef* pClassDef, ObjectCreateStruct* pStruct,
-                                uint32 nObjectID, float fData,
-                                LTObject** ppObject)
+LTRESULT sm_CreateObjectInWorld(CServerMgr* manager, LPBASECLASS game,
+                                ClassDef* definition, ObjectCreateStruct* input,
+                                uint32 requested_id, float reason, LTObject** output)
 {
-	CUnknown390* p390;
-	LTObject*    pLTObject;
-	void*        pRec;
-	LTRESULT     dResult;
-
-	*ppObject = LTNULL;
-
-	if (!pMgr->m_bWorldLoaded)
-		RETURN_ERROR(1, "sm_AddObjectToWorld", LT_NOTINWORLD);
-
-	p390 = &pMgr->m_Unknown390;
-
-	dResult = sub_1002585f(p390, pStruct, &pLTObject);
-	if (dResult != LT_OK)
-		return dResult;
-
-	pObject->m_hObject = (HOBJECT)pLTObject;
-
-	dResult = sub_100332e8(pMgr, pStruct, pClassDef, pLTObject, pObject,
-		&pLTObject->m_pSData);
-
-	if (dResult != LT_OK)
-	{
-		un390_RemoveObject(p390, pLTObject);
-		return dResult;
-	}
-
-	pObject->EngineMessageFn(MID_ACTIVATING, LTNULL, 0.0f);
-
-	dResult = w_ApplyObjectFilenames(pMgr, pLTObject, pStruct);
-	if (dResult != LT_OK)
-	{
-		sm_ObjectRemoved2(pMgr, pLTObject);
-		un390_RemoveObject(p390, pLTObject);
-		return dResult;
-	}
-
-	dResult = sm_ClaimObjectID(pMgr, &pRec, (uint16)nObjectID);
-	if (dResult != LT_OK)
-	{
-		sm_ObjectRemoved2(pMgr, pLTObject);
-		un390_RemoveObject(p390, pLTObject);
-		return dResult;
-	}
-
-	pLTObject->m_ChangeFlags = 0x44;
-	pLTObject->m_pSData->m_Unknown28 = pRec;
-	{
-		uint32 nID = ((CObjectIDRec*)pRec)->m_nID;
-
-		pLTObject->m_ObjectID = (uint16)nID;
-	}
-
-	pMgr->m_Unknown8fc.m_pArray[pLTObject->m_ObjectID].m_nFlags = 1;
-	pMgr->m_Unknown8fc.m_pArray[pLTObject->m_ObjectID].m_pRecord = pLTObject;
-
-	pLTObject->m_pSData->m_pBaseClass = pObject;
-
-	if (pLTObject->m_ObjectType == OT_WORLDMODEL ||
-		pLTObject->m_ObjectType == OT_CONTAINER)
-		sub_1001eae7(pLTObject);
-
-	sm_UpdateObjectBBox(pMgr, pLTObject);
-
-	pObject->EngineMessageFn(MID_INITIALUPDATE, pStruct, fData);
-
-	sm_SetObjectChangeFlag(pMgr, pLTObject,
-		sm_GetObjectChangeFlags2(pMgr, pLTObject));
-
-	g_Unknown58bec += 0x1fc;
-
-	*ppObject = pLTObject;
-
-	return LT_OK;
+    if (!output) return LT_INVALIDPARAMS;
+    *output = nullptr;
+    if (!manager || !game || !input || requested_id > 0xffff ||
+        !manager->m_ClassMgr.owns(definition) || !manager->m_ClassMgr.owns(game)) return LT_INVALIDPARAMS;
+    if (!manager->m_bWorldLoaded || manager->m_Terminating || manager->m_EndingWorld || !manager->m_Lifetime->alive) return LT_NOTINWORLD;
+    // A callback may pass an SDK structure owned by another object. Keep it
+    // independent of callback mutation and validate every bounded name.
+    ObjectCreateStruct create = *input;
+    if (!std::memchr(create.m_Name,0,sizeof(create.m_Name)) ||
+        !std::memchr(create.m_Filename,0,sizeof(create.m_Filename))) return LT_INVALIDPARAMS;
+    for (const auto& skin : create.m_SkinNames) if (!std::memchr(skin,0,sizeof(skin))) return LT_INVALIDPARAMS;
+    ServerCallbackGuard server(manager->m_Lifetime);
+    LTObject* object = nullptr;
+    auto result = om_CreateObject(&manager->m_Unknown390,&create,&object);
+    if (result != LT_OK) return result;
+    game->m_hObject = object;
+    result = sub_100332e8(manager,&create,definition,object,game,&object->m_pSData);
+    if (result != LT_OK) { game->m_hObject = nullptr; un390_RemoveObject(&manager->m_Unknown390,object); return result; }
+    g_Unknown58bec += sizeof(LTObject);
+    ObjectCallbackGuard actor(*object);
+    auto rollback = [&] {
+        if (server.unchanged() && actor.same_data()) sm_RemoveObjectFromWorld(manager,game);
+    };
+    try {
+        // Publish a complete native identity before invoking game code.
+        void* record = nullptr;
+        result = sm_ClaimObjectID(manager,&record,static_cast<uint16>(requested_id));
+        if (result != LT_OK) { rollback(); return result; }
+        object->m_pSData->m_Unknown28 = record;
+        object->m_ObjectID = static_cast<uint16>(static_cast<CObjectIDRec*>(record)->m_nID);
+        auto& entry = manager->m_Unknown8fc[object->m_ObjectID];
+        entry.m_nFlags = 1; entry.m_pRecord = object;
+        object->m_ChangeFlags |= 0x44;
+        manager->m_ClassMgr.message(game,MID_ACTIVATING,nullptr,0);
+        if (!server.unchanged()) return LT_ERROR;
+        if (!actor.unchanged()) { rollback(); return LT_ERROR; }
+        result = w_ApplyObjectFilenames(manager,object,&create);
+        if (!server.unchanged()) return LT_ERROR;
+        if (!actor.unchanged()) { rollback(); return LT_ERROR; }
+        if (result != LT_OK) { rollback(); return result; }
+        if (object->m_ObjectType == OT_WORLDMODEL || object->m_ObjectType == OT_CONTAINER) obj_RetransformWorldModelDims(object);
+        sm_UpdateObjectBBox(manager,object);
+        manager->m_ClassMgr.message(game,MID_INITIALUPDATE,&create,reason);
+        if (!server.unchanged()) return LT_ERROR;
+        if (!actor.unchanged()) { rollback(); return LT_ERROR; }
+        sm_SetObjectChangeFlag(manager,object,sm_GetObjectChangeFlags(manager,object));
+        *output = object;
+        return LT_OK;
+    } catch (...) { rollback(); throw; }
 }
 
 
@@ -8352,37 +6158,40 @@ LTRESULT sm_CreateObjectInWorld(CServerMgr* pMgr, LPBASECLASS pObject,
 //
 // LTRESULT, not the void servermgr.h declares: the body ends `xor %eax,%eax`.
 // Renamed for that reason.
-LTRESULT sm_ObjectRemoved2(CServerMgr* pMgr, LTObject* pObject)
+LTRESULT sm_ObjectRemoved(CServerMgr* pMgr, LTObject* pObject)
 {
+    if (!pObject || !pObject->m_pSData) return LT_INVALIDPARAMS;
+    ServerCallbackGuard server(pMgr->m_Lifetime);
+    ObjectCallbackGuard lifetime(*pObject);
+    pObject->m_pSData->m_Removing = true;
+
+    auto** changed = &pMgr->m_pChangedObjects;
+    while (*changed && *changed != pObject) changed = &(*changed)->m_pSData->m_pNextChanged;
+    if (*changed) *changed = pObject->m_pSData->m_pNextChanged;
+    pObject->m_pSData->m_pNextChanged = nullptr;
+
 	sub_100334cc(pMgr, pObject);
+    if (!server.unchanged() || !lifetime.same_data()) return LT_OK;
 
 	if (pObject->m_pSData->m_hIdentifier)
 		dhash_Remove(pMgr->m_hHash8c0, pObject->m_pSData->m_hIdentifier);
 
-	if (pObject->m_ChangeFlags & 0x80)
-	{
-		LTLink* pLink = sub_1002af00(pMgr, pObject);
-
-		if (pLink)
-		{
-			dl_RemoveAt(&pMgr->m_List8ec, pLink);
-
-			dfree(pLink);
-		}
-	}
+    pMgr->m_ClientReferences.RemoveFor(pObject);
 
 	sm_BreakAttachments(pMgr, pObject, 0, 1);
+    if (!server.unchanged() || !lifetime.same_data()) return LT_OK;
 	sm_BreakAttachments(pMgr, pObject, 1, 0);
+    if (!server.unchanged() || !lifetime.same_data()) return LT_OK;
 	sm_BreakAttachments(pMgr, pObject, 2, 0);
+    if (!server.unchanged() || !lifetime.same_data()) return LT_OK;
 
 	dl_RemoveAt(&pMgr->m_List8dc, &pObject->m_pSData->m_StateLink);
 
 	{
 		SObjData* pSData = pObject->m_pSData;
 
-		((CSObjDataTermView*)pSData)->Term(0);
-
-		sb_Free(&pMgr->m_MessageBank.m_Bank, pSData);
+        pObject->m_pSData = nullptr;
+        pMgr->m_MessageBank.Free(pSData);
 	}
 
 	return LT_OK;
@@ -8442,7 +6251,7 @@ void sm_SendWorldInfo(CServerMgr* pMgr, Client* pClient)
 	{
 		la_WriteChange(pMgr, &pServerMgr->m_pLightAnims[i], i, msg.m_pMsg, 0xff);
 
-		if (((CMsgLenView*)msg.m_pMsg)->GetSpaceLeft() <= 0x16)
+		if ((msg.m_pMsg)->GetSpaceLeft() <= 0x16)
 		{
 			sm_SendToClient(pMgr, pClient, 0x19, msg.m_pMsg, 0, 0x80);
 
@@ -8489,7 +6298,7 @@ void sm_SendWorldInfo(CServerMgr* pMgr, Client* pClient)
 // whole (`mov %esi,%eax`), where a uint16 return truncates to `mov %si,%ax`.
 // Renamed for that reason; its one caller stores the result into a uint16
 // field either way.
-uint32 sm_GetObjectChangeFlags2(CServerMgr* pMgr, LTObject* pObject)
+uint32 sm_GetObjectChangeFlags(CServerMgr* pMgr, LTObject* pObject)
 {
 	uint32 nFlags = 0x201;
 
@@ -8532,70 +6341,12 @@ uint32 sm_GetObjectChangeFlags2(CServerMgr* pMgr, LTObject* pObject)
 
 	if (pObject->m_pAttachments != 0 ||
 		(pObject->m_ObjectType == 1 &&
-			((CObjectModelView*)pObject)->m_Unknown204 != 0))
+			static_cast<ModelInstance*>(pObject)->m_HiddenPieces != 0))
 	{
 		nFlags |= 0x100;
 	}
 
 	return nFlags;
-}
-
-
-// One node of a queued message's client list: two links, one in the client's
-// own queue (whose payload is the record) and one in the record's list of
-// nodes (whose payload is the node itself, which is what the release walks
-// to hand them back). Names ours; the record comes out of the bank at 0x864.
-class CQueuedMsgNode
-{
-public:
-	LTLink m_ClientLink;                     // +0x00
-	LTLink m_RecordLink;                     // +0x0c
-};
-
-// 0x1002980d — make one queued message and hand it to every client that is
-// in the world. The record is 0x160 bytes out of the bank at 0x9d4, cleared
-// whole, and its reference count ends up as the number of clients that took
-// a copy — which is what CQueuedMsg::Release (0x10031d47) counts back down.
-//
-// The declared name is servermgr.h's; what the bytes build is a CQueuedMsg,
-// and the `int` it stores at +0x00 is the word the writer gate tests. The
-// walk keeps its cursor in the dead pMgr argument slot because the manager,
-// the record and the client all hold registers.
-void* sm_AddSoundRecord(CServerMgr* pMgr, int n)
-{
-	CQueuedMsgView* pRec = (CQueuedMsgView*)sm_sb_Allocate(&pMgr->m_Bank9D4);
-	LTLink*         pCur;
-	LTLink*         pHead;
-
-	memset(pRec, 0, 0x160);
-
-	dl_InitList(&pRec->m_List140);
-
-	pHead = &pMgr->m_ClientList.m_Head;
-
-	pCur = pHead->m_pNext;
-
-	while (pCur != pHead)
-	{
-		Client* pClient = (Client*)pCur->m_pData;
-
-		if (pClient->m_State == 3)
-		{
-			CQueuedMsgNode* pNode =
-				(CQueuedMsgNode*)sm_sb_Allocate(&pMgr->m_Bank864);
-
-			dl_AddHead(&pRec->m_List140, &pNode->m_RecordLink, pNode);
-			dl_AddHead(&pClient->m_List3CC, &pNode->m_ClientLink, pRec);
-
-			pRec->m_RefCount++;
-		}
-
-		pCur = pCur->m_pNext;
-	}
-
-	*(uint32*)pRec = (uint32)n;
-
-	return pRec;
 }
 
 
@@ -8624,12 +6375,12 @@ inline CPrecacheTreeView* sm_PrecacheTree(CServerMgr* pMgr, uint32 i)
 
 inline HCLASS sm_PrecacheFindClass(CServerMgr* pMgr)
 {
-	HCLASS hClass = ((CClassMgrFindView*)&pMgr->m_ClassMgr)->FindClass("BaseClass");
+	HCLASS hClass = reinterpret_cast<HCLASS>(pMgr->m_ClassMgr.find("BaseClass"));
 
 	return hClass;
 }
 
-LTBOOL CPrecacheView::PrecacheModels()
+LTBOOL CServerMgr::PrecacheModels()
 {
 	ObjectCreateStruct oc;
 	CPrecacheTreeView* pTree;
@@ -8646,16 +6397,16 @@ LTBOOL CPrecacheView::PrecacheModels()
 	{
 		pTree = sm_PrecacheTree((CServerMgr*)this, i);
 
-		if (pTree->m_pList->m_Flags48 & 8)
+		if (pTree->m_pWorldBsp->m_nUnknown48 & 8)
 		{
-			for (j = 0; j < pTree->m_pList->m_nEntries140; j++)
+			for (j = 0; j < pTree->m_pWorldBsp->m_Array138.GetSize(); j++)
 			{
 				oc.Clear();
 
 				oc.m_ObjectType = 2;
 				oc.m_Flags = 0x3000;
 
-				if (!fs_GetTableName(&pTree->m_pList->m_Table04, j,
+				if (!fs_GetTableName(pTree->m_pWorldBsp->m_Name, j,
 				                     oc.m_Filename, sizeof(oc.m_Filename)))
 					return LTFALSE;
 
@@ -8663,14 +6414,14 @@ LTBOOL CPrecacheView::PrecacheModels()
 					return LTFALSE;
 			}
 		}
-		else if (pTree->m_pList->m_Flags48 & 0x30)
+		else if (pTree->m_pWorldBsp->m_nUnknown48 & 0x30)
 		{
 			oc.Clear();
 
 			oc.m_ObjectType = 2;
 			oc.m_Flags = 0x3000;
 
-			strncpy(oc.m_Filename, pTree->m_pName0c->m_Name,
+			strncpy(oc.m_Filename, pTree->m_pCurrent->m_Name,
 				sizeof(oc.m_Filename) - 1);
 			oc.m_Filename[sizeof(oc.m_Filename) - 1] = 0;
 
@@ -8683,511 +6434,35 @@ LTBOOL CPrecacheView::PrecacheModels()
 }
 
 
-// 0x1003446d — is this file already on the cache list? A thiscall on the
-// manager (the caller pushes only the handle and cleans nothing up), so it
-// is a member CServerMgr does not declare; reached through a view. Name
-// ours: it is the only thing AddCachedFile consults before making a record.
-class CCacheLookupView
-{
-public:
-	CCacheRecView* FindCachedFile(void* hFile);   // 0x1003446d
-
-	uint8  m_pad_00[0x44];
-	LTList m_List44;                         // +0x44
-};
-
-CCacheRecView* CCacheLookupView::FindCachedFile(void* hFile)
-{
-	LTLink* pCur;
-	LTLink* pHead;
-
-	pCur = m_List44.m_Head.m_pNext;
-	pHead = &m_List44.m_Head;
-
-	while (pCur != pHead)
-	{
-		CCacheRecView* pRec = (CCacheRecView*)pCur->m_pData;
-
-		if (pRec->m_hFile == hFile)
-			return pRec;
-
-		pCur = pCur->m_pNext;
-	}
-
-	return LTNULL;
+std::shared_ptr<const SoundTrack> CServerMgr::AddCachedFile(CFileRef* file) {
+    if (!file) return {};
+    try { return m_Sounds.Load(*file); }
+    catch (const std::exception& error) {
+        if (g_DebugLevel >= 2) dsi_ServerError("Invalid sound file %s: %s", file->m_Name.c_str(), error.what());
+        return {};
+    }
 }
 
-// 0x1002bcd9 — the file manager's loader for a cache pass: it hands back a
-// counted object whose slot 1 is released as soon as the record has been
-// built from it (name ours, from the shape).
-class ICacheSource
-{
-public:
-	virtual void _v00() = 0;
-	virtual void Release() = 0;
-};
-
-ICacheSource* fs_OpenCacheSource(CFileMgr* pFileMgr, char* pFilename);  // 0x1002bcd9
-
-// 0x1003448f — put a file on the current cache pass's list and hand back its
-// record. A file already recorded is handed back as it stands; a file that
-// cannot be opened leaves the list alone.
-//
-// servermgr.h declares this address twice, as GetSoundTrack and as
-// AddCachedFile; the record it builds and links onto m_List44 is what the
-// pass sweeper (0x10034757) later walks, so AddCachedFile is the accurate
-// one and is what is defined here.
-//
-// The bank pointer is named in the source and lands in the dead hFile
-// argument slot -- the handle itself is in ebp by then. The filename lookup
-// happens *before* the null test on the handle, which is not an ordering the
-// compiler could have chosen: the source really does ask for the name first.
-CCacheRec* CServerMgr::AddCachedFile(void* hFile)
-{
-	CCacheRecView* pRec = ((CCacheLookupView*)this)->FindCachedFile(hFile);
-
-	if (!pRec)
-	{
-		char* pszName = fs_GetFilename(&m_FileMgr, hFile);
-
-		if (hFile)
-		{
-			ICacheSource* pSource = fs_OpenCacheSource(&m_FileMgr, pszName);
-
-			if (pSource)
-			{
-				StructBank* pBank = &m_Bank0C;
-				int         bOK;
-
-				pRec = (CCacheRecView*)sm_sb_Allocate(pBank);
-
-				bOK = pRec->Init(hFile, pSource, ((void**)hFile)[1]);
-
-				pSource->Release();
-
-				if (!bOK)
-				{
-					sb_Free(pBank, pRec);
-
-					return LTNULL;
-				}
-
-				dl_AddHead(&m_List44, &pRec->m_Link, pRec);
-			}
-		}
-	}
-
-	return (CCacheRec*)pRec;
+LTBOOL CServerThread::IsRequestQueued(void* file) {
+    return m_pServerMgr && file && m_pServerMgr->m_Models.HasPending(static_cast<CFileRef*>(file)->m_Name);
 }
 
-
-// The sub-object teardowns CServerWorld::Term reaches, each a thiscall on
-// the address of a member (names by address; nothing in the image names
-// them).
-class CWorldSub6CView
-{
-public:
-	void Term();                             // 0x10039bbc
-};
-
-// 0x10014295 -- the point-shade grid's teardown: free the one pointer it
-// owns and clear the rest (20 bytes; commonmodel.cpp's CWorldSubFC, whose
-// Release at 0x10014185 is a tail jump here). Its home in the image is that
-// class's run in commonmodel.cpp; written here through the view because this
-// is the file that calls it.
-class CWorldSubFCView
-{
-public:
-	void*  m_pData;                          // +0x00
-
-	void Term();                             // 0x10014295
-	void Clear();                            // 0x1001424e  CWorldSubFC::Clear
-};
-
-void CWorldSubFCView::Term()
-{
-	dfree(m_pData);
-	Clear();
+void CServerThread::ProcessMessage(LThreadMessage* message) {
+    if (!m_pServerMgr || !message || message->m_Data[0] || message->m_Data[2]) return;
+    auto* file = reinterpret_cast<CFileRef*>(message->m_Data[3]);
+    if (!file) return;
+    ModelService::Ticket ticket = message->m_Data[5];
+    Model* model = nullptr;
+    LThreadMessage reply;
+    reply.m_Data[0] = se_LoadModelData(m_pServerMgr,file->m_Name.data(),file,&model,&ticket);
+    reply.m_Data[2] = 0;
+    reply.m_Data[3] = reinterpret_cast<uintptr_t>(file);
+    reply.m_Data[5] = ticket;
+    // The service retains Ready results even when this queue cannot allocate.
+    m_OutgoingQueue.PostMessage(&reply);
 }
 
-// One entry of the array at +0x18c: a flag byte whose bit 0 says the second
-// dword is worth tearing down first (names ours).
-class CWorldArrayEntry
-{
-public:
-	uint8  m_Flags;                          // +0x00
-	uint8  m_pad_01[0x04 - 0x01];
-	class CWorldArrayInner* m_pInner;        // +0x04
-
-	void Term();                             // 0x10007ebe
-};
-
-class CWorldArrayInner
-{
-public:
-	void Term();                             // 0x1000ae5c
-};
-
-// 0x10058c7c is the allocator both of Term's array teardowns pass.
-extern uint32 g_WorldAllocator;              // 0x10058c7c
-
-// 0x10007a6a — the world's own file-scope teardown, taking the world
-// (cdecl), and 0x10007f73 — the last step, a thiscall on it. Names by
-// address.
-//
-// The list at +0xf4 is the world-object records worldbsp.cpp's loader pushes
-// (WorldObjectRecQT1 there, 0x14 bytes): each one's object is handed back to
-// its class's free function (the class's +0x08, a plain function pointer --
-// `call *0x8(%eax)` with no `this`), the record is dfree'd, and the head is
-// left null. lithtech.exe's copy is standalone too (0x00421c70, 68 bytes).
-class CWorldObjClassView
-{
-public:
-	void*  m_pMake;                          // +0x00
-	uint8  m_pad_04[0x08 - 0x04];
-	void   (*m_pFree)(void* pObject);        // +0x08
-};
-
-class CWorldObjRecView
-{
-public:
-	void*  m_pBsp;                           // +0x00
-	void*  m_pSurface;                       // +0x04
-	void*  m_pObject;                        // +0x08
-	CWorldObjClassView* m_pClass;            // +0x0c
-	CWorldObjRecView*   m_pNext;             // +0x10
-};
-
-class CWorldObjListView
-{
-public:
-	uint8  m_pad_00[0xf4];
-	CWorldObjRecView* m_pObjRecs;            // +0xf4
-};
-
-void w_TermWorldData(class CServerWorld* pWorld)
-{
-	CWorldObjRecView* pRec = ((CWorldObjListView*)pWorld)->m_pObjRecs;
-	CWorldObjRecView* pNext;
-
-	while (pRec)
-	{
-		pNext = pRec->m_pNext;
-
-		pRec->m_pClass->m_pFree(pRec->m_pObject);
-		dfree(pRec);
-
-		pRec = pNext;
-	}
-
-	((CWorldObjListView*)pWorld)->m_pObjRecs = LTNULL;
-}
-
-class CWorldFinishView
-{
-public:
-	void TermFinish();                       // 0x10007f73
-};
-
-// One thing hanging off the 0xe8 list: only its virtual destructor is
-// reached, through `delete` (name ours).
-class CWorldListItem
-{
-public:
-	virtual ~CWorldListItem();
-};
-
-// The CMoArray<T, DefaultCache> at +0x04, for the one member Term needs:
-// TermPointers, inlined in the shipped code (0x10009c3e).
-class CWorldArray04View
-{
-public:
-	void*   m_vptr;
-	void*   m_pArray;
-	uint32  m_nElements;
-	uint32  m_CacheSize;
-	uint32  m_WantedCache;
-
-	void TermPointers()
-	{
-		m_pArray = 0;
-		m_nElements = 0;
-		m_CacheSize = 0;
-		m_WantedCache = 0;
-	}
-};
-
-// 0x10009be5 — take the world down, children first (the walk calls Term on
-// each child recursively) and then this world's own link out of whatever
-// list it is in.
-//
-// After that the teardown forks on the flag at +0x1e8. A world with it set
-// drops the +0x04 array's pointers without freeing them and tears down the array at +0x18c entry by
-// entry; a world with it clear does the full job — the collection at +0x04,
-// the object store, the 0xe8 list's contents deleted one by one, the two
-// raw pointers freed, and two more sub-objects. Both arms end by releasing
-// the collection at +0x188 and calling the finisher.
-//
-// CServerWorld is nowhere near the eight bytes servermgr.h gives it, so
-// everything here goes through the view above.
-//
-// The four zero stores in the child arm are CMoArray::TermPointers inlined on
-// the DefaultCache array at +0x04 (vptr, m_pArray, m_nElements, and the two
-// cache words at 0x08..0x14): a child world shares its parent's storage and
-// forgets the pointers instead of freeing them. Spelled as four member stores
-// the scheduler hoisted the loop's `xor %ebx,%ebx` and guard above them; as
-// the inline call (0x10009c3e..0x10009c47 then 0x10009c4a) it does not.
-// The two element types Term's arrays are instantiated on (names ours): the
-// +0x04 collection's 0x60-byte record, whose SetSize2 is 0x1000c267, and the
-// +0x188 array's pointer to a sixteen-byte element with a destructor
-// (0x10007eb9 / 0x00422280).
-//
-// Term calls collection.h's own templates on them, not two out-of-line
-// helpers: server.dll's /O1 declines both and calls 0x1000c267 and
-// DeleteAndClearArray2 (0x1000d071) as it always did, while lithtech.exe's
-// /O2 expands them -- 0x00424bc0 is identical only that way. Both
-// DeleteAndClearArray2 sites expand there, with their BaseDelete folded into
-// the loop's null test; the child arm's SetSize2 stays a call (0x00414fa0)
-// and the other arm's expands around a called _DeleteAndDestroyArray
-// (0x00413050), and the +0x04 SetSize2 expands around a called BaseDelete
-// (0x004152b0). VC6 picked every one of those itself.
-//
-// The 0x60 record is collection.cpp's CCollElem60 -- a constructor (the
-// one BaseNew 0x1000d1f2 runs) and no destructor, which is why the release
-// is the plain BaseDelete -- restated here exactly as collection.cpp's
-// DECLARE_COLLCTOR spells it, so that the array's COMDATs are collection.cpp's
-// own (a constructor-less 0x60 stand-in compiled a second _AllocateTArray
-// the shipped image does not have).
-class CCollElem60
-{
-public:
-	CCollElem60();
-	uint8 m_pad[0x60];
-};
-
-// commonmodel.cpp's world record, as far as the teardown needs it: its
-// destructor (0x10007eb9, a tail jump onto its Term) is defined there.
-class CServerWorldRec
-{
-public:
-	~CServerWorldRec();                      // 0x10007eb9
-
-	uint8 m_pad[0x10];
-};
-
-void CServerWorld::Term()
-{
-	uint32 i;
-	CServerWorldView* pThis = (CServerWorldView*)this;
-	LTLink*           pCur;
-	LTLink*           pHead;
-
-	((CWorldSub6CView*)&pThis->m_Unknown6c)->Term();
-
-	pCur = pThis->m_Children.m_pNext;
-	pHead = &pThis->m_Children;
-
-	while (pCur != pHead)
-	{
-		CServerWorld* pChild = (CServerWorld*)pCur->m_pData;
-		LTLink*       pNext = pCur->m_pNext;
-
-		pChild->Term();
-
-		pCur = pNext;
-	}
-
-	dl_Remove(&pThis->m_Link1dc);
-
-	if (pThis->m_bIsChild != 0)
-	{
-		((CWorldArray04View*)&pThis->m_Collection04)->TermPointers();
-
-		for (i = 0; i < pThis->m_nUnknown190; i++)
-		{
-			CWorldArrayEntry* pEntry =
-				(CWorldArrayEntry*)pThis->m_pUnknown18c[i];
-
-			if (pEntry)
-			{
-				if (pEntry->m_Flags & 1)
-					pEntry->m_pInner->Term();
-
-				pEntry->Term();
-			}
-		}
-
-		DeleteAndClearArray2(*(CMoArray<CServerWorldRec*, DefaultCache>*)&pThis->m_Collection188,
-			(LAlloc*)&g_WorldAllocator);
-	}
-	else
-	{
-		((CMoArray<CCollElem60, DefaultCache>*)&pThis->m_Collection04)->SetSize2(0,
-			(LAlloc*)&g_WorldAllocator);
-
-		TermObjects();
-
-		pCur = pThis->m_List0E8.m_pNext;
-		pHead = &pThis->m_List0E8;
-
-		while (pCur != pHead)
-		{
-			LTLink*         pNext = pCur->m_pNext;
-			CWorldListItem* pItem = (CWorldListItem*)pCur->m_pData;
-
-			delete pItem;
-
-			pCur = pNext;
-		}
-
-		dfree(pThis->m_pUnknown1b8);
-
-		w_TermWorldData(this);
-
-		((CWorldSubFCView*)&pThis->m_Unknown0fc)->Term();
-
-		if (pThis->m_pUnknown1b0)
-			::operator delete(pThis->m_pUnknown1b0);
-
-		DeleteAndClearArray2(*(CMoArray<CServerWorldRec*, DefaultCache>*)&pThis->m_Collection188,
-			(LAlloc*)&g_WorldAllocator);
-	}
-
-	((CWorldFinishView*)this)->TermFinish();
-}
-
-
-// 0x10035152 — is a load request for this file already in flight? Both of
-// the thread's queues are locked and then searched by the file handle each
-// message carries in its fourth payload dword.
-//
-// Each walk is the cursor-alias form the circular lists want, and the
-// "already back at the tail" test compiles branchlessly (`sub`/`neg`/`sbb`/
-// `and`), which is what says the source wrote a conditional expression and
-// not an `if`. Both locks' addresses are named in locals because `this` is
-// spent on the second queue's tail by the time they are released.
-//
-// There is no tail local: the terminator test reads the list's m_pTail
-// member each time and VC6 CSEs it into its own register, separate from the
-// cursor, which is why the guard tests the cursor copy (`mov %ecx,%eax;
-// test %eax,%eax` at 0x1003517e, and `mov %esi,%eax` at 0x1003519f with
-// `this` reused for the second tail). A `pTail` local that the cursor is
-// copied from coalesces the two, tests the tail, and tail-duplicates the
-// second loop's head (139 bytes, the old cl-8168 misread).
-LTBOOL CServerThread::IsRequestQueued(void* pFile)
-{
-	LCriticalSection* pCS2;
-	LCriticalSection* pCS1;
-
-	pCS1 = &m_IncomingQueue.m_CS;
-
-	pCS1->Enter();
-
-	pCS2 = &m_OutgoingQueue.m_CS;
-
-	pCS2->Enter();
-
-	if (m_pServerMgr)
-	{
-		LThreadMessage* pCur;
-		LThreadMessage* pRec;
-
-		pCur = m_IncomingQueue.m_MessageList.m_pTail;
-
-		while (pCur)
-		{
-			pRec = pCur;
-			pCur = (pCur->m_pPrev == m_IncomingQueue.m_MessageList.m_pTail) ? LTNULL : pCur->m_pPrev;
-
-			if ((void*)pRec->m_Data[3] == pFile)
-			{
-				pCS2->Leave();
-				pCS1->Leave();
-				return LTTRUE;
-			}
-		}
-
-		pCur = m_OutgoingQueue.m_MessageList.m_pTail;
-
-		while (pCur)
-		{
-			pRec = pCur;
-			pCur = (pCur->m_pPrev == m_OutgoingQueue.m_MessageList.m_pTail) ? LTNULL : pCur->m_pPrev;
-
-			if ((void*)pRec->m_Data[3] == pFile)
-			{
-				pCS2->Leave();
-				pCS1->Leave();
-				return LTTRUE;
-			}
-		}
-	}
-
-	pCS2->Leave();
-	pCS1->Leave();
-
-	return LTFALSE;
-}
-
-
-// serverengine.cpp's loader (0x1002b22c); serverengine.h is not included here.
-LTRESULT se_LoadModelData(CServerMgr* pMgr, char* pFilename, void* pFile,
-                          class Model** ppModel);
-
-// 0x100351d9 / lithtech 0x47bfa0 — slot 0x0c of the thread's vftable: one
-// load request off the incoming queue. The request is the same eight-dword
-// record se_LoadModel posts (payload dwords 0 and 2 zero, the file handle in
-// dword 3); anything else is ignored. The model is loaded here, on the
-// worker, and the answer goes back on the outgoing queue in the shape
-// OnModelLoaded reads: dword 0 is the failure flag (the `neg/sbb/neg` is
-// `!= LT_OK`), dword 3 the file and dword 4 the model.
-void CServerThread::ProcessMessage(LThreadMessage* pMsg)
-{
-	LThreadMessage reply;
-	Model*         pModel;
-
-	if (m_pServerMgr && pMsg->m_Data[0] == 0 && pMsg->m_Data[2] == 0)
-	{
-		void* pFile     = (void*)pMsg->m_Data[3];
-		char* pFilename = fs_GetFileName(&m_pServerMgr->m_FileMgr, pFile);
-
-		LTRESULT dResult = se_LoadModelData(m_pServerMgr, pFilename, pFile,
-		                                    &pModel);
-
-		reply.m_Data[0] = (dResult != LT_OK);
-		reply.m_Data[2] = 0;
-		reply.m_Data[3] = (uint32)pFile;
-		reply.m_Data[4] = (uint32)pModel;
-
-		m_OutgoingQueue.PostMessage(&reply);
-	}
-}
-
-
-// The sent-id list being refilled is g_pFillIDList (0x100587a4, defined at
-// the top of this file): it grows two hundred entries at a time by hand,
-// which is where the 0x190 in the allocation and the 0xc8 added to the
-// capacity (ClientIDList::m_nMaxIDs, +0x02) come from.
-
-// 0x100291c7 — write the object's changed state into the update, and
-// 0x10027ad0 — whatever follows it (names by address).
-// RETURNS int, not void: the shipped exit at 0x10029601 is `push $1 ; pop
-// %eax`, so the answer is 1. The caller ignores it, which is why the
-// declaration could sit here as void for so long without anyone noticing.
-int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
-                  CObjInfo* pInfo, class ServerMessage* pMsg);
-// 0x100250a4 — how many animation trackers the object has: the list at
-// LTObject+0x1f8 walked through +0x04, counted. A thiscall with no
-// arguments, which ltobject_internal.h does not declare (name ours).
-class CObjTrackerCountView
-{
-public:
-	uint32 GetTrackerCount();                // 0x100250a4 / 0x0045b430
-	char*  GetFilename();                    // 0x100250b7 / 0x0045b450
-
-	uint8          m_pad_000[0x1f8];
-	LTAnimTracker* m_pTrackerList;           // 0x1f8  (0x004672a3)
-};
+int sub_100291c7(CServerMgr*, Client*, LTObject*, CObjInfo*, ServerMessage*);
 
 // 0x10013585 — the full rotation, written as whatever its four floats decode
 // to (it converts through 0x10015bcd and 0x1001210b first), and 0x100290d7 —
@@ -9238,7 +6513,7 @@ void sub_100290d7(LTObject* pObject, ServerMessage* pMsg)
 	uint16         nIndex;
 	uint32         nPercent;
 
-	nCount = (uint16)((CObjTrackerCountView*)pObject)->GetTrackerCount();
+	nCount = (uint16)static_cast<ModelInstance*>(pObject)->GetTrackerCount();
 
 	if (nCount > 0x100)
 	{
@@ -9246,7 +6521,7 @@ void sub_100290d7(LTObject* pObject, ServerMessage* pMsg)
 		{
 			dsi_ServerError(
 				"Model (%s) with > 256 AnimTrackers, ignoring animation.",
-				((CObjTrackerCountView*)pObject)->GetFilename());
+				static_cast<ModelInstance*>(pObject)->GetFilename());
 		}
 
 		// 0x0046728b -- OUT OF LINE in lithtech.exe.
@@ -9261,7 +6536,7 @@ void sub_100290d7(LTObject* pObject, ServerMessage* pMsg)
 
 	nIndex = 0;
 
-	pTracker = ((CObjTrackerCountView*)pObject)->m_pTrackerList;
+	pTracker = static_cast<ModelInstance*>(pObject)->m_pTrackerList;
 
 	while (pTracker)
 	{
@@ -9401,7 +6676,7 @@ void sub_10027ad0(CUpdateContext* pCtx, LTObject* pObject, CObjInfo* pInfo)
 
 	if (nAnimFlag && pObject)
 	{
-		nSize = (uint16)(((CObjTrackerCountView*)pObject)->GetTrackerCount() * 4
+		nSize = (uint16)(static_cast<ModelInstance*>(pObject)->GetTrackerCount() * 4
 			+ 15);
 	}
 
@@ -9412,7 +6687,7 @@ void sub_10027ad0(CUpdateContext* pCtx, LTObject* pObject, CObjInfo* pInfo)
 	if (nSendFlags & 0x4000)
 	{
 		lmsg_WriteCompPos(&pCtx->m_Msg2.m_pMsg->m_Write, &pObject->m_Pos,
-			(CPosRef*)&pCtx->m_pMgr->m_World);
+			pCtx->m_pMgr->m_World.PositionReference());
 
 		((IMessageWrite*)&pCtx->m_Msg2.m_pMsg->m_Write)->WriteCompVector(
 			&pObject->m_Velocity);
@@ -9450,30 +6725,15 @@ void sm_WriteObjectUpdate(CUpdateContext* pCtx, LTObject* pObject,
 	if (pInfo->m_ChangeFlags & 0x1000)
 		return;
 
-	if (g_pFillIDList->m_nIDs >= g_pFillIDList->m_nMaxIDs)
-	{
-		uint16* pNew = (uint16*)dalloc(
-			(g_pFillIDList->m_nMaxIDs + 200) * sizeof(uint16));
-
-		memcpy(pNew, g_pFillIDList->m_pIDs,
-			g_pFillIDList->m_nIDs * sizeof(uint16));
-
-		dfree(g_pFillIDList->m_pIDs);
-
-		g_pFillIDList->m_pIDs = pNew;
-		g_pFillIDList->m_nMaxIDs += 200;
-	}
-
-	g_pFillIDList->m_pIDs[g_pFillIDList->m_nIDs] = pObject->m_ObjectID;
-	g_pFillIDList->m_nIDs++;
+	if (!g_pFillIDList->Append(pObject->m_ObjectID)) return;
 
 	nSize = 100;
 
 	nFlags = pInfo->m_ChangeFlags;
 
-	if ((nFlags & 1) && pObject->m_pSData->m_Unknown2c)
+	if ((nFlags & 1) && pObject->m_pSData->m_SFXMessage.m_pMsg)
 	{
-		nSize = ((ServerMessage*)pObject->m_pSData->m_Unknown2c)->m_Unknown34
+		nSize = ((ServerMessage*)pObject->m_pSData->m_SFXMessage.m_pMsg)->m_Unknown34
 			+ 100;
 	}
 
@@ -9516,7 +6776,7 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 	if (pObject->m_Unknown54)
 		return;
 
-	if (((IObjectUpdateGate*)pObject)->IsSkipped())
+	if (pObject->_v34())
 		return;
 
 	if (pObject->m_ObjectType == OT_WORLDMODEL &&
@@ -9527,7 +6787,7 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 		return;
 
 	sm_WriteObjectUpdateInline(pCtx, pObject,
-		&pCtx->m_pClient->m_pObjInfos[pObject->m_ObjectID]);
+		&pCtx->m_pClient->m_ObjInfos[pObject->m_ObjectID]);
 
 	pAttach = pObject->m_pAttachments;
 
@@ -9538,7 +6798,7 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 		if (pChild && sub_10027be0(pCtx->m_pMgr, pChild))
 		{
 			sm_WriteObjectUpdateInline(pCtx, pChild,
-				&pCtx->m_pClient->m_pObjInfos[pChild->m_ObjectID]);
+				&pCtx->m_pClient->m_ObjInfos[pChild->m_ObjectID]);
 		}
 
 		pAttach = pAttach->m_pNext;
@@ -9567,393 +6827,9 @@ void sub_10027918(LTObject* pObject, CUpdateContext* pCtx)
 // Out of line, our lithtech build called it (1332 bytes against 1386, and a
 // stray 72-byte ??0Client row); inline it is expanded (1380), server.dll
 // unchanged.
-inline Client::Client()
-	: m_pClientData(LTNULL)
-{
-}
-
-
 // The sound instance's audible radius and world position, both inside the
 // padding servermgr.h leaves after +0x3c (names ours, from the range test
 // below).
-class CSoundRangeView
-{
-public:
-	uint8    m_pad_00[0x14];
-	// +0x14 — a record whose +0x08 is the sound's id, read as a uint16 both
-	// for the wire and as snd_FindSentState's hash key (names ours).
-	class CSoundIDRec* m_pIDRec;             // +0x14
-	uint8    m_pad_18[0x1c - 0x18];
-	float    m_fStartTime;                   // +0x1c  m_Time when it began
-	uint8    m_pad_20[0x34 - 0x20];
-	// +0x34 — servermgr.h types this uint32; the shipped read is `mov ..,%ax`
-	// and the mask that follows is 16-bit, so the field is a WORD.
-	uint16   m_Flags;                        // +0x34
-	uint8    m_pad_36[0x3c - 0x36];
-	uint8    m_Unknown3c;                    // +0x3c
-	uint8    m_pad_3d[0x40 - 0x3d];
-	float    m_fRadius;                      // +0x40
-	float    m_fInnerRadius;                 // +0x44  see the ratio below
-	uint8    m_Unknown48;                    // +0x48
-	uint8    m_pad_49[0x4c - 0x49];
-	float    m_f4c;                          // +0x4c
-	LTVector m_vPos;                         // +0x50
-	uint32   m_Unknown5c;                    // +0x5c
-
-	// Stand-in accessors (names ours): a float RETURNED from an inline
-	// reaches its use on the x87 stack, which is how sub_100298d9 reads both
-	// fields in lithtech.exe (0x0046855c, 0x0046857c).
-	float    GetF4c() { return m_f4c; }
-	float    GetStartTime() { return m_fStartTime; }
-};
-
-// The two little records the sound points at. The one at +0x0c has its dword
-// read whole and handed to WriteWord, so it is a uint32 there and not the
-// uint16 servermgr.h's `uint16* m_pUnknown0c` implies; the one at +0x14 has
-// its +0x08 read as a word (names ours).
-class CSoundClientRec
-{
-public:
-	uint8  m_pad_00[0x08];
-	uint32 m_nIndex;                         // +0x08
-};
-
-class CSoundIDRec
-{
-public:
-	uint8  m_pad_00[0x08];
-	uint16 m_nID;                            // +0x08
-};
-
-// One client's memory of what it was last told about one sound. Ten bytes,
-// and the size is not inferred: sb_Init2(&m_Bank89C, 10, 0x20, 0x20) at
-// smgr.cpp's manager constructor is where these come from. The change byte's
-// three bits are the three fields below it, in order (names ours).
-#define SNDSENT_FLAGS  1
-#define SNDSENT_BYTE04 2
-#define SNDSENT_RANGE  4
-
-class CSoundSentState
-{
-public:
-	uint8  m_ChangeFlags;                    // +0x00
-	uint8  m_pad_01[0x02 - 0x01];
-	uint16 m_Flags;                          // +0x02  the sound's flag word
-	uint8  m_Unknown04;                      // +0x04  SoundInstance's +0x3c
-	uint8  m_pad_05[0x06 - 0x05];
-	uint16 m_nRange;                         // +0x06  min(m_fRadius, 65535)
-	uint8  m_nInnerRatio;                    // +0x08  inner/outer * 255, capped
-};
-
-// 0x100288be — find this client's record for one sound, or make one. The hash
-// is the client's own at +0x3dc, the key is the two-byte sound id, and a new
-// record comes out of g_pServerMgr->m_Bank89C (names ours).
-CSoundSentState* snd_FindSentState(Client* pClient, uint16 nSoundID);
-
-// 0x10029b53 — merge the freshly computed state into the stored one and leave
-// the change byte saying which of the three fields moved. Per field: if the
-// bit is ALREADY set the value is copied unconditionally, otherwise it is
-// compared and the bit set only on a difference — so a field that changed and
-// was not yet sent stays marked (name ours).
-void snd_MergeSentState(CSoundSentState* pStored, CSoundSentState* pNew);
-
-// 0x10029b42 — take a hold on the instance so a killed sound keeps updating
-// until the last client has heard about it: if any of PLAYSOUND 0x008 / 0x020
-// / 0x400 is set and 0x004 is not, `++m_Unknown28`.
-//
-// THAT INCREMENT CORRECTS servermgr.h, which types m_Unknown28 `void*` and
-// describes it as "keeps a killed sound updating". The description is right
-// and the type is not: nothing ever stores a pointer there and this function
-// increments it, so it is a hold COUNT (name ours).
-//
-// IN-CLASS, i.e. `inline`, and that is what gives both images their shape:
-// server.dll's /Os declines the expansion and calls the out-of-line copy at
-// 0x10029b42 (17 bytes, `test $0x428,%ax` -- /Os picks the short 16-bit
-// test), while lithtech.exe's /Ot expands it into the sound writer
-// (0x0046841f..0x0046842d, `test $0x428,%eax`). Measured in a scratch TU:
-// every spelling of this test is declined at /O1 and accepted at /O2.
-class CSoundHoldView
-{
-public:
-	uint8  m_pad_00[0x28];
-	uint32 m_nHolds;                         // +0x28  SoundInstance::m_Unknown28
-	uint8  m_pad_2c[0x34 - 0x2c];
-	uint32 m_PlaySoundFlags;                 // +0x34
-
-	void AddHold()                           // 0x10029b42
-	{
-		if ((m_PlaySoundFlags & 0x428) && !(m_PlaySoundFlags & 4))
-			++m_nHolds;
-	}
-};
-
-// 0x10028a35 — ServerMessage's four-byte float write, the sibling of the
-// dword one at 0x1000ecd6: same room test against m_MaxDataLen and m_DataSize
-// and the same grow through 0x1000c537 with &g_DefAlloc, then `flds` the
-// argument into the buffer (name ours).
-class CMsgFloatWriteView
-{
-public:
-	void WriteFloat(float fValue);           // 0x10028a35
-	void WriteDWord(uint32 nValue);          // 0x1000ecd6  (netmgr.cpp's too)
-	// 0x1000ec3d again, the word writer, but declared with a DWORD
-	// parameter. The callee only reads the low word (`mov 0x8(%ebp),%dx`),
-	// so the two declarations compile the same body; what differs is the
-	// caller. sub_100298d9 pushes the client-record index whole,
-	// `push 0x8(%eax)` at 0x10029972, and lithtech.exe loads it whole too
-	// (`mov 0x8(%edx),%eax` at 0x0046840d). Through the uint16 prototype
-	// VC6 narrows it to `mov 0x8(%eax),%ax ; push %eax`, whatever the
-	// field's type or the cast.
-	void WriteWord(uint32 nValue);
-};
-
-// 0x100298d9 / lithtech.exe 0x00468330 (1326 bytes, identical in both) —
-// write one sound's state into the update (name ours).
-//
-// NOT RECONSTRUCTED (587 bytes). Every callee and every constant in it is
-// identified below, so what is left is transcription rather than reading.
-//
-// Callees, all six of them:
-//   0x10029b24  SoundInstance::GetObject      already in servermgr.h
-//   0x10029b42  snd_AddHold                   above
-//   0x10029b53  snd_MergeSentState            above
-//   0x100288be  snd_FindSentState             above
-//   0x10028a35  CMsgFloatWriteView::WriteFloat above
-//   0x1000ecd6  ServerMessageWriteView::WriteDWord  already in netmgr.cpp
-//   0x10012f79  lmsg_WriteCompPos             already in servermsg.h:217
-//
-// Two access paths worth writing down because they are not obvious:
-//   * lmsg_WriteCompPos's first argument is pMsg + 0x08, which is
-//     ServerMessage's EMBEDDED LMessageImpl -- servermsg.h already records
-//     that the constructor stores LMessageImpl's vtable into its own +0x08.
-//   * its CPosRef* is pMgr + 0x1a4, i.e. CServerWorld. The world is the
-//     reference frame a compressed position is relative to.
-//
-// The body, in order:
-//   * `if (!pMsg) return;` -- the message is tested before anything else.
-//   * nFlags = pSound->m_PlaySoundFlags, kept as a dword in pSound's own
-//     (dead) parameter slot; the 0x800 bit is then read and written through
-//     the byte at 0xd(%ebp), which is that dword's second byte.
-//   * if (nFlags & 0x808): resolve GetObject(). If it is the client's own
-//     object (Client+0x3ac), set 0x800 in the local copy and clear bit 1 of
-//     pInfo->m_ChangeFlags. Otherwise, if 0x800 was already set, re-resolve,
-//     copy that object's m_Pos (LTObject+0x18c) into the sound's m_vPos, and
-//     SET bit 1 of pInfo. Then nFlags = (nFlags & ~0x800) | 0x2.
-//   * WriteByte(0), WriteByte(1), WriteByte(pInfo->m_ChangeFlags),
-//     WriteWord(pSound->m_pUnknown0c[4])  -- the +0x08 of the 0x0c pointer,
-//     which servermgr.h already calls the client-table index.
-//   * if (pInfo->m_ChangeFlags & 1): snd_AddHold, then
-//     WriteWord(pSound->m_pUnknown14->+0x08), then the range pair:
-//         nRange = (uint16)min(pSound->m_fRadius, 65535.0f)
-//         nInner = (uint8)min((pSound->m_f44 * 255.0f) / nRange, 255)
-//     -- 65535.0f is 0x1004e248 and 255.0f is 0x1004d374, and the divide is
-//     `fidivl` against nRange as an integer, so m_f44 is an inner radius and
-//     the byte is the ratio scaled to 255.
-//     Then snd_FindSentState; a null answer means "first time", which is
-//     spelled as a local record with its change byte set to 7 and used
-//     directly instead of merging. Otherwise fill a local record and
-//     snd_MergeSentState(pStored, pLocal).
-//     Then write only what the change byte says, clearing each bit as it
-//     goes, and note that the VALUES come from the originals rather than
-//     from the record -- the record carries the bits, not the payload.
-//   * if (nFlags & 0x40): WriteByte(pSound->+0x48).
-//   * if (nFlags & 0x80): WriteFloat(pSound->+0x4c).
-//   * if (nFlags & 0x400): the elapsed play time,
-//         nMs = (uint32)((pMgr->m_f6cc - pSound->m_f1c) * 1000.0 + 0.5)
-//     -- 1000.0 at 0x1004e240 and 0.5 at 0x1004e238, both doubles, so this is
-//     seconds to milliseconds with rounding. Written as a byte when it fits;
-//     0xff is the escape and the full value follows as a dword.
-//   * WriteDWord(pSound->+0x5c).
-//   * if (pInfo->m_ChangeFlags & 2): lmsg_WriteCompPos(&pMsg's LMessageImpl,
-//     &pSound->m_vPos, (CPosRef*)&pMgr->m_World).
-//
-// MATCH, 587 of 587 bytes. The last residuals were:
-//   * The flag word: a uint32 FIELD read into a uint16 LOCAL. That is a
-//     truncating `mov 0x34(%ebx),%ax` with a dead upper half, which is what
-//     the shipped code has; sm_WriteQueuedMessageBody forced the spelling
-//     first.
-//   * The elapsed-time subtraction: an inline accessor read of the start time, see
-//     the site.
-//   * The client-record index at 0x10029972: shipped pushes the dword
-//     whole. That is a WriteWord declared with a uint32 parameter; see
-//     CMsgFloatWriteView above. No field type or cast does it through the
-//     uint16 prototype.
-//   * The radius clamp at 0x10029999: shipped does `flds C ; flds r ;
-//     fcomp %st(1)` where we did `fcoms r`. The fix is the SDK's LTMIN,
-//     parentheses included; see the site. Measured negatives, all without
-//     the macro's parentheses: `<`/`<=`/`>`/`>=`/`!(<)` in either operand
-//     order, a float local or a static (const or not) for the bound, and an
-//     if-assign through a float local (591, `fcomps C`). Every one leaves
-//     the compare on memory.
-//
-// Two facts the diff forced, and both are corrections rather than guesses:
-// snd_AddHold is a THISCALL member (the shipped call is `mov %ebx,%ecx; call`
-// where a free function would push), and the inner-ratio local is a uint16,
-// not a uint32 -- `movzbw %al,%ax` into a word slot rather than `movzbl`.
-//
-// What is still unnamed is only SoundInstance's own padding: +0x14 (a pointer
-// whose +0x08 is a word), +0x1c (the start time), +0x3c, +0x44 (the inner
-// radius), +0x48, +0x4c, +0x5c.
-void sub_100298d9(CServerMgr* pMgr, SoundInstance* pSound, CObjInfo* pInfo,
-                  Client* pClient, class ServerMessage* pMsg)
-{
-	CSoundRangeView* pSnd = (CSoundRangeView*)pSound;
-	CSoundSentState* pState;
-	CSoundSentState  state;
-	uint16           nFlags;
-	uint32           nRange;
-	uint16           nInner;
-	uint32           nTmp;
-	uint16           nMs;
-
-	if (!pMsg)
-		return;
-
-	nFlags = (uint16)pSnd->m_Flags;
-
-	if (nFlags & 0x808)
-	{
-		if (pSound->GetObject() == pClient->m_pUnknown3AC)
-		{
-			nFlags |= 0x800;
-			pInfo->m_ChangeFlags &= ~2;
-		}
-		else
-		{
-			if (nFlags & 0x800)
-			{
-				pSnd->m_vPos = pSound->GetObject()->m_Pos;
-				pInfo->m_ChangeFlags |= 2;
-			}
-
-			nFlags = (nFlags & ~0x800) | 2;
-		}
-	}
-
-	pMsg->WriteByte(0);
-	pMsg->WriteByte(1);
-	pMsg->WriteByte((uint8)pInfo->m_ChangeFlags);
-	// The dword-parameter WriteWord: see CMsgFloatWriteView (0x10029972).
-	((CMsgFloatWriteView*)pMsg)->WriteWord(
-		((CSoundClientRec*)pSound->m_pUnknown0c)->m_nIndex);
-
-	if (pInfo->m_ChangeFlags & 1)
-	{
-		((CSoundHoldView*)pSound)->AddHold();
-
-		pMsg->WriteWord(pSnd->m_pIDRec->m_nID);
-
-		// The SDK's LTMIN macro, and its parentheses are what matter. At
-		// /O1 `(r) < C ? r : C` loads C, then loads r and does
-		// `fcomp %st(1)` (0x10029999). The same test without parentheses
-		// round the left operand, in any operand order, folds r into
-		// `fcoms mem`. Measured in a scratch TU.
-		nRange = (uint32)LTMIN(pSnd->m_fRadius, 65535.0f);
-
-		nTmp = (uint32)((pSnd->m_fInnerRadius * 255.0f) / (int)(uint16)nRange);
-
-		if ((uint8)nTmp < 0xff)
-			nInner = (uint8)nTmp;
-		else
-			nInner = 0xff;
-
-		pState = snd_FindSentState(pClient, pSnd->m_pIDRec->m_nID);
-
-		if (!pState)
-		{
-			state.m_ChangeFlags = 7;
-			pState = &state;
-		}
-		else
-		{
-			state.m_Flags       = (uint16)nFlags;
-			state.m_Unknown04   = pSnd->m_Unknown3c;
-			state.m_nRange      = (uint16)nRange;
-			state.m_nInnerRatio = (uint8)nInner;
-
-			snd_MergeSentState(pState, &state);
-		}
-
-		pMsg->WriteByte(pState->m_ChangeFlags);
-
-		if (pState->m_ChangeFlags & SNDSENT_FLAGS)
-		{
-			pState->m_ChangeFlags &= ~SNDSENT_FLAGS;
-			pMsg->WriteWord((uint16)nFlags);
-		}
-
-		if (pState->m_ChangeFlags & SNDSENT_BYTE04)
-		{
-			pState->m_ChangeFlags &= ~SNDSENT_BYTE04;
-			pMsg->WriteByte(pSnd->m_Unknown3c);
-		}
-
-		if ((nFlags & 3) && (pState->m_ChangeFlags & SNDSENT_RANGE))
-		{
-			pState->m_ChangeFlags &= ~SNDSENT_RANGE;
-			pMsg->WriteWord((uint16)nRange);
-			pMsg->WriteByte((uint8)nInner);
-		}
-
-		if (nFlags & 0x40)
-			pMsg->WriteByte(pSnd->m_Unknown48);
-
-		// Read through an inline float accessor: lithtech.exe's call
-		// (0x00468562, to WriteType<float> 0x00466700) passes the float
-		// through x87, `push %ecx ; mov %esi,%ecx ; flds 0x4c(%edx) ; fstps
-		// (%esp)`, where a plain read at /O2 pushes it with `mov ; push` --
-		// 4 bytes short. A volatile read gets the flds too, but scheduled
-		// ahead of the reserve push (0x00468559); the accessor's returned
-		// value lands exactly where shipped has it. server.dll's /O1 code
-		// (0x10029a99) is `flds` either way and still matches.
-		if (nFlags & 0x80)
-			((CMsgFloatWriteView*)pMsg)->WriteFloat(pSnd->GetF4c());
-
-		if (nFlags & 0x400)
-		{
-			// The start time is read through an inline accessor: shipped
-			// loads it on its own (`flds 0x1c(%ebx)`, 0x10029aad) and
-			// subtracts from m_Time with `fsubrs`, and lithtech.exe does the
-			// same at 0x0046857c, after the pMgr load. A plain read folds it
-			// into `fsubs` as a memory operand instead; a volatile read
-			// gets the fsubrs but schedules the flds before the pMgr load
-			// (0x00468578).
-			nMs = (uint16)((pMgr->m_Time -
-				pSnd->GetStartTime()) * 1000.0 + 0.5);
-
-			// These four, and ONLY these four, are the WriteType spelling:
-			// lithtech.exe calls the out-of-line instantiations at every one
-			// of the eleven write sites above (0x004159f0 uint8, 0x0042fa50
-			// uint16) and carries four full expansions here -- 0x004685a3
-			// and 0x00468642 storing a byte with `incw`, 0x004686e7 and
-			// 0x00468787 storing a dword with `add %bp` -- each with its own
-			// "CPacket::WriteType" overrun RETURN_ERROR. That is the entire
-			// 706-byte residual. /Os declines WriteType at every site, so
-			// server.dll keeps four `call`s here exactly as it had -- only
-			// the callee SYMBOL changes, and 0x1001393e is already known to
-			// be WriteType<uint8> (see sm_SendWorldInfo) while 0x1000ecd6 is
-			// the four-byte body netmgr.cpp reaches as WriteDWord.
-			if (nMs < 0xff)
-			{
-				((CPacket*)pMsg)->WriteType((uint8)nMs);
-			}
-			else
-			{
-				((CPacket*)pMsg)->WriteType((uint8)0xff);
-				((CPacket*)pMsg)->WriteType((uint32)nMs);
-			}
-		}
-
-		((CPacket*)pMsg)->WriteType(pSnd->m_Unknown5c);
-	}
-
-	if (pInfo->m_ChangeFlags & 2)
-	{
-		lmsg_WriteCompPos((LMessageImpl*)((uint8*)pMsg + 8), &pSnd->m_vPos,
-		                  (CPosRef*)&pMgr->m_World);
-	}
-}
-
 // 0x10028454 — write the sounds this client still has to hear about.
 //
 // The declared name is servermgr.h's and it is a misnomer: the list walked
@@ -9985,14 +6861,14 @@ void sm_WriteRemovedObjects(CUpdateContext* pCtx, ServerMessage* pMsg)
 
 		if (pSound->m_bKill)
 		{
-			if (!(pCtx->m_pClient->m_pObjInfos[
-					((uint32*)pSound->m_pUnknown0c)[2]].m_ChangeFlags & 0x20))
+			if (!(pCtx->m_pClient->m_ObjInfos[
+					pSound->m_pUnknown0c->m_nIndex].m_ChangeFlags & 0x20))
 			{
 				continue;
 			}
 		}
 
-		if (pSound->m_hSample)
+		if (pSound->m_Track)
 		{
 			if (pSound->m_fTimer <= 0.0f)
 				continue;
@@ -10000,12 +6876,12 @@ void sm_WriteRemovedObjects(CUpdateContext* pCtx, ServerMessage* pMsg)
 
 		if (pSound->m_PlaySoundFlags & 3)
 		{
-			float fRangeSqr = ((CSoundRangeView*)pSound)->m_fRadius *
-				((CSoundRangeView*)pSound)->m_fRadius * 4.0f;
+			float fRangeSqr = pSound->m_fOuterRadius *
+				pSound->m_fOuterRadius * 4.0f;
 
-			if (((CSoundRangeView*)pSound)->m_vPos.DistSqr(
-					pCtx->m_pClient->m_pUnknown3AC->m_Pos) >= fRangeSqr &&
-				((CSoundRangeView*)pSound)->m_vPos.DistSqr(
+			if (pSound->m_vPosition.DistSqr(
+					(pCtx->m_pClient->m_pUnknown3AC ? pCtx->m_pClient->m_pUnknown3AC->m_Pos : pCtx->m_pClient->m_Position)) >= fRangeSqr &&
+				pSound->m_vPosition.DistSqr(
 					pCtx->m_pClient->m_Position) >= fRangeSqr)
 			{
 				continue;
@@ -10015,44 +6891,15 @@ void sm_WriteRemovedObjects(CUpdateContext* pCtx, ServerMessage* pMsg)
 		sm_FinishUpdatePacket(pCtx, pMsg, 8, 0x2d);
 
 		{
-			CObjInfo* pInfo = &pCtx->m_pClient->m_pObjInfos[
-				((uint32*)pSound->m_pUnknown0c)[2]];
+			CObjInfo* pInfo = &pCtx->m_pClient->m_ObjInfos[
+				pSound->m_pUnknown0c->m_nIndex];
 
-			if (g_pFillIDList->m_nIDs >= g_pFillIDList->m_nMaxIDs)
-			{
-				uint16* pNew = (uint16*)dalloc(
-					(g_pFillIDList->m_nMaxIDs + 200) * sizeof(uint16));
-
-				memcpy(pNew, g_pFillIDList->m_pIDs,
-					g_pFillIDList->m_nIDs * sizeof(uint16));
-
-				dfree(g_pFillIDList->m_pIDs);
-
-				g_pFillIDList->m_pIDs = pNew;
-				g_pFillIDList->m_nMaxIDs += 200;
-			}
-
-			// The id goes through a block-scoped uint32 of its own, and
-			// that block is load-bearing: written as one expression --
-			// with the (uint16) cast or without it, signed or unsigned --
-			// VC6 narrows the load itself to `mov 0x8(%ecx),%cx`, where
-			// the shipped code loads the whole word (`mov 0x8(%ecx),%ecx`)
-			// and lets the store take the low half. A function-scope temp
-			// is no good either: it has to be kept live across
-			// sm_FinishUpdatePacket and costs four bytes of frame. One
-			// byte, and the only difference this function had.
-			{
-				uint32 nID = ((uint32*)pSound->m_pUnknown0c)[2];
-
-				g_pFillIDList->m_pIDs[g_pFillIDList->m_nIDs] =
-					(uint16)nID;
-			}
-			g_pFillIDList->m_nIDs++;
+            if (!g_pFillIDList->Append(static_cast<uint16>(pSound->m_pUnknown0c->m_nIndex))) continue;
 
 			if (pInfo->m_ChangeFlags != 0 && !(pInfo->m_Unknown02 & 1))
 			{
-				sub_100298d9(pCtx->m_pMgr, pSound, pInfo, pCtx->m_pClient,
-					pMsg);
+                if (sound_WriteInstance(*pSound,*pInfo,*pCtx->m_pClient,*pMsg,
+                    pCtx->m_pMgr->m_World.PositionReference(),pCtx->m_pMgr->m_Time) != LT_OK) continue;
 			}
 
 			pInfo->m_ChangeFlags = 0x1000;
@@ -10071,99 +6918,8 @@ float MatVMul_H(LTVector* pOut, class LTMatrix* pMat, LTVector* pV);
 // +0x16 of the argument short-circuit it. It is worldsim.cpp's
 // bsp_PointInside (worldsim.h), lithtech.exe 0x00435540 (called from
 // 0x0046feaf); declared here as that file declares it.
-class BSPNode;
+
 int bsp_PointInside(BSPNode* pRoot, LTVector* pPoint);
-
-// The world's own geometry pointer at IWorldBsp+0x9c, which worldbsp.h does
-// not reach from here (name ours).
-class CWorldBspInsideView
-{
-public:
-	virtual int _v00() = 0;                  // slot 0: nonzero disqualifies
-
-	uint8  m_pad_04[0x9c - 0x04];
-	void*  m_pGeometry;                      // +0x9c
-};
-
-#ifndef LT_SERVER_BUILD
-// lithtech 0x0046fd00 expands IWorldBsp::GetBoxDiagonalSqr (the box
-// subtraction and MagSqr at 0x0046fd76..0x0046fddc) where server.dll calls
-// 0x1002fb47; /Ob1 needs an inline body to do that, so the /O2 copy gets
-// this inline twin (stand-in, name ours).
-inline float GetBoxDiagonalSqrInline(IWorldBsp* pBsp)
-{
-	return (pBsp->m_vBoxMax - pBsp->m_vBoxMin).MagSqr();
-}
-#endif
-
-// 0x1002faaa — one candidate for GetPointContainers: an object that is a
-// container (type 9), is not excluded, and whose world model really does
-// contain the point goes on the caller's list.
-//
-// void, not the `int` servermgr.h declares as sm_GatherContainersCB — every
-// exit leaves eax as whatever the last thing to touch it left, and VC6 could
-// not have compiled a value-returning body that falls off the end. Renamed
-// for that reason.
-//
-// The cheap tests come first: the box diagonal against the squared distance
-// before the point is transformed into the model's space at all. The
-// distance is parked in the dead pObj argument slot, the object being in a
-// register by then.
-//
-// lithtech 0x0046fd00 (/O2): with the box diagonal inline (above) it is a
-// 464/464 size-exact near. The named pMat local is what puts rows 1..3 of
-// the expanded MatVMul_H in shipped's x-before-z product order (without it
-// all rows come out z-first, 12 instructions off); only row 0's m[0][0]*x
-// operand order is left (`flds 0x230(%esi); fmuls 0xc(%edi)` at 0x0046fe39
-// against ours x-first) -- VC6's tie-break between equal-weight operands.
-// Measured no better: pPos local (with or without pMat), pMat at function
-// or block top, LTMatrix&, &WorldModelObject::m_Transform230 bare, the
-// distance inline in the compare, `(a - b).MagSqr()` for DistSqr. The box
-// compare must be written `fDistSqr > box` (shipped fcompp order, jne).
-void sm_GatherContainers(LTObject* pObj, void* pUser)
-{
-	PointContainerGather* pGather = (PointContainerGather*)pUser;
-	LTVector              vLocal;
-
-	if (pObj->m_Unknown54 != 0)
-		return;
-
-	if (pObj->m_ObjectType != 9)
-		return;
-
-	if (pGather->m_nElements >= pGather->m_MaxListSize)
-		return;
-
-	{
-		CWorldBspInsideView** ppBsp = (CWorldBspInsideView**)&pObj->m_pWorldBsp;
-
-		if ((*ppBsp)->_v00() != 0)
-			return;
-
-		{
-			CWorldBspInsideView* pBsp = *ppBsp;
-			float fDistSqr = pGather->m_Position.DistSqr(pObj->m_Pos);
-
-#ifdef LT_SERVER_BUILD
-			if (((IWorldBsp*)pBsp)->GetBoxDiagonalSqr() < fDistSqr)
-				return;
-#else
-			if (fDistSqr > GetBoxDiagonalSqrInline((IWorldBsp*)pBsp))
-				return;
-#endif
-
-			LTMatrix* pMat = (class LTMatrix*)((uint8*)pObj + 0x230);
-			MatVMul_H(&vLocal, pMat, &pGather->m_Position);
-
-			if (bsp_PointInside((BSPNode*)pBsp->m_pGeometry, &vLocal) != 0)
-				return;
-		}
-	}
-
-	pGather->m_pList[pGather->m_nElements] = (HOBJECT)pObj;
-	pGather->m_nElements++;
-}
-
 
 // 0x1002f861 — one candidate from the sphere query's box walk. The box test
 // the container did is generous, so this does the round one: the object's
@@ -10234,7 +6990,7 @@ void sm_SendToClient(CServerMgr* pMgr, Client* pClient, int nPacketID,
 
 	if (pClient->m_pConnection)
 	{
-		if (((CNetMgrSendView*)&pMgr->m_NetMgr)->SendToConnection(pMsg,
+		if ((&pMgr->m_NetMgr)->SendToConnection(pMsg,
 				pClient->m_pConnection, nPriority) == 0)
 		{
 			pMgr->m_Unknown800++;
@@ -10245,8 +7001,8 @@ void sm_SendToClient(CServerMgr* pMgr, Client* pClient, int nPacketID,
 
 	if (nFlag)
 	{
-		LTLink* pCur = ((CClientAttachView*)pClient)->m_AttachHead.m_pNext;
-		LTLink* pHead = &((CClientAttachView*)pClient)->m_AttachHead;
+		LTLink* pCur = pClient->m_AttachHead.m_pNext;
+		LTLink* pHead = &pClient->m_AttachHead;
 
 		while (pCur != pHead)
 		{
@@ -10254,7 +7010,7 @@ void sm_SendToClient(CServerMgr* pMgr, Client* pClient, int nPacketID,
 
 			if (pChild->m_pConnection)
 			{
-				((CNetMgrSendView*)&pMgr->m_NetMgr)->SendToConnection(pMsg,
+				(&pMgr->m_NetMgr)->SendToConnection(pMsg,
 					pChild->m_pConnection, nPriority);
 			}
 
@@ -10313,7 +7069,7 @@ public:
 // lithtech.exe 0x00466320 (441 bytes; ours 1040): shipped CALLS the first six
 // float writes (0x004663b3..0x004663fb -> WriteType<float> 0x00466700) and
 // expands only the seventh; ours expands the first five. Measured and NOT
-// kept: the six through CMsgFloatWriteView::WriteFloat, each argument through
+// kept: the six through ServerMessage::WriteFloat, each argument through
 // a value-returning accessor `(&v.x)[i]` (a plain member, a `(float)` cast or
 // LTVector::operator[] all push by `mov`, where shipped `flds/fstps`), gives
 // 441 of 441 with one register swap left in the expanded write (edx/ecx at
@@ -10438,7 +7194,7 @@ void sm_Unknown2873d(CServerMgr* pMgr, Client* pClient)
 //      the same predicate written twice.
 //    * the flag byte is CObjInfo::m_Unknown02 — `testb $0x1,0x2(%edx,%ecx,4)`
 //      against a four-byte record indexed by id off Client+0x190, which is
-//      m_pObjInfos, and the address is then handed to DropListener as its
+//      m_ObjInfos, and the address is then handed to DropListener as its
 //      one stack argument. NOT through a `uint8* pFlags` local, though:
 //      lithtech.exe 0x0046903c tests the byte in memory (`testb $0x1,
 //      (%eax)`) and re-reads it for DropListener's `or` (0x00469051), which
@@ -10456,32 +7212,16 @@ void sm_Unknown2873d(CServerMgr* pMgr, Client* pClient)
 LTRESULT sm_Unknown29f42(CServerMgr* pMgr, ServerMessage* pMsg,
                          Client* pClient)
 {
-	uint16           nID;
-	CObjectMapEntry* pEntry;
-	void*            pRecord;
-
-	if (!pClient)
-		return LT_OK;
-
-	while (pMsg->m_Unknown34 - pMsg->m_Unknown38)
-	{
-		nID = ((CPacket*)pMsg)->ReadType((uint16*)0);
-
-		pEntry = sm_FindObjectMapEntry(pMgr, nID);
-
-		if (pEntry && pEntry->m_nFlags == 2)
-		{
-			pRecord = pEntry->m_pRecord;
-
-			if (pRecord)
-			{
-				if (!(pClient->m_pObjInfos[nID].m_Unknown02 & 1))
-					((CSoundListenerView*)pRecord)->DropListener(&pClient->m_pObjInfos[nID].m_Unknown02);
-			}
-		}
-	}
-
-	return LT_OK;
+    if (!pMgr || !pMsg || !pClient || !pMsg->CanRead(0) ||
+        ((pMsg->m_DataLen-pMsg->m_Pos) & 1)) return LT_OK;
+    while (pMsg->CanRead(2)) {
+        const auto id = pMsg->ReadWord(nullptr);
+        if (id >= pClient->m_ObjInfos.size()) continue;
+        const auto* entry = sm_FindObjectMapEntry(pMgr,id);
+        if (entry && entry->m_nFlags == 2 && entry->m_pRecord && !(pClient->m_ObjInfos[id].m_Unknown02 & 1))
+            static_cast<SoundInstance*>(entry->m_pRecord)->DropListener(&pClient->m_ObjInfos[id].m_Unknown02);
+    }
+    return LT_OK;
 }
 
 
@@ -10538,81 +7278,35 @@ LTRESULT sm_Unknown29f42(CServerMgr* pMgr, ServerMessage* pMsg,
 LTRESULT sm_ReadClientCommands(CServerMgr* pMgr, ServerMessage* pMsg,
                                Client* pClient)
 {
-	uint8  changed[MAX_CLIENTCOMMANDS + 1];
-	uint8* pLive;
-	uint8* pNext;
-	float  fRate;
-	uint16 n;
-	uint32 nCount;
-	uint16 i;
-	uint32 nChanged;
-
-	// One positive condition around the whole body: the shipped LT_OK is at
-	// the very end with the null test jumping to it and the body falling in.
-	if (pClient)
-	{
-		pLive = pClient->m_CommandStates[pClient->m_nCurCommands];
-		pNext = pClient->m_CommandStates[pClient->m_nCurCommands == 0];
-
-		memset(pNext, 0, MAX_CLIENTCOMMANDS);
-
-		pClient->m_nCurCommands = (pClient->m_nCurCommands == 0);
-
-#ifdef LT_SERVER_BUILD
-		fRate = (float)pMsg->ReadByte(0);
-#else
-		fRate = (float)((CPacket*)pMsg)->ReadType((uint8*)0);
-#endif
-
-		if (fRate != pClient->m_Unknown128)
-		{
-			pClient->m_Unknown128 = fRate;
-
-			pClient->m_RateControl.SetRate(fRate);
-		}
-
-#ifdef LT_SERVER_BUILD
-		n = pMsg->ReadByte(0);
-#else
-		n = ((CPacket*)pMsg)->ReadType((uint8*)0);
-#endif
-
-		if (n > 0)
-		{
-			nCount = n;
-
-			do
-			{
-#ifdef LT_SERVER_BUILD
-				pNext[pMsg->ReadByte(0)] = 1;
-#else
-				pNext[((CPacket*)pMsg)->ReadType((uint8*)0)] = 1;
-#endif
-
-				nCount--;
-			}
-			while (nCount != 0);
-		}
-
-		nChanged = 0;
-
-		for (i = 0; i < MAX_CLIENTCOMMANDS; i++)
-		{
-			if (pNext[i] != pLive[i])
-			{
-				changed[nChanged] = (uint8)i;
-
-				nChanged++;
-			}
-		}
-
-		pMgr->NotifyCommandChanges(pClient, changed, nChanged);
-
-		if ((int)((uint16)pMsg->m_Unknown34 - (uint16)pMsg->m_Unknown38) > 0)
-			return sm_Unknown29f42(pMgr, pMsg, pClient);
-	}
-
-	return LT_OK;
+    if (!pMgr || !pMsg || !pClient || pClient->m_Removing || pClient->m_nCurCommands > 1 || !pMsg->CanRead(2)) return LT_OK;
+    const auto rate = pMsg->m_pData[pMsg->m_Pos];
+    const auto count = pMsg->m_pData[pMsg->m_Pos+1];
+    const auto available = pMsg->m_DataLen-pMsg->m_Pos-2;
+    // Validate the complete message before publishing any command changes.
+    // The optional sound-completion tail consists of whole object IDs.
+    if (count > available || ((available-count) & 1)) return LT_OK;
+    std::array<uint8,MAX_CLIENTCOMMANDS> next{}, changed{};
+    for (unsigned i = 0; i < count; ++i) {
+        const auto command = pMsg->m_pData[pMsg->m_Pos+2+i];
+        if (command >= next.size()) return LT_OK;
+        next[command] = 1;
+    }
+    const auto page = pClient->m_nCurCommands;
+    unsigned changed_count = 0;
+    for (unsigned i = 0; i < next.size(); ++i)
+        if (next[i] != pClient->m_CommandStates[page][i]) changed[changed_count++] = static_cast<uint8>(i);
+    const auto client_lifetime = pClient->m_Lifetime;
+    ServerCallbackGuard operation(pMgr->m_Lifetime);
+    pClient->m_nCurCommands = !page;
+    std::copy(next.begin(),next.end(),pClient->m_CommandStates[!page]);
+    if (rate != pClient->m_Unknown128) {
+        pClient->m_Unknown128 = rate;
+        pClient->m_RateControl.SetRate(rate);
+    }
+    pMsg->m_Pos += 2+count;
+    pMgr->NotifyCommandChanges(pClient,changed.data(),changed_count);
+    if (!operation.unchanged() || !*client_lifetime || pClient->m_Removing) return LT_OK;
+    return sm_Unknown29f42(pMgr,pMsg,pClient);
 }
 
 
@@ -10645,60 +7339,8 @@ LTRESULT sm_ReadClientCommands(CServerMgr* pMgr, ServerMessage* pMsg,
 //
 // — so the member is a four-element array at +0x134 of the object that
 // caller builds, each element 12 bytes with only its head pointer set.
-class CElem463CE0
-{
-public:
-	CElem463CE0();
-
-	void*  m_pHead;                          // 0x00
-	uint32 m_Unknown04;                      // 0x04  (untouched here)
-	uint32 m_Unknown08;                      // 0x08
-};
-
-CElem463CE0::CElem463CE0()
-{
-	m_pHead = LTNULL;
-}
-
-
-// 0x004666f0, 12 bytes — release through a one-pointer holder.
-//
-//      8b 09         mov (%ecx),%ecx
-//      85 c9         test %ecx,%ecx
-//      74 05         je 0x004666fb
-//      8b 01         mov (%ecx),%eax
-//      ff 60 08      jmp *0x8(%eax)
-//      c3            ret
-//
-// `mov (%ecx),%ecx` makes the holder exactly one pointer wide, and the tail
-// `jmp *0x8(%eax)` is a no-argument virtual call whose result is this
-// function's. What says holder rather than object is the call sites: eleven
-// of them, and 0x0046569a walks an array BACKWARDS in four-byte steps
-// (`sub $0x4,%esi ; mov %esi,%ecx ; call`) while 0x004787ab passes
-// `lea 0x10(%esp),%ecx`, a stack temporary. Slot 2 with no arguments on a
-// LithTech interface is Release.
-class IRefCounted4666F0
-{
-public:
-	virtual void _v00();
-	virtual void _v04();
-	virtual void Release();                  // slot 2 == +0x08
-};
-
-class CRefHolder4666F0
-{
-public:
-	void ReleaseRef();                       // 0x004666f0
-
-	IRefCounted4666F0* m_pRef;               // 0x00
-};
-
-void CRefHolder4666F0::ReleaseRef()
-{
-	if (m_pRef)
-		m_pRef->Release();
-}
-
+// Historical packet-set and reference-holder layout views are retired.
+// ClientPacketSet and CMessageRef own the actual native message references.
 
 // 0x00476770, 19 bytes — a lazy-init guard.
 //
@@ -10717,21 +7359,6 @@ void CRefHolder4666F0::ReleaseRef()
 // reloaded member at +0x54 is tested, not compared, so it is a pointer. The
 // callee 0x00476660 is in the same module and reads both 0x188(%edx) and
 // the file-scope pointer at 0x004b48c8.
-struct SObj476770
-{
-	uint8 m_pad_00[0x54];
-	void* m_pUnknown54;                      // 0x54
-};
-
-void sub_476660(SObj476770* p);              // 0x00476660
-
-void sm_EnsureQ476770(SObj476770* p)
-{
-	if (!p->m_pUnknown54)
-		sub_476660(p);
-}
-
-
 // *********************************************************************** //
 //  0x10026d23 / 0x00463750 — a connection becomes a client.
 //
@@ -10766,63 +7393,12 @@ void sm_EnsureQ476770(SObj476770* p)
 //  it.
 // *********************************************************************** //
 
-// 0x0042fbc0 / 0x1000e507 — allocate the 0x88-byte packet holder
-// m_pUnknown18C points at, from a five-dword descriptor. The descriptor's
-// shape is svtiny.cpp's, read off server 0x10026ea8..0x10026ebe and confirmed
-// byte for byte at lithtech 0x0046393f..0x00463966 (name ours).
-class CPacketHolderDesc
-{
-public:
-	void*  (*m_pfnGet74)(void* pHolder, void* pArg);          // +0x00
-	uint32 (*m_pfnDispatch)(void* pUnused, void* pObj);       // +0x04
-	int    (*m_pfnAccept)(void);                              // +0x08
-	void*   m_pNetMgr;                                        // +0x0c
-	void*   m_pConn;                                          // +0x10
-};
-
-void* ph_CreateHolder(CPacketHolderDesc* pDesc, uint32 nFlags);  // 0x0042fbc0
-// servermessage.cpp's spelling: the holder view it defines this against.
-class CPacketHolderView;
-void  ph_SetUnknown74(CPacketHolderView* pHolder, uint32 nValue);  // 0x1000e622
-
-// The three slots the descriptor carries. 0x00463d10 is byte-for-byte server
-// 0x1002712c, which svtiny.cpp reconstructs as cb_Sub2712C; 0x00463d20 is
-// `mov eax,1 ; ret`; 0x00463cf0 is the client's forwarder. All three are
-// separate rows and none is this function's work — declared so the stores
-// compile.
-void*  ph_Forward74(void* pHolder, void* pArg);              // 0x00463cf0
-
-// 0x1002712c / 0x00463d10 — the descriptor's dispatch slot (moved here from
-// svtiny.cpp, whose banner "6." has the derivation): __cdecl, two dwords,
-// the second is `this` and slot 1 of its vtable is tail-jumped with no
-// arguments. The object the descriptor's second entry dispatches on. Only
-// slot 1 is reached; slot 0 exists to place it (names ours).
-class CSub2712CView
-{
-public:
-	virtual void   _v00();
-	virtual uint32 _v04();
-};
-
-uint32 cb_Sub2712C(void* pUnused, CSub2712CView* pObj)
-{
-	return pObj->_v04();
+// Native transfer adapter: the file manager owns mounted asset lookup;
+// CClientFiles owns each opened stream for the duration of the transfer.
+static ILTStream* open_client_transfer(void* context, const char* name) {
+    return fs_OpenFile(static_cast<CFileMgr*>(context), const_cast<char*>(name));
 }
 
-// 0x00463d20 / server 0x1003a438 — the descriptor's accept hook: always yes.
-// lithtech.exe keeps it as a function of its own right after cb_Sub2712C's
-// twin (`mov $1,%eax ; ret`); in server.dll /OPT:ICF folded it into the one
-// `push 1 ; pop eax ; ret` body worldtree.cpp's wt_DefaultNodeTest_F also
-// has, which is why the server's descriptor store (0x10026eb7) points into
-// the world tree's run (name ours).
-int ph_AcceptAlways(void)
-{
-	return 1;
-}
-
-int   xfer_AddFile(CClientFiles* pState, char* pName, uint32 nUnknown,
-                   uint32 nFileID, uint16 nFlags);           // 0x0042fd10
-void  xfer_SendPendingFiles(CClientFiles* pState);           // 0x0042fe40
 // 0x00414930 — the client model's inherit-the-server's-file step, which
 // csvis.cpp defines (lithtech.exe only) on its own view of the model.
 class CInheritOwnerQ414;
@@ -10831,615 +7407,53 @@ void  dl_TieOff(LTLink* pHead);
 
 extern int g_LocalNoFlag;                                    // 0x004b329c
 
-// ClientPacketSet's first member is a CMessageRef, not a bare CPacket*:
-// 0x004638c3..0x004638e5 is CMessageRef::Init's body verbatim (release the
-// old through vtable+8, store, AddRef the new through vtable+4), and +0x04 is
-// a FLOAT (5.0f / 15.0f at 0x00463902 / 0x0046390c). Kept as a view rather
-// than edited into servermgr.h so nothing else in the tree moves.
-class CClientPacketSetView
-{
-public:
-	CMessageRef m_Ref;                       // +0x00
-	float       m_fRate;                     // +0x04
-	uint32      m_nSize;                     // +0x08
-};
-
-// One more Client field servermgr.h leaves in padding: +0x12c, a float set to
-// 35.0f (0x420c0000) at 0x004639e6. (+0x164 / +0x180 are smgr.cpp's own
-// CClientAttachView, reused as-is; +0x3dc is now a real member.)
-class CClientF12CView
-{
-public:
-	uint8 m_pad_000[0x12c];
-	float m_f12c;                            // +0x12c
-};
-
-// serverengine.h's CMsgWriteView and CFileRef, cut to what this function
-// touches. Local copies rather than an include, so smgr.cpp's header set does
-// not move; the offsets are serverengine.h's unchanged.
-class CMsgWriteView
-{
-public:
-	void WriteDWord(uint32 nValue);          // 0x1000ecd6
-};
-
-class CFileRef
-{
-public:
-	void*  m_hElement;                       // 0x00
-	uint32 m_Unknown04;                      // 0x04
-	uint32 m_nFileID;                        // 0x08
-	uint16 m_Flags;                          // 0x0c
-};
-
-Client* sm_AddClientForConnection(CServerMgr* pMgr, NetConnection* pConn,
-                                  int bLocal)
-{
-	CMessageRef  msg;
-	// A LOCAL POINTER, not `msg.m_pMsg` written twice, and the reload says
-	// so. `msg` has its address taken (msg.Init at 0x10026d44 takes `&msg`),
-	// so a 16-bit store through a pointer read out of it may alias it and
-	// VC6 must re-read the pointer between the two stores -- our build did,
-	// at both packet sites. The shipped build loads it ONCE
-	// (S:0x10026fa5 `mov -0x4(%ebp),%eax`, then both `movw $0x1` through
-	// %eax) and only re-reads for the __thiscall `this` at S:0x10026fb6,
-	// which is a separate source mention of msg.m_pMsg. Worth 2 instructions
-	// and 6 bytes across the two sites.
-	ServerMessage* pMsg;
-	CAbstractIO* pIO;
-	Client*      pClient;
-	LTLink*      pHead;
-	LTLink*      pCur;
-	uint32       i;
-	uint32       j;
-	uint16       nID;
-	void*        hIter;
-
-	// 0x00463753 `lea eax,[esp+8]`, then 0x0046375a..0x00463765: the standard
-	// idiom, identical to netmgr.cpp:176 and lmessage.cpp:452. m_pMsg is
-	// still the constructor's null here, so Init's release folds away and
-	// only the AddRef at 0x0046377a survives.
-	msg.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
-
-	if (pIO)
-		pIO->Release();                                  // 0x00463787
-
-	// 0x0046378a `cmp DWORD PTR ds:0x4b329c,edi` with edi zero, and the store
-	// at 0x00463792 goes into the bLocal PARAMETER slot. S:0x10026d61
-	// `mov [ebp+0x10],ebx` says the same on a frame-pointer build, which is
-	// what settles it.
-	if (g_LocalNoFlag)
-		bLocal = 0;
-
-	// 0x00463797 `push 0x3e0` — sizeof(Client), which is why m_hSoundHash is
-	// now a member. The constructor at 0x004637aa is expanded here and called
-	// at S:0x10026d76.
-	pClient = new Client;
-
-	memset(pClient, 0, sizeof(Client));                  // 0x004637e2 rep stos
-
-	// 0x004637ed..0x00463816. CLIENTFLAG_LOCAL is 2 and so is the manager
-	// bit; the shipped code materialises the 2 once into %ecx and ors it into
-	// both, which is allocation, not source.
-	if (bLocal)
-	{
-		pClient->m_ClientFlags |= CLIENTFLAG_LOCAL;
-		pMgr->m_Unknown1a0 |= 2;
-	}
-
-	pClient->m_RateControl.SetRate(10.0f);               // 0x00463827
-	pClient->m_ClientFlags |= CLIENTFLAG_SENDCOBJROTATION;  // 0x00463834
-	pClient->m_Unknown128 = 10.0f;                       // 0x00463837
-	pClient->m_State = 1;                                // 0x00463847
-	pClient->m_pName = (char*)dalloc(1);                 // 0x00463851
-	pClient->m_pName[0] = 0;                             // 0x0046385c
-
-	// 0x00463865..0x00463882. The attach LINK's m_pData only — the link is
-	// not tied off here, the attach HEAD is.
-	((CClientAttachView*)pClient)->m_AttachLink.m_pData = pClient;
-
-	// 0x00463877/0x0046387a — the attach head tied off INLINE, +0x04 then
-	// +0x00: CheapLTLink::TieOff's chained `m_pPrev = m_pNext = this`,
-	// byte-identical to the two stores this used to spell out. (The old
-	// dl_TieOff measurement here, 943 -> 945, was against the NON-inline
-	// `void dl_TieOff(LTLink*)` overload declared above this function, which
-	// out-ranks ltlink.h's inline CheapLTLink* one -- it never tested the
-	// inline.) Written as the member because it is one more inline expansion
-	// against the per-function budget described at dl_AddHead below.
-	((CClientAttachView*)pClient)->m_AttachHead.TieOff();
-
-	dl_InitList(&pClient->m_List3CC);
-
-	// 0x00463888..0x00463921. Two nested counted loops over m_PacketSets[2][2];
-	// the address arithmetic at 0x004638ac is `(j + 2*i) * 12`, i.e. row-major
-	// [i][j] with the stride the declaration already gives.
-	for (i = 0; i < 2; i++)
-	{
-		for (j = 0; j < 2; j++)
-		{
-			CClientPacketSetView* pSet =
-				(CClientPacketSetView*)&pClient->m_PacketSets[i][j];
-
-			pSet->m_Ref.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
-
-			if (pIO)
-				pIO->Release();                          // 0x004638f0
-
-			// 0x0046388e `dec ; neg ; sbb ; and 0x80 ; add 0x80` — VC6's
-			// branchless select, hoisted out of the inner loop by /Og in BOTH
-			// images (S:0x10026e0f, after j is zeroed, which is what says the
-			// source wrote it inside).
-			//
-			// THE FALSE ARM IS ZERO, not 0x100, and the constants say so.
-			// VC6's branchless select is `(r & (C_false - C_true)) + C_true`
-			// with r = 0 when the test holds and -1 otherwise, so the pair of
-			// literals in the instruction stream IS the pair in the source.
-			// S:0x10026e14 is `and $0xffffff80,%ebx ; add $0x80,%ebx` --
-			// C_true = 0x80, C_false = 0x80 + (-0x80) = 0 -- and lithtech's
-			// 0x00463893 `and $0x80,%al ; add $0x80,%eax` is the same pair
-			// with the upper 24 bits of the -1 left standing. 0x100 gave
-			// `mov $0x80,%eax ; and %eax,%ebx ; add %eax,%ebx`, one
-			// instruction over, because C_false - C_true was then +0x80.
-			pSet->m_nSize = (i == 1) ? 0x80 : 0;         // stored 0x004638f9
-
-			// 5.0f at .rdata 0x004a1ffc, 15.0f at 0x004a2ed0; the `jne` takes
-			// the 15.0f arm, so zero falls through to 5.0f.
-			pSet->m_fRate = (j == 0) ? 5.0f : 15.0f;     // stored 0x0046390c
-		}
-	}
-
-	// 0x00463927..0x0046397c. The shipped store order is [0][1][3][2][4] here
-	// and [3][0][1][2][4] in server.dll, so it is scheduling, not source, and
-	// field order is used.
-	{
-		CPacketHolderDesc desc;
-		// AN IF, NOT A TERNARY, and before the desc stores. `bLocal ? 4 : 0`
-		// gives VC6's branchless select -- `mov 0x10(%ebp),%eax ; neg ;
-		// sbb ; and $0x4` -- where S:0x10026e8e is `xor %eax,%eax ;
-		// cmp %eax,0x10(%ebp) ; je ; push $0x4 ; pop %eax`: a zero default
-		// in a register with a branch over the assignment, which is the
-		// if/else shape (a ternary over two constants gives
-		// branchless setne/add; an if/else branches). Writing it after the
-		// desc stores left four of the five stores ahead of the branch;
-		// writing it first puts all five behind the join, as shipped.
-		uint32 nHolderFlags = 0;
-
-		if (bLocal)
-			nHolderFlags = 4;
-
-		desc.m_pfnGet74    = ph_Forward74;               // 0x0046393f
-		desc.m_pfnDispatch =
-			(uint32 (*)(void*, void*))cb_Sub2712C;       // 0x0046394d
-		desc.m_pfnAccept   = ph_AcceptAlways;            // 0x0046395e
-		desc.m_pNetMgr     = &pMgr->m_NetMgr;            // 0x00463955
-		desc.m_pConn       = pConn;                      // 0x00463966
-
-		pClient->m_pUnknown18C =
-			ph_CreateHolder(&desc, nHolderFlags);        // 0x0046396a
-	}
-
-	ph_SetUnknown74((CPacketHolderView*)pClient->m_pUnknown18C,
-	                (uint32)pMgr);                           // 0x00463977
-
-	// 0x00463985 `mov [esi+8],esi`, 0x00463989 `call 0x00463cc0`
-	// (CheapLTLink::AddAfter, out of line in both images), 0x00463994
-	// `inc [ebx+0x7e4]` — dl_AddAfter's three statements in order with the
-	// head as the anchor, i.e. dl_AddHead.
-	//
-	// THE ONE RESIDUAL LEFT IN THIS FUNCTION, and it is this call: we expand
-	// AddAfter's six stores inline, both shipped images CALL it. That costs
-	// 3 instructions and 2 bytes and is the whole of the remaining gap.
-	//
-	// CAUSE, MEASURED: VC6 has a PER-FUNCTION INLINE-EXPANSION BUDGET. A
-	// scratch TU with N `g(i); dl_AddHead(...)` pairs expands every AddAfter
-	// up to N=9 at /O1; at N=10 the first two are CALLED, at N=14 the first
-	// nine, and the out-of-line COMDAT appears. Here, fifteen calls to an
-	// empty `inline void f() {}` placed right after this line make VC6 call
-	// AddAfter and nothing else: 925/288 -> 923/285 SIZE-EXACT, +1 matched
-	// (the AddAfter COMDAT itself claims 0x100270be), leaving only a
-	// pIO/pSet frame-slot swap and a 2-insn xor/lea order at 0x10026f38.
-	// (14 is not enough, 15..34 all give the same.) In lithtech.exe the
-	// same probe (13+) also makes LTList::LTList() inside the expanded
-	// Client constructor a call, exactly as shipped 0x004637d9, and claims
-	// two more rows there. So the shipped source spent roughly fifteen more
-	// inline expansions in this function than ours, near or after this
-	// point -- probably small inline helpers/accessors the original used
-	// where we spell out member stores. WHICH ones is not recovered; nops at
-	// the TOP of the function do nothing (the earliest sites are refused
-	// first), and an inline id-search helper for the loop below, the dword
-	// write through WriteType<uint32>, and real LTLink members at Client
-	// +0x164/+0x180 each move nothing on server.dll.
-	//
-	// What has been RULED OUT, so nobody re-derives it:
-	//  * it is not a whole-image setting. The COMDAT at 0x100270be has
-	//    exactly ONE caller in server.dll and 0x00463cc0 exactly one in
-	//    lithtech.exe, and both are this site; every other dl_Insert /
-	//    dl_AddHead site in either image has AddAfter inlined, and the
-	//    functions containing them are byte-identical matches, so ltlink.h's
-	//    `inline` and its definition position are both fine.
-	//  * (an earlier note here said "not an inline budget" because eight
-	//    dl_AddHeads and forty dl_InitLists AHEAD of this line all
-	//    expanded. That was the wrong side: the budget refuses the earliest
-	//    sites first, so extra expansions must come after this one.)
-	//  * it is not inline DEPTH. Five hand-written inline wrappers on top of
-	//    the four-deep dl_AddHead -> dl_AddAfter -> dl_Insert -> AddAfter
-	//    chain still expanded.
-	//  * it is not the spelling. dl_AddAfter with the head passed
-	//    explicitly, m_pData + dl_Insert + ++m_nElements, and m_pData +
-	//    m_Head.AddAfter + ++m_nElements all give the same inline expansion
-	//    (922/286 against 923/285, and all three LOSE the `lea
-	//    0x8b8(%edi),%ebx` CSE that dl_AddHead reproduces).
-	//  * it is not the compiler revision. CL_REV=8168 builds this TU to the
-	//    same 271 matched and the same bytes here.
-	dl_AddHead(&pMgr->m_ClientList, &pClient->m_Link, pClient);
-
-	// 0x0046399b..0x004639d2. The size expression is WRITTEN TWICE: the member
-	// is reloaded at 0x004639b4 rather than kept, which is the fingerprint of
-	// two separate source expressions, and server.dll reloads it too
-	// (S:0x10026f06). sizeof(CObjInfo) is 4.
-	pClient->m_pObjInfos =
-		(CObjInfo*)dalloc(pMgr->m_Unknown8b8 * sizeof(CObjInfo));
-
-	memset(pClient->m_pObjInfos, 0, pMgr->m_Unknown8b8 * sizeof(CObjInfo));
-
-	pClient->m_pConnection = pConn;                      // 0x004639da
-	pClient->m_pUnknown3AC = LTNULL;                     // 0x004639e0
-	((CClientF12CView*)pClient)->m_f12c = 35.0f;         // 0x004639e6
-	pClient->m_ClientID    = 0;                          // 0x004639f0
-
-	// 0x004639f7..0x00463a19 — the lowest id nobody is using. The walk is
-	// FORWARD (`[edx+4]` is CheapLTLink::m_pNext; ltlink.h puts m_pPrev
-	// first), and the outer bound is 30000.
-	pHead = &pMgr->m_ClientList.m_Head;
-
-	for (nID = 0; nID < 30000; nID++)
-	{
-		// THE MATCH EXITS THE INNER LOOP BY GOTO AND THE WALK FALLING OFF
-		// THE END IS THE `break`, not the other way round. Written as
-		// `for (...) { if (match) break; } if (pCur == pHead) break;` VC6
-		// INVERTS the inner loop -- test at the bottom, entry test
-		// duplicated, four instructions and nine bytes over -- and while,
-		// do/while and for(;;) with the head test spelled inside all give
-		// the same inversion (the shape of
-		// CNetMgr::GetPacket). With the natural exit carrying the outer
-		// `break` the loop is not inverted: S:0x10026f40..0x10026f64 keeps
-		// the test at the top and jumps back to it with `jmp 0x10026f43`,
-		// and so do we. Worth 4 instructions and 9 bytes.
-		for (pCur = pHead->m_pNext; pCur != pHead; pCur = pCur->m_pNext)
-		{
-			if (((Client*)pCur->m_pData)->m_ClientID == nID)
-				goto taken;
-		}
-
-		break;
-
-	taken:
-		;
-	}
-
-	pClient->m_ClientID = nID;                           // 0x00463a22
-
-	// 0x00463a29 — 500 slots, key kind 0.
-	pClient->m_hSoundHash = dhash_Create(500, 0);
-
-	// 0x00463a45, the literal at 0x004acff4. The id is RE-READ out of the
-	// client (0x00463a3d) rather than reusing nID, which is what says the
-	// source wrote the member expression.
-	dsi_ServerError("New client, id %d, for a total of %d.",
-		pClient->m_ClientID, pMgr->m_ClientList.m_nElements);
-
-	// 0x00463a4f `mov ecx,[ebx+0x820]` — CClassMgr::m_pServerShell — then
-	// vtable slot 2, which iservershell.h makes OnAddClient (slot 0 is the
-	// virtual destructor, slot 1 ServerAppMessageFn).
-	pMgr->m_ClassMgr.m_pServerShell->OnAddClient((HCLIENT)pClient);
-
-	// 0x00463a5e..0x00463a80. Packet id 4, four-byte payload 6. The dword
-	// write is a CALL in BOTH images, so it is spelled through the out-of-line
-	// CMsgWriteView rather than the template.
-	pMsg = msg.m_pMsg;
-	pMsg->m_Unknown38 = 1;
-	pMsg->m_Unknown34 = 1;
-
-	((CMsgWriteView*)msg.m_pMsg)->WriteDWord(6);
-
-	sm_SendToClient(pMgr, pClient, 4, msg.m_pMsg, 0, 0x80);
-
-	// 0x00463a85..0x00463be3. Packet id 0xc carries the client's own id and
-	// the local flag. BOTH are the packet.h TEMPLATES — lithtech expands them
-	// here (the grow loop at 0x00463aaf / 0x00463b59 and the "ERROR: Packet
-	// write overrun!" tail at 0x00463aff / 0x00463ba0 are WriteType's body
-	// verbatim) and server.dll calls 0x1000ec3d / 0x1001393e.
-	pMsg = msg.m_pMsg;
-	pMsg->m_Unknown38 = 1;
-	pMsg->m_Unknown34 = 1;
-
-	((CPacket*)msg.m_pMsg)->WriteType(pClient->m_ClientID);
-	((CPacket*)msg.m_pMsg)->WriteType((uint8)bLocal);
-
-	sm_SendToClient(pMgr, pClient, 0xc, msg.m_pMsg, 0, 0x80);
-
-	// 0x00463be8..0x00463c41 — every file the manager knows about goes into
-	// the new client's queue with bit 1 forced on.
-	hIter = dhash_GetFirst(pMgr->m_FileMgr.m_hFileHash);
-
-	while (hIter)
-	{
-		CFileRef* pRef = (CFileRef*)dhash_GetData(dhash_GetNext(&hIter));
-		// THE KEY IS A STATEMENT OF ITS OWN. Nested inside the argument list
-		// VC6 pushes arguments 5..3, then evaluates the nested call, then
-		// pushes its result -- and since %ecx is live across it (it holds
-		// the flags byte) the pending cleanups come out as four `pop %ecx`.
-		// The shipped build calls dhash_GetKey FIRST (S:0x10027034
-		// `push $0x0 ; push (%ebx) ; call`) and only then reads m_Flags,
-		// which is what right-to-left evaluation of a call whose second
-		// argument is already a value looks like; it also frees %ebx to
-		// hold pRef and batches all four calls' cleanup into one
-		// `add $0x24,%esp`. Worth 4 instructions, and it drags the whole
-		// tail of the function into agreement.
-		char*     pKey = dhash_GetKey(pRef->m_hElement, LTNULL);
-
-		xfer_AddFile((CClientFiles*)pClient->m_pUnknown18C, pKey,
-			pRef->m_Unknown04, pRef->m_nFileID, (uint16)(pRef->m_Flags | 2));
-	}
-
-	xfer_SendPendingFiles((CClientFiles*)pClient->m_pUnknown18C);   // 0x00463c4f
-
-	// 0x00463c54 `test al,2` on m_ClientFlags, then 0x00463c61..0x00463c97,
-	// the model hash one element at a time.
-	//
-	// THE LT_SERVER_BUILD SEAM. server.dll's copy (S:0x10027088..0x1002709d)
-	// is this loop with the body EMPTY — dhash_GetData's result is computed
-	// and dropped. lithtech.exe hands each element to the client shell.
-	if (pClient->m_ClientFlags & CLIENTFLAG_LOCAL)
-	{
-		hIter = dhash_GetFirst(pMgr->m_hModelHash);
-
-		while (hIter)
-		{
-			void* pModel = dhash_GetData(dhash_GetNext(&hIter));
-
-#ifndef LT_SERVER_BUILD
-			cs_InheritFileFromServerQ414((CInheritOwnerQ414*)pModel);  // 0x00463c89
-#else
-			(void)pModel;
-#endif
-		}
-	}
-
-	sm_SetClientState(pMgr, pClient, 1);                 // 0x00463c9c
-
-	return pClient;                                      // 0x00463cb1
-}
-
-
-// *********************************************************************** //
-//  0x10029bdf / 0x00468900 — the queued sound write itself; 0x10029bc4 is the
-//  gate in front of it.
-//
-//  The third declared-never-defined prototype this sweep turned up, and the
-//  one that corrects its own declaration. servermgr.h gave the first argument
-//  as CQueuedMsg*; it is SoundRecord*. All eleven PlaySoundInfo members fall
-//  out of the offsets with nothing left over, and each is gated by the exact
-//  PLAYSOUND_ bit ltbasedefs.h says gates it.
-//
-//  THE TENSION, STATED RATHER THAN HIDDEN: the gate above passes what it
-//  calls a CQueuedMsg, and the gate is a 27-byte MATCH. Both readings survive
-//  that, because the gate only tests +0x00 and the pointer type never reaches
-//  its codegen — so the cast at the call site is where the two spellings meet,
-//  and the offsets decide. If it turns out the queued list really does
-//  hold CQueuedMsg, this signature is what to revisit.
-//
-//  MEASURED: 543 bytes against 545, and 174 instructions against 174 --
-//  instruction-exact. It got there from 597 on ONE finding: there is no delta
-//  vector in this function. It was first written as `vDelta = a - b;` then
-//  `vDelta.MagSqr()`, which made our build copy twelve bytes into a temporary
-//  -- three `movsl` with no counterpart in the shipped code. The shipped build
-//  takes the ADDRESS instead and calls _CVector::DistSqr (0x1000f8f8), which
-//  is how commonphysics.cpp, objbank.cpp and sub_100298d9 in this same file
-//  all already spell the same test. Worth 54 bytes.
-//
-//  NOW 545 of 545, size-exact. The clamp is closed: LTMIN gives the shipped
-//  `flds C ; flds r ; fcomp %st(1)` at 0x10029c9f, the same fix as in
-//  sub_100298d9. What is left is one frame-slot swap. Shipped homes nSpatial
-//  in pRec's dead argument slot +8, and because the variable lives in
-//  memory the `& 3` and the test are done there: `mov %ebx,8(%ebp) ; andl
-//  $3,8(%ebp) ; cmp %di,8(%ebp)` at 0x10029c36. That is one instruction
-//  fewer, 174 against our 175. fRadius, the fidivl temporary and nInner
-//  share -4 in shipped. Ours gives +8 to that group and -4 to nSpatial,
-//  which it computes in eax. All of these left the slots where they are:
-//  nSpatial declared first or last; fRadius at function scope, declared
-//  first or last, or with an initialiser; `nSpatial = nFlags; nSpatial &=
-//  3;`; the assignment inside the if; nSpatial as short; bOwnObject = 0
-//  before nFlags; nInner as a ternary or through a uint32 temporary; an
-//  (int) divisor; nRange as uint16. Worse: fRadius assigned before the if
-//  (13 blocks); nInner as uint32 (costs another function in the file); a
-//  uint32 nSpatial (538/543, the 16-bit compare disappears). The earlier
-//  negatives for the clamp all predate LTMIN.
-//
-//  A NOTE THAT PAYS ELSEWHERE. The unsolved shape recorded at sub_100298d9
-//  below — "the shipped load is `mov 0x34(%ebx),%ax`, sixteen bits into a
-//  register whose top half is then STALE ... a uint16 field read into a
-//  uint32 local gives movzwl; reading the uint32 field whole gives a dword
-//  load; neither reproduces a narrowed load with a dead upper half" — has an
-//  option that was not on that list and is the one the offsets here force: a
-//  uint32 FIELD read into a uint16 LOCAL. That is a truncating load, no
-//  zero-extension, upper half dead, and every later use here is sixteen bits
-//  or narrower. server.dll agrees: 0x10029c3d is `cmp di,[ebp+8]`, a
-//  sixteen-bit compare on the slot. Spelled that way below; it is the first
-//  thing to try on sub_100298d9's remaining bytes.
-// *********************************************************************** //
-
-void sm_WriteQueuedMessageBody(SoundRecord* pRec, Client* pClient,
-                               ServerMessage* pMsg)
-{
-	CSoundSentState* pState;
-	CSoundSentState  state;
-	uint16           nFlags;
-	uint16           nSpatial;
-	int              bOwnObject;
-	uint32           nRange;
-	uint16           nInner;
-
-	// 0x0046890a / 0x00468916 / 0x00468921.  Three guards, and all three
-	// jump to the SAME tail (0x00468e1a) in both images while the body's own
-	// normal exit at 0x00468de5 is a SEPARATE epilogue -- which is exactly
-	// what /O2 does with early returns whose landing site is the end of the
-	// function.  The argument the guards test in the middle is the message,
-	// not the client.
-	if (!pRec)
-		return;
-
-	if (!pMsg)
-		return;
-
-	if (!pRec->m_hFile)
-		return;
-
-	// 0x00468929 `mov ax,[ebp+8]` -- see the note above; the local is uint16
-	// and the field is the SDK's uint32.
-	nFlags     = (uint16)pRec->m_Info.m_dwFlags;
-	bOwnObject = 0;                                  // 0x00468938
-
-	// 0x00468931 `test ah,8` = PLAYSOUND_CLIENTLOCAL.
-	if (nFlags & PLAYSOUND_CLIENTLOCAL)
-	{
-		// 0x00468942 -- the object the sound is glued to against the
-		// client's own object.
-		if (pRec->m_Info.m_hObject == (HOBJECT)pClient->m_pUnknown3AC)
-		{
-			bOwnObject = 1;                          // 0x00468952
-		}
-		else
-		{
-			// 0x0046895c / 0x00468961 -- drop CLIENTLOCAL, force 3D.
-			nFlags = (nFlags & ~PLAYSOUND_CLIENTLOCAL) | PLAYSOUND_3D;
-		}
-	}
-
-	// 0x00468967 `and eax,3 ; test ax,ax` -- a SIXTEEN-BIT test, which is
-	// what makes this a uint16 local of its own rather than a repeated
-	// expression.
-	nSpatial = (uint16)(nFlags & (PLAYSOUND_AMBIENT | PLAYSOUND_3D));
-
-	if (nSpatial)
-	{
-		float fRadius;
-
-		// 0x004689d0 `mov ecx,[ebp+0x120]` -- an INTEGER move of a float
-		// member into a slot that is then read twice by the x87, which is
-		// the fingerprint of a float LOCAL rather than two member reads.
-		fRadius = pRec->m_Info.m_fOuterRadius;
-
-		// NO DELTA VECTOR. This was first written as
-		// `vDelta = a - b; ... vDelta.MagSqr()`, which made our build copy
-		// twelve bytes into a temporary -- three `movsl` that have no
-		// counterpart in the shipped code. The shipped build takes the
-		// ADDRESS instead: 0x10029c52..0x10029c61 loads m_pUnknown3AC, adds
-		// 0x18c to reach m_Pos, pushes that pointer and calls
-		// _CVector::DistSqr (0x1000f8f8, __thiscall, the other vector by
-		// reference). commonphysics.cpp and objbank.cpp already spell it
-		// this way, and sub_100298d9 in this very file does the same test
-		// against the same 4.0f.
-		//
-		// The radius is squared AFTER the call -- `fld [ebp-4]`,
-		// `fmul [ebp-4]`, `fmul 4.0` at 0x10029c66..0x10029c6c -- so the
-		// distance is the left operand of the compare.
-		if (pRec->m_Info.m_vPosition.DistSqr(
-				((LTObject*)pClient->m_pUnknown3AC)->m_Pos) >
-			fRadius * fRadius * 4.0f)
-		{
-			return;
-		}
-	}
-
-	// 0x00468a0c / 0x00468a15 / 0x00468a1e.  Two zero bytes then the file's
-	// id; the id is the uint16 at m_hFile+0x08, which serverengine.h:229
-	// calls CFileRef::m_nFileID.
-	pMsg->WriteByte(0);
-	pMsg->WriteByte(0);
-	pMsg->WriteWord((uint16)((CFileRef*)pRec->m_hFile)->m_nFileID);
-
-	// 0x00468a2d..0x00468a88.  65535.0f is .rdata 0x004a2ef0 and 255.0f is
-	// 0x004a1a5c; the divide is `fidivl` against the range NARROWED to
-	// sixteen bits (0x00468a64 `and ecx,0xffff`), which is what says the
-	// range is stored uint16 before it is used as the divisor.
-	// LTMIN, as in sub_100298d9. The parenthesised left operand in the
-	// macro is what gives `flds C ; flds r ; fcomp %st(1)` at 0x10029c9f
-	// rather than `fcoms r`.
-	nRange = (uint32)LTMIN(pRec->m_Info.m_fOuterRadius, 65535.0f);
-
-	nInner = (uint16)((pRec->m_Info.m_fInnerRadius * 255.0f) /
-		(float)(uint16)nRange);
-
-	if (nInner >= 0xff)                              // 0x00468a77
-		nInner = 0xff;
-
-	// 0x00468a89 -- keyed by the same file id the wire got.
-	pState = snd_FindSentState(pClient,
-		(uint16)((CFileRef*)pRec->m_hFile)->m_nFileID);
-
-	// 0x00468a9c.  A null answer is "first time": a local record whose change
-	// byte says all three fields moved, used in place of the stored one.
-	// Same spelling sub_100298d9 already uses.
-	if (!pState)
-	{
-		state.m_ChangeFlags = 7;                     // 0x00468aa0
-		pState = &state;                             // 0x00468aa5
-	}
-	else
-	{
-		state.m_Flags       = nFlags;                // 0x00468aba
-		state.m_Unknown04   = pRec->m_Info.m_nPriority;   // 0x00468ac3
-		state.m_nRange      = (uint16)nRange;        // 0x00468ac9
-		state.m_nInnerRatio = (uint8)nInner;         // 0x00468ace
-
-		snd_MergeSentState(pState, &state);          // 0x00468ad2
-	}
-
-	// 0x00468ada -- the change byte itself goes out first, then each field
-	// the byte still claims, CLEARING the bit as it goes.  The values come
-	// from the originals, not from the record.
-	pMsg->WriteByte(pState->m_ChangeFlags);
-
-	if (pState->m_ChangeFlags & SNDSENT_FLAGS)       // 0x00468ae6, bit 1
-	{
-		pState->m_ChangeFlags &= ~SNDSENT_FLAGS;
-		pMsg->WriteWord(nFlags);                     // 0x00468af5
-	}
-
-	if (pState->m_ChangeFlags & SNDSENT_BYTE04)      // 0x00468afc, bit 2
-	{
-		pState->m_ChangeFlags &= ~SNDSENT_BYTE04;
-		pMsg->WriteByte(pRec->m_Info.m_nPriority);   // 0x00468b0d
-	}
-
-	// 0x00468b12 `cmpw $0,[esp+0x14]` -- nSpatial again, tested BEFORE the
-	// change bit, so the range pair only travels for a positioned sound.
-	if (nSpatial && (pState->m_ChangeFlags & SNDSENT_RANGE))   // 0x00468b1c
-	{
-		pState->m_ChangeFlags &= ~SNDSENT_RANGE;
-
-		pMsg->WriteWord((uint16)nRange);             // 0x00468b27, out of line
-		((CPacket*)pMsg)->WriteType((uint8)nInner);  // 0x00468b2c, EXPANDED
-	}
-
-	if (nFlags & PLAYSOUND_CTRL_VOL)                 // 0x00468b97, 0x40
-		((CPacket*)pMsg)->WriteType(pRec->m_Info.m_nVolume);      // 0x00468ba2
-
-	if (nFlags & PLAYSOUND_CTRL_PITCH)               // 0x00468c8f, 0x80
-		((CPacket*)pMsg)->WriteType(pRec->m_Info.m_fPitchShift);  // 0x00468c97
-
-	// 0x00468d42.  A sound on the client's own object does not need a
-	// position; a positioned one does, compressed against the world.
-	if (!bOwnObject && nSpatial)
-	{
-		lmsg_WriteCompPos(&pMsg->m_Write, &pRec->m_Info.m_vPosition,
-			(CPosRef*)&g_pServerMgr->m_World);       // 0x00468d6a
-	}
-
-	// 0x00468d72 -- the last field, expanded, and its overrun tail at
-	// 0x00468de6 is the block the enumerator mistook for a second function.
-	((CPacket*)pMsg)->WriteType(pRec->m_Info.m_UserData);
+// Prepare all native client resources before publishing the connection.
+Client* sm_AddClientForConnection(CServerMgr* manager, NetConnection* connection, int local) {
+    if (!manager || !connection) return nullptr;
+    local = local && !g_LocalNoFlag;
+    ServerMessage hello, identity;
+    hello.WriteDWord(6);
+    if (hello.m_Flags & PACKETFLAG_WRITEOVERFLOW) return nullptr;
+    std::unique_ptr<Client> owned;
+    try {
+        owned = std::make_unique<Client>();
+        if (!owned->Initialize(manager->m_Unknown8b8)) return nullptr;
+        owned->m_pConnection = connection;
+        if (local) owned->m_ClientFlags |= CLIENTFLAG_LOCAL;
+        uint16 id = 0;
+        for (; id < 30000; ++id) {
+            bool taken = false;
+            for (auto* link = manager->m_ClientList.m_Head.m_pNext; link != &manager->m_ClientList.m_Head; link = link->m_pNext)
+                if (static_cast<Client*>(link->m_pData)->m_ClientID == id) { taken = true; break; }
+            if (!taken) break;
+        }
+        if (id == 30000) return nullptr;
+        owned->m_ClientID = id;
+        identity.WriteWord(id);
+        identity.WriteByte(static_cast<uint8>(local));
+        if (identity.m_Flags & PACKETFLAG_WRITEOVERFLOW) return nullptr;
+        CPacketHolderDesc descriptor{open_client_transfer, &manager->m_FileMgr, &manager->m_NetMgr, connection};
+        owned->m_FileTransfer.reset(ph_CreateHolder(&descriptor, local ? 4 : 0));
+        if (!owned->m_FileTransfer) return nullptr;
+        for (const auto* file : manager->m_FileMgr.files())
+            if (!owned->m_FileTransfer->Add(file->m_Name.c_str(), file->m_Unknown04, file->m_nFileID, uint16(file->m_Flags | 2)))
+                return nullptr;
+    } catch (const std::bad_alloc&) { return nullptr; }
+    auto* client = owned.get();
+    client->Register(manager->m_ClientList);
+    if (local) manager->m_Unknown1a0 |= 2;
+    const auto lifetime = client->m_Lifetime;
+    owned.release();
+    if (manager->m_ClassMgr.m_pServerShell) manager->m_ClassMgr.shell([&](IServerShell& shell) { return shell.OnAddClient(client->Handle()); });
+    if (!*lifetime) return nullptr;
+    sm_SendToClient(manager, client, 4, &hello, 0, 0x80);
+    sm_SendToClient(manager, client, 0xc, &identity, 0, 0x80);
+    if (!client->m_FileTransfer->Announce()) {
+        manager->m_NetMgr.Disconnect(connection,6,0);
+        return nullptr;
+    }
+    sm_SetClientState(manager, client, 1);
+    return client;
 }
 
 
@@ -11482,62 +7496,22 @@ void lmsg_WriteCompRotation(LMessageImpl* pMsg, LTRotation* pRot);  // 0x100132d
 
 // The ServerMessage members servermsg.h does not carry.  Each already exists
 // under exactly this shape elsewhere in the tree -- servermessage.cpp's
-// CMsgWriteView (WriteDWord 0x1000ecd6, WriteString 0x10026137), smgr.cpp's
-// CMsgFloatWriteView (WriteFloat 0x10028a35) and CMsgLenView (GetSpaceLeft
+// ServerMessage (WriteDWord 0x1000ecd6, WriteString 0x10026137), smgr.cpp's
+// ServerMessage (WriteFloat 0x10028a35) and CMsgLenView (GetSpaceLeft
 // 0x1000e845) -- and they are gathered on one view here only because this
 // file cannot reach three different .cpp-local classes.
-class CMsgWriteQ291
-{
-public:
-	void WriteDWord(uint32 nValue);          // 0x1000ecd6 / 0x004192e0-class
-	void WriteFloat(float fValue);           // 0x10028a35
-	void WriteString(char* pStr);            // 0x10026137
-	int  GetSpaceLeft();                     // 0x1000e845
-};
 
-// A sprite object's own field, the one CF_MODELINFO sends for OT_SPRITE.
-// objtypes.h has no sprite class yet; this is the single dword both images
-// read at LTObject+0x1bc under `cmpb $0x3` (0x10029381 / the /O2 twin).
-class CObjSpriteQ291
-{
-public:
-	uint8  m_pad_000[0x1bc];
-	uint32 m_Unknown1bc;                     // 0x1bc
-};
 
-// A model object's field at 0x204, sent at the end of the attachment block
-// and only for OT_MODEL (0x100295f4).
-class CObjModelQ291
-{
-public:
-	uint8  m_pad_000[0x204];
-	uint32 m_Unknown204;                     // 0x204
-};
-
-// A container's code at 0x270 is objtypes.h's CObjContainer::m_ContainerCode;
-// repeated on a view for the same reason as the two above.
-class CObjContainerQ291
-{
-public:
-	uint8  m_pad_000[0x270];
-	uint16 m_ContainerCode;                  // 0x270
-};
+// CF_MODELINFO sends a sprite's clip polygon, and the attachment block ends
+// with a model's hidden pieces: the native members the original read at
+// LTObject+0x1bc and +0x204 (0x10029381 / 0x100295f4). A container sends its
+// code (+0x270).
 
 // SObjData's two fields ltobject_internal.h does not name at these offsets:
 // +0x2c is the stowed SFX ServerMessage (smgr.cpp's sm_SetObjectSFXMessage
 // already treats it as one) and +0x4c is a flag word whose bit 0 sets 0x20
 // in the info byte (0x100292d7 / 0x00467661).
-class CSObjDataQ291
-{
-public:
-	uint8          m_pad_000[0x2c];
-	ServerMessage* m_pSFXMessage;            // +0x2c
-	void*          m_pModelFile;             // +0x30
-	uint8          m_pad_034[0x4c - 0x34];
-	uint32         m_Unknown4c;              // +0x4c
-	uint16         m_ClientChangeFlags;      // +0x50
-	uint16         m_NetFlags;               // +0x52
-};
+
 
 // The file record the file id comes out of: smgr.cpp's CSoundIDRec is the
 // same eight-bytes-then-a-word shape, and this is the file manager's.
@@ -11615,7 +7589,7 @@ inline void sm_WritePacketDWordQ291(CPacket* p, uint32 val)
 // That is a tail merge, not two separate statements.
 //
 // Every member read is WRITTEN OUT at each use.  pObject->m_pSData is
-// fetched four times, pObject->m_pSData->m_pSFXMessage three, and
+// fetched four times, pObject->m_pSData->m_SFXMessage.m_pMsg three, and
 // pObject->m_ObjectType six; the single load each straight-line region shows
 // is VC6's CSE inside a block, and the re-read after every call is what says
 // there is no local.
@@ -11649,14 +7623,14 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 		nFlags &= 0xfbfb;                    // ~(CF_ROTATION | 0x400)
 	}
 
-	if (((CSObjDataQ291*)pObject->m_pSData)->m_NetFlags & NETFLAG_POSUNGUARANTEED)
+	if ((pObject->m_pSData)->m_NetFlags & NETFLAG_POSUNGUARANTEED)
 		nFlags &= 0xfffd;                    // ~CF_POSITION
 
-	if (((CSObjDataQ291*)pObject->m_pSData)->m_NetFlags & NETFLAG_ROTUNGUARANTEED)
+	if ((pObject->m_pSData)->m_NetFlags & NETFLAG_ROTUNGUARANTEED)
 		nFlags &= 0xfffb;                    // ~CF_ROTATION
 
 	if (pObject->m_ObjectType == OT_MODEL &&
-		(((CSObjDataQ291*)pObject->m_pSData)->m_NetFlags & NETFLAG_ANIMUNGUARANTEED))
+		((pObject->m_pSData)->m_NetFlags & NETFLAG_ANIMUNGUARANTEED))
 	{
 		nFlags &= 0xffdf;                    // ~CF_MODELINFO
 	}
@@ -11691,55 +7665,55 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 	{
 		nInfo = (uint8)pObject->m_ObjectType;
 
-		if (((CSObjDataQ291*)pObject->m_pSData)->m_pSFXMessage)
+		if ((pObject->m_pSData)->m_SFXMessage.m_pMsg)
 		{
 			nInfo |= 0x40;
 
-			if (((CSObjDataQ291*)pObject->m_pSData)->m_pSFXMessage->m_Unknown34
+			if ((pObject->m_pSData)->m_SFXMessage.m_pMsg->m_Unknown34
 				>= 0x100)
 			{
 				nInfo |= 0x80;
 			}
 		}
 
-		if (((CSObjDataQ291*)pObject->m_pSData)->m_Unknown4c & 1)
+		if ((pObject->m_pSData)->m_CreateFlags & 1)
 			nInfo |= 0x20;
 
 		pMsg->WriteByte(nInfo);
 
-		if (((CSObjDataQ291*)pObject->m_pSData)->m_pSFXMessage)
+		if ((pObject->m_pSData)->m_SFXMessage.m_pMsg)
 		{
 			if (nInfo & 0x80)
 			{
-				pMsg->WriteWord(((CSObjDataQ291*)pObject->m_pSData)
-					->m_pSFXMessage->m_Unknown34);
+				pMsg->WriteWord((pObject->m_pSData)
+					->m_SFXMessage.m_pMsg->m_Unknown34);
 			}
 			else
 			{
-				pMsg->WriteByte((uint8)((CSObjDataQ291*)pObject->m_pSData)
-					->m_pSFXMessage->m_Unknown34);
+				pMsg->WriteByte((uint8)(pObject->m_pSData)
+					->m_SFXMessage.m_pMsg->m_Unknown34);
 			}
 
-			// THROUGH CMsgDataView, whose length parameter is uint16.
+			// THROUGH ServerMessage, whose length parameter is uint16.
 			// servermsg.h's WriteData takes uint32, which makes our build
 			// zero-extend (`movzwl 0x34(%eax),%ecx`); the shipped call at
 			// 0x10029320 is `mov cx,WORD PTR [eax+0x34]` and pushes the dword
 			// with a stale top half, which is what a uint16 argument does.
 			// That view already exists in this file for the same reason.
-			((CMsgDataView*)pMsg)->WriteData(
-				((CSObjDataQ291*)pObject->m_pSData)->m_pSFXMessage->m_pData,
-				((CSObjDataQ291*)pObject->m_pSData)->m_pSFXMessage->m_Unknown34);
+			(pMsg)->WriteData(
+				(pObject->m_pSData)->m_SFXMessage.m_pMsg->m_pData,
+				(pObject->m_pSData)->m_SFXMessage.m_pMsg->m_Unknown34);
 		}
 
 		if (pObject->m_ObjectType == OT_WORLDMODEL)
 		{
-			((CMsgWriteQ291*)pMsg)->WriteString(pObject->m_pWorldBsp->m_Name);
+			(pMsg)->WriteString(pObject->m_pWorldBsp->m_Name);
 		}
 		else if (pObject->m_ObjectType == OT_CONTAINER)
 		{
-			((CMsgWriteQ291*)pMsg)->WriteString(pObject->m_pWorldBsp->m_Name);
+			(pMsg)->WriteString(pObject->m_pWorldBsp->m_Name);
 
-			pMsg->WriteWord(((CObjContainerQ291*)pObject)->m_ContainerCode);
+			pMsg->WriteWord(static_cast<CObjContainer*>(pObject)->m_ContainerCode);
 		}
 		else if (pObject->m_ObjectType == OT_MODEL)
 		{
@@ -11747,8 +7721,7 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 		}
 		else if (pObject->m_ObjectType == OT_SPRITE)
 		{
-			pMsg->WriteWord(((CFileIDRecQ291*)((CSObjDataQ291*)
-				pObject->m_pSData)->m_pModelFile)->m_nID);
+			pMsg->WriteWord(static_cast<CFileRef*>(pObject->m_pSData->m_pModelFile)->m_nFileID);
 		}
 	}
 
@@ -11760,8 +7733,8 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 		}
 		else if (pObject->m_ObjectType == OT_SPRITE)
 		{
-			((CMsgWriteQ291*)pMsg)->WriteDWord(
-				((CObjSpriteQ291*)pObject)->m_Unknown1bc);
+			(pMsg)->WriteDWord(
+				static_cast<CObjSprite*>(pObject)->m_ClipPoly);
 		}
 	}
 
@@ -11769,7 +7742,7 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 	{
 		pMsg->WriteWord((uint16)pObject->m_Flags);
 		pMsg->WriteByte((uint8)pObject->m_Flags2);
-		((CMsgWriteQ291*)pMsg)->WriteDWord(pObject->m_UserFlags);
+		(pMsg)->WriteDWord(pObject->m_UserFlags);
 	}
 
 	if (nFlags & CF_COLORINFO)
@@ -11791,27 +7764,27 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 
 	if (nFlags & CF_SCALE)
 	{
-		((CMsgWriteQ291*)pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Scale.x));
-		((CMsgWriteQ291*)pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Scale.y));
+		(pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Scale.x));
+		(pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Scale.y));
 
 		if (pObject->m_ObjectType != OT_SPRITE)
-			((CMsgWriteQ291*)pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Scale.z));
+			(pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Scale.z));
 	}
 
 	if (nFlags & (CF_POSITION | 0x200))
 	{
 		if (pObject->m_Flags & FLAG_FULLPOSITIONRES)
 		{
-			((CMsgWriteQ291*)pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Pos.x));
-			((CMsgWriteQ291*)pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Pos.y));
-			((CMsgWriteQ291*)pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Pos.z));
+			(pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Pos.x));
+			(pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Pos.y));
+			(pMsg)->WriteFloat(sm_FloatArgQ291(pObject->m_Pos.z));
 
 			((IMessageWrite*)&pMsg->m_Write)->WriteVector(&pObject->m_Velocity);
 		}
 		else
 		{
 			lmsg_CompressPos(posData, &pObject->m_Pos,
-				(CPosRef*)&pMgr->m_World);
+				pMgr->m_World.PositionReference());
 
 			lmsg_WriteCompPosWords((IMessageWrite*)&pMsg->m_Write,
 				posData);
@@ -11843,7 +7816,7 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 
 		while (pAttach)
 		{
-			if (((CMsgLenView*)pMsg)->GetSpaceLeft() >= 30)
+			if ((static_cast<ServerMessage*>(pMsg))->GetSpaceLeft() >= 30)
 			{
 				((CPacket*)pMsg)->WriteType((uint16)(pAttach->m_nChildID));
 
@@ -11866,72 +7839,15 @@ int sub_100291c7(CServerMgr* pMgr, Client* pClient, LTObject* pObject,
 		{
 #ifndef LT_SERVER_BUILD
 			sm_WritePacketDWordQ291((CPacket*)pMsg,
-				((CObjModelQ291*)pObject)->m_Unknown204);
+				static_cast<ModelInstance*>(pObject)->m_HiddenPieces);
 #else
 			((CPacket*)pMsg)->WriteType((uint32)
-				((CObjModelQ291*)pObject)->m_Unknown204);
+				static_cast<ModelInstance*>(pObject)->m_HiddenPieces);
 #endif
 		}
 	}
 
 	return 1;
-}
-
-
-// 0x100288be (117 bytes, /O1) / 0x00466550 (186 bytes, /O2) — this client's
-// record for one sound, or a new one. Ported from the /O2-tuned copy in
-// src/engine/lithtech/ccobj.cpp, which is byte-identical at 0x00466550; that
-// copy is kept in step rather than deleted, exactly as sub_100291c7's is.
-//
-// THE KEY IS THE PARAMETER'S OWN ADDRESS. Both images pass `lea 0x10(%esp)` /
-// `lea 0x14(%esp)` as the hash key (0x100288c4, 0x0046655d) and that slot IS
-// the uint16 parameter — there is no local to copy it into. So the source
-// hands the hash `&nSoundID` with a length of two, twice.
-//
-// The redundant null test is real and in the source: the allocate's own
-// failure arm and the caller's `if (!pState)` both land on the same return-0
-// block (0x100288fd -> 0x10028922, 0x004665aa/0x004665c7 -> 0x004665c9).
-//
-// THE FAILURE PATH FREES BANK MEMORY WITH dfree, and that is a shipped bug
-// rather than a misread: 0x1002891c / 0x004665ed is the plain allocator free
-// (0x1000d398 / 0x00429080), not sb_Free, on a record that came out of
-// m_Bank89C two statements earlier. Transcribed as shipped.
-CSoundSentState* snd_FindSentState(Client* pClient, uint16 nSoundID)
-{
-	void*            hElement;
-	CSoundSentState* pState;
-
-	hElement = dhash_FindElement((CHashTable*)pClient->m_hSoundHash,
-		&nSoundID, sizeof(nSoundID));
-
-	if (hElement)
-	{
-		pState = (CSoundSentState*)dhash_GetData(hElement);
-
-		if (pState)
-			return pState;
-	}
-
-	pState = (CSoundSentState*)
-		sm_sb_AllocateCleared(&g_pServerMgr->m_Bank89C);
-
-	if (!pState)
-		return LTNULL;
-
-	pState->m_ChangeFlags = SNDSENT_FLAGS | SNDSENT_BYTE04 | SNDSENT_RANGE;
-
-	hElement = dhash_AddElement((CHashTable*)pClient->m_hSoundHash,
-		&nSoundID, sizeof(nSoundID));
-
-	if (!hElement)
-	{
-		dfree(pState);
-		return LTNULL;
-	}
-
-	dhash_SetData(hElement, pState);
-
-	return pState;
 }
 
 
@@ -11955,82 +7871,8 @@ CSoundSentState* snd_FindSentState(Client* pClient, uint16 nSoundID)
 // image's `operator delete` (the client data block, and the record itself),
 // and dhash_Free (0x1000dbe0) takes the hash.
 //
-// The five cdecl calls between the message loop and the hash walk share ONE
-// `add $0x14,%esp` (0x10027457), which is cl 8447 batching consecutive
-// fixed-prototype cleanups -- it says nothing about the prototypes and
-// nothing about statement grouping.
-//
-// The hash walk frees each record back onto m_Bank89C BY HAND -- 0x10027476
-// leas the global's +0x8b4, which is m_Bank89C's m_pFreeList at +0x18 --
-// i.e. servermgr.h's inline sb_Free. snd_FindSentState above is where those
-// records come from.
-//
-// The advance is its own statement: nested inside the GetData call, VC6's
-// right-to-left ordering would hoist it and the shipped batching is lost.
-//
-// THE DESTRUCTOR IS REAL AND servermgr.h DOES NOT MODEL IT. `delete
-// pClient` reaches 0x100274bc, a 32-byte out-of-line body that destroys the
-// 2x2 packet array at Client+0x134 BACKWARDS, four trips, stride 12, each
-// trip a guarded `call *0x8(%vptr)`. That is the array-destructor idiom and
-// nothing else, so ClientPacketSet has a destructor that releases its
-// packet. servermgr.h is not changed here: the slot is smgr.cpp's own
-// CClientPacketSetView above, whose first member is servermsg.h's
-// CMessageRef -- and CMessageRef ALREADY carries exactly that destructor
-// (`if (m_pMsg) m_pMsg->Release()`, Release being slot 2, which is the
-// `call *0x8(%eax)` at 0x100274d3). So the destructor needs no new code at
-// all, only a layout view that puts four of those slots at +0x134.
-class CClientDtorView
-{
-public:
-	uint8                m_pad_000[0x134];
-	CClientPacketSetView m_PacketSets[2][2];             // 0x134
-	uint8                m_pad_164[0x3e0 - 0x164];
-};
-
-class CClientFilesView;
-void xfer_Term(CClientFilesView* pState);                // 0x1000e5c5
-
-void sub_100273e9(CServerMgr* pMgr, Client* pClient)
-{
-	LTLink* pCur;
-	void*   hIter;
-	void*   hElement;
-
-	xfer_Term((CClientFilesView*)pClient->m_pUnknown18C);
-
-	pCur = pClient->m_List3CC.m_Head.m_pNext;
-
-	while (pCur != &pClient->m_List3CC.m_Head)
-	{
-		LTLink* pNext = pCur->m_pNext;
-
-		((CQueuedMsg*)pCur->m_pData)->Release();
-
-		pCur = pNext;
-	}
-
-	dfree(pClient->m_pObjInfos);
-	dfree(pClient->m_IDLists[0].m_pIDs);
-	dfree(pClient->m_IDLists[1].m_pIDs);
-	dfree(pClient->m_pName);
-
-	hIter = dhash_GetFirst(pClient->m_hSoundHash);
-
-	while (hIter)
-	{
-		hElement = dhash_GetNext(&hIter);
-
-		if (hElement)
-			sb_Free(&g_pServerMgr->m_Bank89C, dhash_GetData(hElement));
-	}
-
-	dhash_Free(pClient->m_hSoundHash);
-
-	::operator delete(pClient->m_pClientData);
-
-	delete (CClientDtorView*)pClient;
-}
-
+// The server returns its pooled records before the client releases its owned state.
+void sub_100273e9(CServerMgr*, Client* client) { delete client; }
 
 // 0x10013585 (sub_10013585, the facing as one byte) is servermsg.cpp's.
 
@@ -12049,29 +7891,7 @@ void la_WriteChange(CServerMgr* pMgr, LightAnim* pAnim, uint32 hLightAnim,
 // maximum less the write cursor, less seven, floored at zero. servermsg.h
 // does not carry it and is not this reconstruction's to change, so the
 // message is cast to reach it (name ours).
-class CMsgSpaceView
-{
-public:
-	// IN-CLASS, and that is load-bearing. Both images are /Ob1, so only an
-	// in-class (or `inline`-marked) body is an expansion candidate at all.
-	// server.dll's /Os declines it and CALLS 0x1000e845; lithtech.exe's /Ot
-	// accepts it, and the expansion lets the optimiser FOLD the floor into
-	// the caller's comparison -- at 0x00463055 the `js` jumps straight into
-	// the guarded block, because a negative left-count is certainly <= 0x16.
-	// That fold is the whole 286-vs-261 difference between the two images.
-	int GetSpaceLeft()
-	{
-		ServerMessage* pMsg = (ServerMessage*)this;
-		int            nLeft;
 
-		nLeft = pMsg->m_MaxDataLen - pMsg->m_Unknown38 - 7;
-
-		if (nLeft < 0)
-			nLeft = 0;
-
-		return nLeft;
-	}
-};
 
 
 // 0x10026755 — flush a client's queued light-animation changes. One packet is
@@ -12127,16 +7947,17 @@ public:
 void sm_Unknown26755(CServerMgr* pMgr, Client* pClient)
 {
 	CMessageRef msg;
-	CLAClient*   pLAClient = (CLAClient*)pClient;
+	Client* pLAClient = pClient;
 	CAbstractIO* pIO;
 
 	msg.Init(msg_AllocPacket(&pIO, 0x1000, 0x1000));
 	if (pIO)
 		pIO->Release();
+    if (!msg.m_pMsg) return;
 
-	for (uint32 i = 0; i < pLAClient->m_nChanges; i++)
+	for (uint32 i = 0; i < std::min<uint32>(pLAClient->m_nLightChanges,MAX_CLIENTLACHANGES); i++)
 	{
-		CLAChange* pChange = &pLAClient->m_Changes[i];
+		ClientLightChange* pChange = &pLAClient->m_LightChanges[i];
 
 		if (pChange->m_hLightAnim < pMgr->m_nLightAnims)
 		{
@@ -12144,7 +7965,7 @@ void sm_Unknown26755(CServerMgr* pMgr, Client* pClient)
 			               pChange->m_hLightAnim, msg.m_pMsg,
 			               pChange->m_ChangeFlags);
 
-			if (((CMsgSpaceView*)msg.m_pMsg)->GetSpaceLeft() <= 0x16)
+			if ((static_cast<ServerMessage*>(msg.m_pMsg))->GetSpaceLeft() <= 0x16)
 			{
 				sm_SendToClient(pMgr, pClient, 0x19, msg.m_pMsg, 0, 0x80);
 
@@ -12170,5 +7991,5 @@ void sm_Unknown26755(CServerMgr* pMgr, Client* pClient)
 		}
 	}
 
-	pLAClient->m_nChanges = 0;
+	pLAClient->m_nLightChanges = 0;
 }

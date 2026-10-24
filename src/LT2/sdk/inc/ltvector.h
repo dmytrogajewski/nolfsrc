@@ -94,6 +94,7 @@
 
 			_CVector<T> operator		^ ( const _CVector<T> v ) const { return Cross(v); }
 			T   &operator		[] ( uint32 i ) { return ((T*)this)[i]; }
+			const T &operator [] (uint32 i) const { return ((const T*)this)[i]; }
 
 			// Member Variables
 			T	x;

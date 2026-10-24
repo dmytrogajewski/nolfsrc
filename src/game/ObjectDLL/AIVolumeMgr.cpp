@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIVolumeMgr.h"
 #include "AIPath.h"
 #include "FastHeap.h"
@@ -22,8 +25,8 @@ CAIVolumeMgr::CAIVolumeMgr()
 
 CAIVolumeMgr::~CAIVolumeMgr()
 {
-	g_pAIVolumeMgr = LTNULL;
 	Term();
+	if (g_pAIVolumeMgr == this) g_pAIVolumeMgr = LTNULL;
 }
 
 void CAIVolumeMgr::Term()
@@ -124,7 +127,7 @@ void CAIVolumeMgr::Init()
 */
 					if ( cNeighbors >= c_nMaxNeighbors )
 					{
-						_ASSERT(!"Max number of neighboring volumes exceeded!!!!");
+						GAME_ASSERT(!"Max number of neighboring volumes exceeded!!!!");
                         g_pLTServer->CPrint("Max number of neighboring volumes exceeded!!!!");
 						break;
 					}
@@ -158,7 +161,7 @@ CAIVolume* CAIVolumeMgr::GetVolumeByName(const char* szVolume)
 
 	for ( int32 iVolume = 0 ; iVolume < m_cVolumes ; iVolume++ )
 	{
-		if ( !_stricmp(szVolume, m_aVolumes[iVolume].GetName()) )
+		if ( !nolf::ascii_compare(szVolume, m_aVolumes[iVolume].GetName()) )
 		{
 			return &m_aVolumes[iVolume];
 		}
@@ -352,7 +355,7 @@ LTBOOL CAIVolumeMgr::FindDangerScatterPosition(CAIVolume* pVolume, const LTVecto
 	{
 		// Find opposite corner
 
-		_ASSERT(iCornerBest >= 0 && iCornerBest <= 3);
+		GAME_ASSERT(iCornerBest >= 0 && iCornerBest <= 3);
 
 		uint32 iCornerOpposite;
 

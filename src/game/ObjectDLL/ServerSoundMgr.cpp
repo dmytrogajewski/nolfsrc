@@ -10,7 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "ServerSoundMgr.h"
 #include "CommonUtilities.h"
 
@@ -143,7 +145,7 @@ HLTSOUND CServerSoundMgr::PlaySound(PlaySoundInfo & psi)
 	}
 	else
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		m_pInterface->CPrint("ERROR in CServerSoundMgr::PlaySound() - Couldn't play sound '%s'", psi.m_szSoundName);
 		return LTNULL;
 	}

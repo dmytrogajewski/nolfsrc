@@ -5,9 +5,7 @@
 #if !defined(AFX_FOLDERNEW_H__B9A9F281_225A_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_FOLDERNEW_H__B9A9F281_225A_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
 #pragma once
-#endif // _MSC_VER > 1000
 
 #include "BaseSelectionFolder.h"
 

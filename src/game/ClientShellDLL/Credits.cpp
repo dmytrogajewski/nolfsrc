@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 /****************************************************************************
 ;
 ;	 MODULE:		Credits (.CPP)
@@ -14,11 +18,14 @@
 
 // Includes...
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "GameClientShell.h"
 #include "Credits.h"
 #include <stdio.h>
 #include "ClientRes.h"
+#include "engine/client/client_resources.h"
+#include "engine/portable/resources.h"
+#include <string>
 
 // Macros...
 
@@ -40,13 +47,9 @@ namespace
 	LTIntPt		s_PositionUR;
 	LTIntPt		s_PositionLL;
 	LTIntPt		s_PositionLR;
-	HMODULE s_hModule = NULL;
-	HRSRC   s_hRes    = NULL;
-	HGLOBAL	s_hGlobal = NULL;
-	char*	s_sBuf    = LTNULL;
 }
 
-static char* GetTextBuffer(char* sName);
+static std::string GetTextBuffer(const char* sName);
 
 // Functions...
 
@@ -77,33 +80,17 @@ LTBOOL CCredit::Init(char* sBuf)
 
 	// Parse the text buffer and add each line as a separate string...
 
-	char sString[256];
-	int  i = 0;
-
-	while (*sBuf)
-	{
-		if ((*sBuf == '\n') || (*sBuf == '\r') || (*sBuf == '\0'))
-		{
-			sString[i] = '\0';
-			AddString(sString); 
-			i = 0;
-
-			while (((*sBuf == '\n') || (*sBuf == '\r'))) 
-			{
-				sBuf = (char*)_mbsinc((const unsigned char*)sBuf);
-			};
-		}
-		else
-		{
-			int nCount = _mbsnbcnt((const unsigned char*)sBuf,1);
-			memcpy(&sString[i], sBuf, nCount);
-			i += nCount;
-			sBuf = (char*)_mbsinc((const unsigned char*)sBuf);
+	std::string line;
+	while (*sBuf) {
+		if (*sBuf == '\n' || *sBuf == '\r') {
+			AddString(line.data()); line.clear();
+			while (*sBuf == '\n' || *sBuf == '\r') ++sBuf;
+		} else {
+			const char* next=nolf::text::next(sBuf);
+			line.append(sBuf,static_cast<std::size_t>(next-sBuf)); sBuf=const_cast<char*>(next);
 		}
 	}
-
-	sString[i] = '\0';
-	if (strlen(sString) > 0) AddString(sString);
+	if (!line.empty()) AddString(line.data());
 
 	CreateSurface();	
 
@@ -154,39 +141,39 @@ LTBOOL CCredit::AddString(char* sString)
 
 	// Check if this is a special command string...
 
-	if (_mbsnbcmp((const unsigned char*)sString, (const unsigned char*)">TIME:", 6) == 0)
+	if (std::strncmp(sString, ">TIME:", 6) == 0)
 	{
-		if (_mbstrlen(sString) > 6)
+		if (nolf::text::length(sString) > 6)
 		{
 			m_fHoldTime = (float)atof(&sString[6]);
 			return(LTTRUE);
 		}
 	}
-	else if (_mbsnbcmp((const unsigned char*)sString, (const unsigned char*)">POS:UL", 7) == 0)
+	else if (std::strncmp(sString, ">POS:UL", 7) == 0)
 	{
 		m_Pos = s_PositionUL;
 		m_ePosition = CP_UL;
 		return(LTTRUE);
 	}
-	else if (_mbsnbcmp((const unsigned char*)sString, (const unsigned char*)">POS:UR", 7) == 0)
+	else if (std::strncmp(sString, ">POS:UR", 7) == 0)
 	{
 		m_Pos = s_PositionUR;
 		m_ePosition = CP_UR;
 		return(LTTRUE);
 	}
-	else if (_mbsnbcmp((const unsigned char*)sString, (const unsigned char*)">POS:LR", 7) == 0)
+	else if (std::strncmp(sString, ">POS:LR", 7) == 0)
 	{
 		m_Pos = s_PositionLR;
 		m_ePosition = CP_LR;
 		return(LTTRUE);
 	}
-	else if (_mbsnbcmp((const unsigned char*)sString, (const unsigned char*)">POS:LL", 7) == 0)
+	else if (std::strncmp(sString, ">POS:LL", 7) == 0)
 	{
 		m_Pos = s_PositionLL;
 		m_ePosition = CP_LL;
 		return(LTTRUE);
 	}
-	else if (_mbsnbcmp((const unsigned char*)sString, (const unsigned char*)">BIG", 4) == 0)
+	else if (std::strncmp(sString, ">BIG", 4) == 0)
 	{
 		m_bBig = LTTRUE;
 		return(LTTRUE);
@@ -887,43 +874,19 @@ void CCredits::AddCredits()
 		default: sName = "CREDITS";
 	}
 
-	char* sBuf = GetTextBuffer(sName);
-	if (!sBuf) return;
-
-
-	// Parse the credits text...
-
-	char sCredit[1024];
-	int  i = 0;
-
-	while (*sBuf)
-	{
-
-		if (*sBuf == '#' && *((char*)_mbsinc((const unsigned char*)sBuf)) == '#')
-		{
-			sCredit[i] = '\0';
-
-			if (_mbsnbcmp((const unsigned char*)sCredit, (const unsigned char*)">END", 4) == 0)	// end?
-			{
-				return;
-			}
-
-			AddCredit(sCredit);
-			i = 0;
-
-			sBuf = (char*)_mbsinc((const unsigned char*)sBuf);
-			sBuf = (char*)_mbsinc((const unsigned char*)sBuf);
-
-			while (*sBuf != '\0' && ((*sBuf == '\n') || (*sBuf == '\r'))) sBuf++;
-		}
-		else
-		{
-			int nCount = _mbsnbcnt((const unsigned char*)sBuf,1);
-			memcpy(&sCredit[i], sBuf, nCount);
-			i += nCount;
-			sBuf = (char*)_mbsinc((const unsigned char*)sBuf);
-		}
+	std::string text = GetTextBuffer(sName);
+	std::size_t start=0;
+	while (start < text.size()) {
+		const auto delimiter=text.find("##",start);
+		const auto end=delimiter == std::string::npos ? text.size() : delimiter;
+		std::string credit=text.substr(start,end-start);
+		if (credit.compare(0,4,">END") == 0) return;
+		if (!credit.empty()) AddCredit(credit.data());
+		if (delimiter == std::string::npos) break;
+		start=delimiter+2;
+		while (start < text.size() && (text[start]=='\n' || text[start]=='\r')) ++start;
 	}
+
 }
 
 void CCredits::AddCredit(char* sText)
@@ -952,28 +915,17 @@ void CCredits::AddCredit(char* sText)
 
 // Functions...
 
-char* GetTextBuffer(char* sName)
+static std::string GetTextBuffer(const char* name)
 {
-	//if (s_sBuf)
-	//{
-		//return(s_sBuf);
-	//}
-	//else
-	{
-		void* hModule;
-		g_pLTClient->GetEngineHook("cres_hinstance",&hModule);
-		s_hModule = (HINSTANCE)hModule;
-		if (!s_hModule)	return(NULL);
-
-		s_hRes = FindResource(s_hModule, sName, "TEXT");
-		if (!s_hRes) return(NULL);
-
-		s_hGlobal = LoadResource(s_hModule, s_hRes);
-		if (!s_hGlobal) return(NULL);
-
-		s_sBuf = (char*)LockResource(s_hGlobal);
-		if (!s_sBuf) return(NULL);
-		
-		return(s_sBuf);
-	}
+    try {
+        const auto bytes=nolf::client_resources(*g_pLTClient).raw("cres","TEXT",name);
+        if (bytes.size() > 256*1024) throw std::runtime_error("credits resource is too large");
+        std::string text(reinterpret_cast<const char*>(bytes.data()),bytes.size());
+        const auto nul=text.find('\0');
+        if (nul != std::string::npos) text.resize(nul);
+        return text;
+    } catch (const std::exception& error) {
+        g_pLTClient->CPrint("Cannot load credits %s: %s",name,error.what());
+        return {};
+    }
 }

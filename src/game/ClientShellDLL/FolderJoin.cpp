@@ -1,7 +1,9 @@
 // FolderJoin.cpp: implementation of the CFolderJoin class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "platform/system.h"
+#include "engine/portable/string.h"
 #include "FolderJoin.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -665,7 +667,7 @@ void CFolderJoin::UpdateDummyStatus(HSURFACE hDestSurf)
 
 	// Check for ending...
 
-	if (GetTickCount() >= m_timeDummyEnd)
+	if ((nolf::platform::monotonic_nanoseconds()/1000000) >= m_timeDummyEnd)
 	{
 		SetState(m_nNextDummyState);
 		return;
@@ -871,7 +873,7 @@ void CFolderJoin::SetState(int nNewState)
 
 	// Set the new state value...
 
-	m_timeStateStart = GetTickCount();
+	m_timeStateStart = (nolf::platform::monotonic_nanoseconds()/1000000);
 	m_nState         = nNewState;
 }
 
@@ -901,7 +903,7 @@ void CFolderJoin::SetDummyStatusState(HSTRING hStr, uint32 dwWaitTime, int nNext
 {
 	// Set dummy status values...
 
-	m_timeDummyEnd    = GetTickCount() + dwWaitTime;
+	m_timeDummyEnd    = (nolf::platform::monotonic_nanoseconds()/1000000) + dwWaitTime;
 	m_nNextDummyState = nNextState;
 
 	if (m_hDummyStatus)
@@ -952,7 +954,7 @@ void CFolderJoin::JoinCurGame(LTBOOL bPasswordSet)
 	char sVer[16];
 	sprintf(sVer,"%d.%.3d",GAME_HANDSHAKE_VER_MAJOR,(GAME_HANDSHAKE_VER_MINOR-1));
 	char* sGameVer = pGame->GetStringValue("gamever");
-	if (sGameVer && stricmp(sVer,sGameVer)!=0)
+	if (sGameVer && nolf::ascii_compare(sVer,sGameVer)!=0)
 	{
         HSTRING hString = g_pLTClient->FormatString(IDS_SERVER_WRONGVERSION);
 		g_pInterfaceMgr->ShowMessageBox(hString,LTMB_OK,LTNULL,LTNULL,g_pInterfaceResMgr->IsEnglish());
@@ -984,7 +986,7 @@ void CFolderJoin::JoinCurGame(LTBOOL bPasswordSet)
 	{
 		if (bPasswordSet)
 		{
-			if (stricmp(m_szPassword, sPassword) != 0)
+			if (nolf::ascii_compare(m_szPassword, sPassword) != 0)
 			{
                 HSTRING hString = g_pLTClient->FormatString(IDS_ACCESSDENIED);
 			    g_pInterfaceMgr->ShowMessageBox(hString,LTMB_OK,LTNULL,LTNULL);
@@ -1054,7 +1056,7 @@ LTBOOL CFolderJoin::DoJoinGame(CGameSpyServer* pGame)
 	// Try to join a game...
 
 	int nType = DEATHMATCH;
-	if (stricmp(pGame->GetGameType(), "H.A.R.M. vs. UNITY") == 0) nType = COOPERATIVE_ASSAULT;
+	if (nolf::ascii_compare(pGame->GetGameType(), "H.A.R.M. vs. UNITY") == 0) nType = COOPERATIVE_ASSAULT;
 
 
 	g_pGameClientShell->SetGameType((GameType)nType);
@@ -1103,7 +1105,7 @@ LTBOOL CFolderJoin::DoJoinGame(CGameSpyServer* pGame)
 		}
 
 		// Wait a sec and try again.
-		Sleep(1000);
+		nolf::platform::sleep_for(std::chrono::seconds(1));
 		nRetries--;
 	}
 
@@ -1122,7 +1124,7 @@ uint32 CFolderJoin::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwParam2
             void* pGame = LTNULL;
 			if (nIndex != CListCtrl::kNoSelection)
 			{
-				pGame = (void*)m_pServerList->GetControl(nIndex)->GetParam1();
+				pGame = m_pServerList->GetControl(nIndex)->GetUserData();
 			}
 
 			if (pGame != GetCurGameServerHandle())
@@ -1384,7 +1386,7 @@ int CFolderJoin::AddServerCtrl(CGameSpyServer* pGame)
 	CLTGUIFont *pFont = GetSmallFont();
     CGroupCtrl *pGroup = CreateGroup(nServerGroupWidth,pFont->GetHeight(),LTNULL);
     LTIntPt pos(0,0);
-    pGroup->SetParam1((uint32)pGame->GetHandle());
+    pGroup->SetUserData(pGame->GetHandle());
 
 	char sTemp[128] = "";
 #ifdef NOLFSRC_MODERN
@@ -1428,7 +1430,7 @@ int CFolderJoin::AddPlayerCtrl(CGameSpyPlayer* pPlr)
 	CLTGUIFont *pFont = GetSmallFont();
     CGroupCtrl *pGroup = CreateGroup(nPlayerGroupWidth,pFont->GetHeight(),LTNULL);
     LTIntPt pos(0,0);
-    pGroup->SetParam1((uint32)pPlr);
+    pGroup->SetUserData(pPlr);
 
 	char sTemp[128] = "";
 #ifdef NOLFSRC_MODERN
@@ -1573,11 +1575,11 @@ void CFolderJoin::UpdateLists(LTBOOL bForce)
 
 	// Make sure we don't do a full update too often...
 
-	static uint32 timeLastFullUpdate = 0;
+	static uint64 timeLastFullUpdate = 0;
 
 	if (!bForce && bNewServer)
 	{
-		if ((GetTickCount() - timeLastFullUpdate) < 1000)
+		if (((nolf::platform::monotonic_nanoseconds()/1000000) - timeLastFullUpdate) < 1000)
 		{
 			bDelayNewServer = LTTRUE;
 		}
@@ -1593,7 +1595,7 @@ void CFolderJoin::UpdateLists(LTBOOL bForce)
 
 	if (bForce)
 	{
-		timeLastFullUpdate = GetTickCount();
+		timeLastFullUpdate = (nolf::platform::monotonic_nanoseconds()/1000000);
 		bDelayNewServer    = LTFALSE;
 	}
 
@@ -1664,7 +1666,7 @@ void CFolderJoin::UpdateServers(LTBOOL bForce)
 		if (m_nVersionFilter)
 		{
 			char* sGameVer = pGame->GetStringValue("gamever");
-			if (sGameVer && stricmp(sVer,sGameVer)!=0)
+			if (sGameVer && nolf::ascii_compare(sVer,sGameVer)!=0)
 				bPass = LTFALSE;
 		}
 
@@ -1673,8 +1675,8 @@ void CFolderJoin::UpdateServers(LTBOOL bForce)
 			char* sType = pGame->GetGameType();
 			int   nType = -1;
 
-			if (stricmp(sType, "deathmatch") == 0) nType = DEATHMATCH;
-			if (stricmp(sType, "H.A.R.M. vs. UNITY") == 0) nType = COOPERATIVE_ASSAULT;
+			if (nolf::ascii_compare(sType, "deathmatch") == 0) nType = DEATHMATCH;
+			if (nolf::ascii_compare(sType, "H.A.R.M. vs. UNITY") == 0) nType = COOPERATIVE_ASSAULT;
             if (nType != nGameFilter) bPass = LTFALSE;
 		}
 
@@ -1730,7 +1732,7 @@ void CFolderJoin::UpdateServers(LTBOOL bForce)
 		if (nStart >= 0)
 			m_pServerList->SetStartIndex(nStart);
 
-		void* pHandle = (void*)m_pServerList->GetControl(nNewSel)->GetParam1();
+		void* pHandle = m_pServerList->GetControl(nNewSel)->GetUserData();
 		SetCurGameServerHandle(pHandle);
 	}
 	else
@@ -1858,11 +1860,11 @@ void CFolderJoin::UpdateOptions(LTBOOL bForce)
 	if (!pGame->IsInitialized()) return;
 
 	GameType eGameType = SINGLE;
-	if (stricmp(pGame->GetGameType(), "H.A.R.M. vs. UNITY") == 0)
+	if (nolf::ascii_compare(pGame->GetGameType(), "H.A.R.M. vs. UNITY") == 0)
 	{
 		eGameType = COOPERATIVE_ASSAULT;
 	}
-	else if (stricmp(pGame->GetGameType(), "Deathmatch") == 0)
+	else if (nolf::ascii_compare(pGame->GetGameType(), "Deathmatch") == 0)
 	{
 		eGameType = DEATHMATCH;
 	}
@@ -1876,7 +1878,7 @@ void CFolderJoin::UpdateOptions(LTBOOL bForce)
 		sprintf(sVer,"%d.%.3d",GAME_HANDSHAKE_VER_MAJOR,(GAME_HANDSHAKE_VER_MINOR-1));
     	HSTRING hDemoBuildVersion = g_pLTClient->FormatString(IDS_DEMOVERSION);
 
-		if ((stricmp(sVer,sGameVer) == 0) && hDemoBuildVersion)
+		if ((nolf::ascii_compare(sVer,sGameVer) == 0) && hDemoBuildVersion)
 		{
 			AddOptionCtrl(IDS_VERSION_FILTER, g_pLTClient->GetStringData(hDemoBuildVersion));
 		}
@@ -1951,7 +1953,7 @@ void CFolderJoin::UpdateOptions(LTBOOL bForce)
 			break;
 		case SO_SPECIAL:
 			{
-				if (stricmp(pOpt->szVariable,"NetDefaultWeapon") == 0)
+				if (nolf::ascii_compare(pOpt->szVariable,"NetDefaultWeapon") == 0)
 				{
 					nVal = pGame->GetIntValue(pOpt->szVariable);
 					if (nVal)

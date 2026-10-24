@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIShark.h"
 #include "CharacterHitBox.h"
 #include "AIVolumeMgr.h"
@@ -137,7 +140,7 @@ AI_Shark::AI_Shark() : CAIAnimal()
 
 	if ( !m_SteeringMgr.Init(this) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
         g_pLTServer->CPrint("could not initialize Shark's steeringmgr");
 	}
 
@@ -196,7 +199,7 @@ void AI_Shark::HandleModelString(ArgList* pArgList)
 	char* pKey = pArgList->argv[0];
 	if (!pKey) return;
 
-	if (stricmp(pKey, c_szKeyBite) == 0)
+	if (nolf::ascii_compare(pKey, c_szKeyBite) == 0)
 	{
         LTFLOAT fBiteDistance = 200.0f;  // TODO: Bute
         LTFLOAT fBiteDamage = 10.0f;     // TODO: Bute
@@ -344,7 +347,7 @@ LTBOOL AI_Shark::HandleCommand(char** pTokens, int nArgs)
 
 	for ( int iState = 0 ; iState < s_cStateMaps ; iState++ )
 	{
-		if ( !_stricmp(pTokens[0], s_aStateMaps[iState].szState) )
+		if ( !nolf::ascii_compare(pTokens[0], s_aStateMaps[iState].szState) )
 		{
 			// Change states
 
@@ -355,9 +358,9 @@ LTBOOL AI_Shark::HandleCommand(char** pTokens, int nArgs)
 		}
 	}
 
-	if ( !_stricmp(pTokens[0], "TURNRADIUS") )
+	if ( !nolf::ascii_compare(pTokens[0], "TURNRADIUS") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -370,9 +373,9 @@ LTBOOL AI_Shark::HandleCommand(char** pTokens, int nArgs)
             g_pLTServer->CPrint("TURNRADIUS missing argument");
 		}
 	}
-	else if ( !_stricmp(pTokens[0], "MASS") )
+	else if ( !nolf::ascii_compare(pTokens[0], "MASS") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -385,9 +388,9 @@ LTBOOL AI_Shark::HandleCommand(char** pTokens, int nArgs)
             g_pLTServer->CPrint("MASS missing argument");
 		}
 	}
-	else if ( !_stricmp(pTokens[0], "BRAKE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "BRAKE") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -400,9 +403,9 @@ LTBOOL AI_Shark::HandleCommand(char** pTokens, int nArgs)
             g_pLTServer->CPrint("BRAKE missing argument");
 		}
 	}
-	else if ( !_stricmp(pTokens[0], "MAXFORCE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "MAXFORCE") )
 	{
-		_ASSERT(pTokens[1]);
+		GAME_ASSERT(pTokens[1]);
 
 		if ( pTokens[1] && *pTokens[1] )
 		{
@@ -456,7 +459,7 @@ void AI_Shark::SetState(CAISharkState::AISharkStateType eState)
 
 	if ( !m_pSharkState )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -464,7 +467,7 @@ void AI_Shark::SetState(CAISharkState::AISharkStateType eState)
 
 	if ( !m_pSharkState->Init(this) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		FACTORY_DELETE(m_pSharkState);
         m_pSharkState = LTNULL;
 	}
@@ -484,7 +487,7 @@ void AI_Shark::UpdateMovement()
 
 	if ( !m_SteeringMgr.Update() )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 	}
 
 	if ( -1 != m_iLastVolume )
@@ -501,7 +504,8 @@ void AI_Shark::UpdateMovement()
 
 			if ( (vPos.y + m_vDims.y) > vTop.y )
 			{
-				g_pLTServer->TeleportObject(m_hObject, &LTVector(vPos.x, vTop.y - m_vDims.y, vPos.z));
+				LTVector position(vPos.x, vTop.y - m_vDims.y, vPos.z);
+				g_pLTServer->TeleportObject(m_hObject, &position);
 			}
 
 		}

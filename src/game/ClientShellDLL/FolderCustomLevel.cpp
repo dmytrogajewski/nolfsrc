@@ -1,7 +1,8 @@
 // FolderCustomLevel.cpp: implementation of the CFolderCustomLevel class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "FolderCustomLevel.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -132,7 +133,8 @@ LTBOOL CFolderCustomLevel::Build()
 		{
 			char* pTemp = m_pFilenames[j];
 
-			for (int k = j; k >= i && stricmp (pTemp, m_pFilenames[k - i]) < 0; k -= i)
+			int k = j;
+			for (; k >= i && nolf::ascii_compare (pTemp, m_pFilenames[k - i]) < 0; k -= i)
 			{
 				m_pFilenames[k] = m_pFilenames[k - i];
 			}
@@ -143,7 +145,7 @@ LTBOOL CFolderCustomLevel::Build()
 
 	CLTGUITextItemCtrl* pItem;
 
-	for (i = 0; i < m_nFiles; ++i)
+	for (int i = 0; i < m_nFiles; ++i)
 	{
 		pItem = AddTextItem(m_pFilenames[i], FOLDER_CMD_CUSTOM+i, IDS_HELP_CUSTOMLEVEL, LTFALSE, GetSmallFont());
 	}
@@ -199,7 +201,7 @@ int CFolderCustomLevel::CountDatFiles(FileEntry* pFiles)
 	{
 		if (ptr->m_Type == TYPE_FILE)
 		{
-			if (strnicmp (&ptr->m_pBaseFilename[strlen(ptr->m_pBaseFilename) - 4], ".dat", 4) == 0) nNum++;
+			if (nolf::ascii_compare_n (&ptr->m_pBaseFilename[strlen(ptr->m_pBaseFilename) - 4], ".dat", 4) == 0) nNum++;
 		}
 		ptr = ptr->m_pNext;
 	}
@@ -223,7 +225,7 @@ void CFolderCustomLevel::AddFilesToFilenames(FileEntry* pFiles, char* pPath, int
 			SAFE_STRCPY(strBaseName, ptr->m_pBaseFilename);
 			pBaseName = strtok (strBaseName, ".");
 			pBaseExt = strtok (NULL, "\0");
-			if (pBaseExt && stricmp (pBaseExt, "dat") == 0)
+			if (pBaseExt && nolf::ascii_compare (pBaseExt, "dat") == 0)
 			{
 				char szString[512];
 				sprintf(szString, "%s%s", pPath, pBaseName);

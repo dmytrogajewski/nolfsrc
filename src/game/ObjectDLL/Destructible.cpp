@@ -10,11 +10,13 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
 #include <stdio.h>
 #include "Destructible.h"
 #include "iltserver.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "Projectile.h"
 #include "ServerUtilities.h"
 #include "Character.h"
@@ -1640,11 +1642,13 @@ void CDestructible::HandleTrigger(LPBASECLASS pObject, HOBJECT hSender, HMESSAGE
 {
 	if (m_bDead) return;
 
-	const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+	const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+
+	const char* szMsg = szMsgStorage.c_str();
 
 	// See if we should destroy ourself...
 
-    if (_stricmp(TRIGGER_MSG_DESTROY, szMsg) == 0)
+    if (nolf::ascii_compare(TRIGGER_MSG_DESTROY, szMsg) == 0)
 	{
 		DamageStruct damage;
 
@@ -1656,7 +1660,7 @@ void CDestructible::HandleTrigger(LPBASECLASS pObject, HOBJECT hSender, HMESSAGE
 
 	// See if we should reset ourself...
 
-    if (_stricmp(TRIGGER_MSG_RESET, szMsg) == 0)
+    if (nolf::ascii_compare(TRIGGER_MSG_RESET, szMsg) == 0)
 	{
 		Reset(GetMaxHitPoints(), GetMaxArmorPoints());
 	}

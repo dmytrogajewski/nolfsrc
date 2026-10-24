@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : p1_config.cpp
@@ -18,7 +22,10 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include <algorithm>
+#include <cmath>
+#include "engine/portable/string.h"
 #include "VarTrack.h"
 #include "ClientUtilities.h"
 #include "cshell/p1_modern.h"
@@ -65,10 +72,10 @@ namespace
 
 				// ';' cannot appear in a console string: name it by code
 				if (pBinding->strTriggerName[0] == ';')
-					_snprintf(szCmd, sizeof(szCmd), "rangebind \"%s\" \"##39\" 0 0 \"\"",
+					std::snprintf(szCmd, sizeof(szCmd), "rangebind \"%s\" \"##39\" 0 0 \"\"",
 						pBinding->strDeviceName);
 				else
-					_snprintf(szCmd, sizeof(szCmd), "rangebind \"%s\" \"%s\" 0 0 \"\"",
+					std::snprintf(szCmd, sizeof(szCmd), "rangebind \"%s\" \"%s\" 0 0 \"\"",
 						pBinding->strDeviceName, pBinding->strTriggerName);
 				szCmd[sizeof(szCmd) - 1] = '\0';
 
@@ -132,7 +139,7 @@ void P1Config_AfterInit()
 		// naming d3d.ren): say so in the config.
 		HCONSOLEVAR hDll = g_pLTClient->GetConsoleVar("RenderDll");
 		const char* sDll = hDll ? g_pLTClient->GetVarValueString(hDll) : LTNULL;
-		if (sDll && !_stricmp(sDll, "d3d.ren"))
+		if (sDll && !nolf::ascii_compare(sDll, "d3d.ren"))
 			g_pLTClient->RunConsoleString("RenderDll d3d9.ren");
 	}
 
@@ -176,7 +183,8 @@ void P1Config_AfterInit()
 
 int P1Config_FramerateLimit()
 {
-	int nLimit = s_vtFramerateLimit.IsInitted() ? (int)s_vtFramerateLimit.GetFloat() : 240;
+	const float configured=s_vtFramerateLimit.IsInitted() ? s_vtFramerateLimit.GetFloat() : 240.0f;
+    int nLimit=std::isfinite(configured) ? static_cast<int>(std::clamp(configured,0.0f,1000.0f)) : 240;
 	return nLimit < 0 ? 0 : nLimit;
 }
 bool P1Config_OldMouseLook()	{ return ReadFlag(s_vtOldMouseLook, false); }
@@ -186,7 +194,7 @@ bool P1Config_NoRawInput()		{ return ReadFlag(s_vtNoRawInput, false); }
 // light scaling and tints themselves.  So it applies with d3d7.ren alone.
 bool P1Config_IntelFixRenderer(const char* pRenderDll)
 {
-	return pRenderDll && (!_stricmp(pRenderDll, "d3d7.ren") || !_stricmp(pRenderDll, "d3d.ren"));
+	return pRenderDll && (!nolf::ascii_compare(pRenderDll, "d3d7.ren") || !nolf::ascii_compare(pRenderDll, "d3d.ren"));
 }
 
 bool P1Config_IntelFixOn()

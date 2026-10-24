@@ -1,7 +1,7 @@
 // FolderMulti.cpp: implementation of the CFolderMulti class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMulti.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"

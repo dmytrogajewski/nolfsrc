@@ -5,12 +5,9 @@
 #ifndef _LIST_CTRL_
 #define _LIST_CTRL_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
-#include "LTGUIMgr.h"
-#include "stdlith.h"
+#include "ltguimgr.h"
+#include "dynarray.h"
 #include "BitmapCtrl.h"
 
 class CListCtrl : public CLTGUICtrl

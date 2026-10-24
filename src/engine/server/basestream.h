@@ -27,9 +27,9 @@ class CBaseStream : public ILTStream
 public:
 	// Length-prefixed: a word of length, then the bytes, and nothing else —
 	// no terminator goes on the wire.
-	LTRESULT ReadString(char* pStr, unsigned long maxBytes);  // 0x10011314
-	LTRESULT WriteStream(ILTStream& dsSource, unsigned long dwMin,
-	                     unsigned long dwMax);                // 0x10011402
+	LTRESULT ReadString(char* pStr, uint32 maxBytes);  // 0x10011314
+	LTRESULT WriteStream(ILTStream& dsSource, uint32 dwMin,
+	                     uint32 dwMax);                // 0x10011402
 	LTRESULT WriteString(char* pStr);                         // 0x100113ce
 };
 

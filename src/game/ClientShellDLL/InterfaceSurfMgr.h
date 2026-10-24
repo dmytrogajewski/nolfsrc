@@ -5,11 +5,8 @@
 #if !defined(AFX_INTERFACESURFMGR_H__8B896D01_6918_11D2_BDAE_0060971BDC6D__INCLUDED_)
 #define AFX_INTERFACESURFMGR_H__8B896D01_6918_11D2_BDAE_0060971BDC6D__INCLUDED_
 
-#if _MSC_VER >= 1000
-#pragma once
-#endif // _MSC_VER >= 1000
 
-#include "stdlith.h"
+#include "dynarray.h"
 class CSharedSurface
 {
 public:

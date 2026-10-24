@@ -15,24 +15,15 @@
 #define __WORLDSIM_H__
 
 #include "ltbasedefs.h"
+#include "world_line_query.h"
 #include "ltobject_internal.h"
-#include "servermgr.h"
+#include "counter.h"
+#include "world_move.h"
 #include "de_error.h"
 
 // One node of a world's BSP tree. The plane is two indirections away, the
 // same walk WorldPoly::GetPlane makes; the flag byte at 0x16 marks a node
 // with nothing below it, and both of its low bits do.
-class BSPNode
-{
-public:
-	WorldPolyOwner* m_pOwner;                // 0x00
-	BSPNode*        m_pChild[2];             // 0x04  [0] behind, [1] in front
-	uint8           m_pad_0c[0x16 - 0x0c];
-	uint8           m_Flags;                 // 0x16
-
-	LTPlane* GetPlane() { return m_pOwner->m_pParent->m_pPlane; }
-};
-
 #define BSPNODE_LEAF 0x03
 
 // The two leaf bits on their own. bsp_PointInside tests them one at a time
@@ -61,7 +52,7 @@ public:
 // recursion, which is what lets the walk run to any depth without touching
 // the machine stack; a pointer equal to the base means nothing is left to
 // come back to (name ours).
-extern BSPNode* g_NodeStack[];
+
 
 
 // 0x100032be — is any of the tree's geometry within the sphere? (name ours)
@@ -71,10 +62,10 @@ int bspq_TestSphere(BSPNode* pNode, CSphereQuery* pQuery);
 // global rather than a parameter, like everything else the module works on.
 // The other two are the box at each end of a move, and the radius they all
 // share is the box's own, worked out once by the caller (names ours).
-extern CSphereQuery g_BoxSphere;
-extern CSphereQuery g_SphereAtOffset;
-extern CSphereQuery g_SphereAtDelta;
-extern float        g_fBoxRadius;
+extern thread_local CSphereQuery g_BoxSphere;
+extern thread_local CSphereQuery g_SphereAtOffset;
+extern thread_local CSphereQuery g_SphereAtDelta;
+extern thread_local float        g_fBoxRadius;
 
 // Below this, a move has not really moved and there is nothing to redo.
 #define WS_MOVE_EPSILON 0.0001
@@ -87,6 +78,7 @@ int bsp_SphereInside(BSPNode* pRoot, LTVector* pPoint, float fRadius);
 // 0x10002fff — does this box touch the world? One of the three ways into the
 // module from outside it (name ours).
 int ws_GetBoxStatus(BSPNode* pRoot, LTVector* pMin, LTVector* pMax);
+int ws_BoxTouchesSolidSurface(BSPNode* root, LTVector minimum, LTVector maximum);
 
 // How far a resting object is pushed back off the surface it hit, and how
 // much of the impulse becomes momentum. Both are in the shipped constants
@@ -153,71 +145,11 @@ extern WSProjectFn g_BoxProjectFns[7];
 
 // The move the module is working on, as the caller described it. Only the
 // fields the physics touches are named here (name ours).
-// Whatever owns the simulation. The physics reaches through it for the
-// collision record it fills in and for the callback that tells the game two
-// objects hit each other (names ours).
-class CSimOwner
-{
-public:
-	CollisionInfo* m_pInfo;                  // 0x00
-};
-
-class IPhysicsSim
-{
-public:
-	virtual void       _p00()=0;
-	virtual CSimOwner* GetOwner()=0;         // 0x04
-	virtual void       OnBounce(LTObject* pObj, LTObject* pOther,
-	                            LTVector* pImpulse, float fMag)=0;  // 0x08
-};
-
-// 0x100052d0 — two objects have run into each other: work out what each takes
-// away from it, tell whichever of them asked to be told, and apply it. The
-// third and last way into the module from outside (name ours).
-void ws_ObjectsCollided(IPhysicsSim* pSim, LTObject* pObj1, LTObject* pObj2,
-                        LTVector* pNormal, float fDist);
-
-// The physics module's host. The only thing it is ever asked for is an
-// object's name, and only to complain about one (name ours).
-class IPhysicsHost
-{
-public:
-	virtual void _p00()=0; virtual void _p04()=0; virtual void _p08()=0;
-	virtual void _p0c()=0; virtual void _p10()=0; virtual void _p14()=0;
-	virtual void _p18()=0; virtual void _p1c()=0; virtual void _p20()=0;
-	virtual void _p24()=0; virtual void _p28()=0;
-
-	virtual char* GetObjectName(LTObject* pObj)=0;   // 0x2c
-
-	// 0x30 — whatever knows how high this object may step up. Only the one
-	// slot below is ever reached through it.
-	virtual class IStepper* GetStepper()=0;
-};
-
-class IStepper
-{
-public:
-	virtual void _p00()=0; virtual void _p04()=0; virtual void _p08()=0;
-	virtual void _p0c()=0; virtual void _p10()=0; virtual void _p14()=0;
-	virtual void _p18()=0; virtual void _p1c()=0; virtual void _p20()=0;
-	virtual void _p24()=0; virtual void _p28()=0; virtual void _p2c()=0;
-	virtual void _p30()=0; virtual void _p34()=0; virtual void _p38()=0;
-	virtual void _p3c()=0; virtual void _p40()=0;
-
-	// 0x44 — negative means "work it out from the object's own height".
-	virtual void GetStepHeight(float* pHeight)=0;
-};
+// Collision callbacks use the same native mover as the enclosing move.
+void ws_ObjectsCollided(IObjectMover*, LTObject*, LTObject*, LTVector*, float);
 
 // The world's physics block for the region a move starts in. All the module
 // wants from it is the index the sweeps look their geometry up by (name ours).
-class CPhysicsBlock
-{
-public:
-	class WSNode* m_pNodes;                  // 0x00
-	uint8  m_pad_04[0x06 - 0x04];
-	uint16 m_nIndex;                         // 0x06  the block's root node
-};
-
 // One node of a physics block's tree: the polygon on its plane, and the two
 // children either side of it. Everything is a sixteen-bit index into the
 // block, with two reserved values standing in for the two kinds of leaf
@@ -228,21 +160,14 @@ public:
 // Deep enough for any world the game ships.
 #define WS_NODE_STACK 1024
 
-class WSNode
-{
-public:
-	uint16 m_nPoly;                          // 0x00
-	uint16 m_nChild[2];                      // 0x02  [0] behind, [1] in front
-};
-
-extern CPhysicsBlock* g_pPBlock;
+extern thread_local CPhysicsBlock* g_pPBlock;
 
 class CMoveState
 {
 public:
-	IPhysicsHost*  m_pHost;                  // 0x00
+	IObjectMover*   m_pHost;                  // 0x00
 	CollisionInfo* m_pInfo;                  // 0x04  filled in for the caller
-	void*          m_pUnknown08;             // 0x08  copied out of the world
+	bool           m_pUnknown08;             // 0x08  copied out of the world
 	                                         //       model move state's +0x18
 	                                         //       (0x1001f9ac); nothing in
 	                                         //       this module reads it
@@ -305,16 +230,16 @@ public:
 	LTVector   m_vVelocityAdd;               // 0x20
 };
 
-extern int       g_nContacts;
-extern WSContact g_Contacts[WS_MAX_CONTACTS];
+extern thread_local int       g_nContacts;
+extern thread_local WSContact g_Contacts[WS_MAX_CONTACTS];
 
-extern LTVector   g_vMoveBase;
-extern LTVector   g_vMoveStart;
-extern LTVector   g_vMoveEnd;
-extern CMoveState*   g_pMoveState;
-extern CBounceState* g_pMoveResult;
+extern thread_local LTVector   g_vMoveBase;
+extern thread_local LTVector   g_vMoveStart;
+extern thread_local LTVector   g_vMoveEnd;
+extern thread_local CMoveState*   g_pMoveState;
+extern thread_local CBounceState* g_pMoveResult;
 
-extern uint32 g_nPhysContactTime;
+extern thread_local uint32 g_nPhysContactTime;
 
 // How upward a polygon's normal has to point before the box can be said to
 // be standing on it.
@@ -370,8 +295,8 @@ extern float g_BoxSigns[6];
 // The two physics statistics this module keeps that are not times: one is the
 // running total a CountAdder adds to and the other a plain count. Named by
 // their addresses because nothing here says what either measures.
-extern uint32 g_nPhysStatA4;
-extern uint32 g_nPhysStatA8;
+extern thread_local uint32 g_nPhysStatA4;
+extern thread_local uint32 g_nPhysStatA8;
 
 // How upward a surface has to face before stepping onto it is even
 // considered, and how upward before it counts as flat rather than a slope.
@@ -408,35 +333,22 @@ void ws_MovePoint(CMoveState* pMove, CBounceState* pState);        // 0x10003366
 // and zeroes all six fields in the order 0x00, 0x04, 0x08, 0x14, 0x0c, 0x10 —
 // not offset order, so the source wrote the result pointer's clear before the
 // two unknown dwords (names ours).
-class CLineQuery
-{
-public:
-	CLineQuery();                            // 0x1000f08d
-
-	LTVector*  m_pStart;                     // 0x00
-	LTVector*  m_pEnd;                       // 0x04
-	LTVector*  m_pHit;                       // 0x08
-	uint32     m_Unknown0c;                  // 0x0c
-	uint32     m_Unknown10;                  // 0x10
-	WorldPoly* m_pPoly;                      // 0x14  what the walk found
-};
-
 // 0x10013f28 — the walk itself, which takes the segment's two ends by value
 // as well as the query (its own 43 bytes copy them off the query and forward
 // them to 0x10013bf5). Nothing here needs more than its answer (name ours).
-int bspq_IntersectLine(class BSPNode* pRoot, CLineQuery* pQuery);
+int bspq_IntersectLine(BSPNode* pRoot, CLineQuery* pQuery);
 
 // 0x10013bf5 — the recursion under it. The two ends arrive by value because
 // the walk splits the segment as it descends and needs its own copy of each
 // half; the query object comes along beside them for the crossing point and
 // the result (name ours).
-int bspq_IntersectLineRec(class BSPNode* pNode, CLineQuery* pQuery,
+int bspq_IntersectLineRec(BSPNode* pNode, CLineQuery* pQuery,
                           LTVector vStart, LTVector vEnd);
 
 // 0x10013f53 — the world's line-versus-BSP query: the first polygon the
 // segment crosses, where it crossed it and the plane it crossed (name and
 // signature ours).
-WorldPoly* bsp_IntersectLine(class BSPNode* pRoot, LTVector* pStart,
+WorldPoly* bsp_IntersectLine(BSPNode* pRoot, LTVector* pStart,
                              LTVector* pEnd, LTVector* pHit,
                              LTPlane* pPlane);
 int  ws_HitPoly(WorldPoly* pPoly, CBounceState* pState,
@@ -536,8 +448,8 @@ public:
 // twice; for a box in motion each set holds all eight corners of the box at
 // one end of the move. Either way the union covers the volume, which is all
 // the consumers need (names ours).
-extern LTVector g_SweepPoints[2][8];
-extern LTPlane  g_BoxPlanes[6];
+extern thread_local LTVector g_SweepPoints[2][8];
+extern thread_local LTPlane  g_BoxPlanes[6];
 
 // 0x10003140 (name ours).
 void ws_SetupBoxGeometry(LTVector* pMin, LTVector* pMax);

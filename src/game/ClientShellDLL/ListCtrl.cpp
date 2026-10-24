@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "ListCtrl.h"
 #include "InterfaceMgr.h"
 #ifdef NOLFSRC_MODERN

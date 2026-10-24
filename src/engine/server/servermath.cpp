@@ -68,8 +68,7 @@ void CLTServerMath::AlignRotation(LTRotation* pRotation, LTVector* pVector, LTVe
 	if (!pRotation || !pVector)
 		RETURN_ERROR_VOID("ILTCSBase::AlignRotation");
 
-	ILTMath* pC = &m_common;
-	pC->AlignRotation(*pRotation, *pVector, *pUp);
+	rot_Align(pRotation, pVector, pUp);
 }
 
 LTRESULT CLTServerMath::SetupEuler(LTRotation* pRotation, float pitch, float yaw, float roll)
@@ -282,18 +281,22 @@ LTRESULT ILTMath::RotateAroundAxis(LTRotation& rot, LTVector& axis,
 
 // A direction and an up hint become three orthogonal axes, the axes become a
 // matrix, and the matrix becomes the rotation.
-LTRESULT ILTMath::AlignRotation(LTRotation& rot, LTVector& vector,
-                                LTVector& up)
+void rot_Align(LTRotation* pRotation, LTVector* pVector, LTVector* pUp)
 {
 	LTVector vRight, vUp, vForward;
 	LTMatrix mat;
 
-	vec_AlignVectors(&vector, &up, &vRight, &vUp, &vForward);
+	vec_AlignVectors(pVector, pUp, &vRight, &vUp, &vForward);
 
 	mat.SetBasisVectors(&vRight, &vUp, &vForward);
 
-	quat_FromMatrix(&mat, &rot);
+	quat_FromMatrix(&mat, pRotation);
+}
 
+LTRESULT ILTMath::AlignRotation(LTRotation& rot, LTVector& vector,
+                                LTVector& up)
+{
+	rot_Align(&rot, &vector, &up);
 	return LT_OK;
 }
 
@@ -362,7 +365,7 @@ void quat_ConvertToMatrix(LTRotation* pRot, LTMatrix* pMat);
 // (`push 8(%esp)` twice), sixteen bytes, two `pop %ecx`.
 void quat_ToMatrix(LTRotation* pRot, LTMatrix* pMat)
 {
-	quat_ConvertToMatrix(pRot, pMat);
+	quat_ConvertToMatrix(pRot->m_Quat, pMat->m);
 }
 
 // The wrapper pushes its first argument and then its second, so the callee
@@ -370,14 +373,14 @@ void quat_ToMatrix(LTRotation* pRot, LTMatrix* pMat)
 // bytes, two `pop %ecx` for the cleanup.
 void quat_FromMatrix(LTMatrix* pMat, LTRotation* pRot)
 {
-	sub_10015ce2(pRot, pMat);
+	quat_ConvertFromMatrix(pRot->m_Quat, pMat->m);
 }
 
 // Four arguments straight through, so one batched `add $0x10,%esp`.
 void quat_GetVectors(LTRotation* pRot, LTVector* pRight, LTVector* pUp,
                      LTVector* pForward)
 {
-	sub_10015e17(pRot, pRight, pUp, pForward);
+	quat_GetVectors(pRot->m_Quat, &pRight->x, &pUp->x, &pForward->x);
 }
 
 // The same forward with a float last: `flds` the argument, `push %ecx` to
@@ -385,7 +388,7 @@ void quat_GetVectors(LTRotation* pRot, LTVector* pRight, LTVector* pUp,
 void quat_Slerp(LTRotation* pDest, LTRotation* pRot1, LTRotation* pRot2,
                 float t)
 {
-	sub_10015e69(pDest, pRot1, pRot2, t);
+	quat_Slerp(pDest->m_Quat, pRot1->m_Quat, pRot2->m_Quat, t);
 }
 
 // Not a free function underneath at all: the axis rotation is LTMatrix's own
@@ -602,22 +605,6 @@ void wm_BuildTransforms(LTVector* pOffset, LTVector* pPos, LTRotation* pRot,
 //  a class derived from it: that is what makes the initializer build a
 //  temporary and copy it (svlast.cpp, which defines the array, explains the
 //  copy). Both TUs spell the two types identically.
-struct SAxisBasis
-{
-	LTVector m_vRight;                       // +0x00
-	LTVector m_vUp;                          // +0x0c
-	LTVector m_vNormal;                      // +0x18
-};
-
-class CAxisBasis : public SAxisBasis
-{
-public:
-	CAxisBasis(LTVector vRight, LTVector vUp, LTVector vNormal);
-};
-
-// 0x10058610 — defined (with its dynamic initializer) in svlast.cpp.
-extern SAxisBasis g_AxisBases[6];
-
 // 0x1001450d — the constructor. It is a constructor and not an Init: the
 // body returns `this` in %eax (`mov %ecx,%eax` on entry, `%eax` untouched at
 // the `ret $0x24`), and the initialiser above relies on that return value as
@@ -722,3 +709,70 @@ void servermath_ForceSDKInlines(LTRotation* pOut, LTRotation* pA, LTRotation* pB
 
 	pMat->Apply3x3(*pIn, *pDest);
 }
+
+
+SAxisBasis g_AxisBases[6] =
+{
+	CAxisBasis(LTVector(1.0f, 0.0f,  0.0f),
+	           LTVector(0.0f, 0.0f, -1.0f),
+	           LTVector(0.0f, 1.0f,  0.0f)),
+
+	CAxisBasis(LTVector(1.0f,  0.0f, 0.0f),
+	           LTVector(0.0f,  0.0f, 1.0f),
+	           LTVector(0.0f, -1.0f, 0.0f)),
+
+	CAxisBasis(LTVector(1.0f, 0.0f, 0.0f),
+	           LTVector(0.0f, 1.0f, 0.0f),
+	           LTVector(0.0f, 0.0f, 1.0f)),
+
+	CAxisBasis(LTVector(1.0f,  0.0f,  0.0f),
+	           LTVector(0.0f, -1.0f,  0.0f),
+	           LTVector(0.0f,  0.0f, -1.0f)),
+
+	CAxisBasis(LTVector(0.0f,  0.0f, 1.0f),
+	           LTVector(0.0f, -1.0f, 0.0f),
+	           LTVector(1.0f,  0.0f, 0.0f)),
+
+	CAxisBasis(LTVector( 0.0f,  0.0f, -1.0f),
+	           LTVector( 0.0f, -1.0f,  0.0f),
+	           LTVector(-1.0f,  0.0f,  0.0f))
+};
+
+void mat_Mul(LTMatrix* out, LTMatrix* a, LTMatrix* b) { MatMul(out, a, b); }
+
+void mat_SetupTransform(LTVector* pPos, LTRotation* pRot, LTVector* pScale,
+                        LTMatrix* pMat)
+{
+	if (pRot)
+		quat_ToMatrix(pRot, pMat);
+	else
+		pMat->Identity();
+
+	if (pScale)
+	{
+		pMat->m[0][0] *= pScale->x;
+		pMat->m[1][0] *= pScale->x;
+		pMat->m[2][0] *= pScale->x;
+
+		pMat->m[0][1] *= pScale->y;
+		pMat->m[1][1] *= pScale->y;
+		pMat->m[2][1] *= pScale->y;
+
+		pMat->m[0][2] *= pScale->z;
+		pMat->m[1][2] *= pScale->z;
+		pMat->m[2][2] *= pScale->z;
+	}
+
+	if (pPos)
+	{
+		pMat->m[0][3] = pPos->x;
+		pMat->m[1][3] = pPos->y;
+		pMat->m[2][3] = pPos->z;
+	}
+}
+
+// Typed native adapters for the SDK matrix arithmetic.
+void quat_ConvertToMatrix(LTRotation* rotation, LTMatrix* matrix) {
+    quat_ConvertToMatrix(rotation->m_Quat,matrix->m);
+}
+void mat_Multiply(LTMatrix* out, LTMatrix* a, LTMatrix* b) { MatMul(out,a,b); }

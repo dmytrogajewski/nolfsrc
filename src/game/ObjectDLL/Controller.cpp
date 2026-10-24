@@ -10,11 +10,13 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
-#include "controller.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
+#include "Controller.h"
 #include "iltmessage.h"
-#include "commonutilities.h"
-#include "serverutilities.h"
+#include "CommonUtilities.h"
+#include "ServerUtilities.h"
 #include "ObjectMsgs.h"
 
 
@@ -111,7 +113,8 @@ uint32 Controller::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGERE
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			HandleTrigger(hSender, szMsg);
 		}
 		break;
@@ -332,15 +335,15 @@ void Controller::HandleTrigger(HOBJECT hSender, const char *szMsg)
 		}
 
 		char* szCmd = parse.m_Args[0];
-		if(stricmp(szCmd, "FADE") == 0)
+		if(nolf::ascii_compare(szCmd, "FADE") == 0)
 		{
 			HandleFadeCommand(szMsg, &parse);
 		}
-		else if(stricmp(szCmd, "FLICKER") == 0)
+		else if(nolf::ascii_compare(szCmd, "FLICKER") == 0)
 		{
 			HandleFlickerCommand(szMsg, &parse);
 		}
-		else if(stricmp(szCmd, "OFF") == 0)
+		else if(nolf::ascii_compare(szCmd, "OFF") == 0)
 		{
 			HandleOffCommand(szMsg, &parse);
 		}
@@ -373,11 +376,11 @@ void Controller::HandleFadeCommand(const char *szMsg, ConParse *pParse)
 	pDuration = pParse->m_Args[3];
 
 	// Parse everything.. it doesn't do anything if there's an error.
-	if(stricmp(pParamType, "ALPHA") == 0)
+	if(nolf::ascii_compare(pParamType, "ALPHA") == 0)
 	{
 		paramType = Param_Alpha;
 	}
-	else if(stricmp(pParamType, "COLOR") == 0)
+	else if(nolf::ascii_compare(pParamType, "COLOR") == 0)
 	{
 		paramType = Param_Color;
 	}
@@ -481,7 +484,7 @@ ParamValue Controller::ParseValue(ParamType paramType, char *pValue)
 		for(i=0; i < 3; i++)
 		{
 			color[i] = (float)atof(colorStr[i]);
-			if(stricmp(colorStr[i], "X") == 0)
+			if(nolf::ascii_compare(colorStr[i], "X") == 0)
 				color[i] = -1.0f;
 		}
 

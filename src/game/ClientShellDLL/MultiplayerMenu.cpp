@@ -9,7 +9,8 @@
 // ----------------------------------------------------------------------- //
 
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "MultiplayerMenu.h"
 #include "FolderCommands.h"
 #include "InterfaceMgr.h"
@@ -186,7 +187,7 @@ void COptionMenu::Build()
 			break;
 		case SO_SPECIAL:
 			{
-				if (stricmp(pOpt->szVariable,"NetDefaultWeapon") == 0)
+				if (nolf::ascii_compare(pOpt->szVariable,"NetDefaultWeapon") == 0)
 				{
 					nVal = (int)fOpt[i];
 					if (nVal)

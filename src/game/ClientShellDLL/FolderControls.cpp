@@ -1,7 +1,7 @@
 // FolderControls.cpp: implementation of the CFolderControls class.
 //
 //////////////////////////////////////////////////////////////////////
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderControls.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -87,7 +87,7 @@ LTBOOL CFolderControls::Build()
 #endif
 
 #ifdef NOLFSRC_MODERN
-	// M-P7-01, M-P7-06: no DirectInput joystick: the controller (##gamepad,
+	// M-P7-01, M-P7-06: no DirectInput joystick: the controller (gamepad,
 	// Controller above) is the only one, and the retail joystick set-up
 	// would bind its sticks a second time
 #else
@@ -215,7 +215,7 @@ void CFolderControls::ClearBindings()
 		while (ptr)
 		{
 			if (ptr->strTriggerName[0] == ';')
-				sprintf(str, "rangebind \"%s\" \"##39\" 0 0 \"\"", ptr->strDeviceName);
+				sprintf(str, "rangebind \"%s\" \"39\" 0 0 \"\"", ptr->strDeviceName);
 			else
 				sprintf(str, "rangebind \"%s\" \"%s\" 0 0 \"\"", ptr->strDeviceName, ptr->strTriggerName);
             g_pLTClient->RunConsoleString (str);

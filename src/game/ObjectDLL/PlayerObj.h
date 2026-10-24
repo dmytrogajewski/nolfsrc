@@ -15,7 +15,7 @@
 
 #include "Character.h"
 #include "GameStartPoint.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "CheatDefs.h"
 #include "TemplateList.h"
 #include "CVarTrack.h"

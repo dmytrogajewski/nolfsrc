@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AIUtils.h"
 #include "AIDog.h"
 #include "AISense.h"
@@ -40,7 +42,7 @@ void AI_Dog::DoReaction(HSTRING hstrReaction, CAISense* pAISense, LTBOOL bIndivi
 
 	char szTrigger[1024];
     char* szReaction = g_pLTServer->GetStringData(hstrReaction);
-	_ASSERT(szReaction);
+	GAME_ASSERT(szReaction);
 
 	if ( !strcmp(szReaction, c_szNoReaction) )
 	{

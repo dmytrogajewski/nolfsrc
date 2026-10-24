@@ -1,3 +1,7 @@
+#include "engine/portable/string.h"
+#include "engine/portable/text.h"
+#include <cstdio>
+#include <cstring>
 // ----------------------------------------------------------------------- //
 //
 // MODULE  : p4_jukebox.cpp
@@ -18,7 +22,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "cshell/p4_jukebox.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
@@ -125,13 +130,13 @@ LTBOOL CP4JukeboxButeMgr::Init(ILTCSBase *pInterface, const char* szAttributeFil
 
 		char szDir[64];
 		m_buteMgr.GetString(szTag, "Directory", "", szDir, sizeof(szDir));
-		_snprintf(pTheme->szDirectory, sizeof(pTheme->szDirectory) - 1, "Music\\%s", szDir);
+		std::snprintf(pTheme->szDirectory, sizeof(pTheme->szDirectory) - 1, "Music\\%s", szDir);
 		m_buteMgr.GetString(szTag, "ControlFile", "", pTheme->szControlFile, sizeof(pTheme->szControlFile));
 
 		// Listed only if its music is in the game's data (the Game of the
 		// Year theme needs nolfgoty.rez).
 		char szCtrl[160];
-		_snprintf(szCtrl, sizeof(szCtrl) - 1, "%s\\%s", pTheme->szDirectory, pTheme->szControlFile);
+		std::snprintf(szCtrl, sizeof(szCtrl) - 1, "%s\\%s", pTheme->szDirectory, pTheme->szControlFile);
 		szCtrl[sizeof(szCtrl) - 1] = '\0';
 		pStream = LTNULL;
 		if (szDir[0] && pTheme->szControlFile[0] &&
@@ -357,8 +362,8 @@ void CP4FolderJukebox::PlayPiece(int nPiece)
 
 	CMusicState *pState = pMusic->GetMusicState();
 	if (!pMusic->IsLevelInitialized() ||
-		stricmp(pState->szDirectory, pTheme->szDirectory) != 0 ||
-		stricmp(pState->szControlFile, pTheme->szControlFile) != 0)
+		nolf::ascii_compare(pState->szDirectory, pTheme->szDirectory) != 0 ||
+		nolf::ascii_compare(pState->szControlFile, pTheme->szControlFile) != 0)
 	{
 		// Another theme: stop, then load this one's control file.
 		pMusic->Stop();

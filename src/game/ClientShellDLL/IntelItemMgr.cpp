@@ -10,15 +10,15 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "IntelItemMgr.h"
 #include "GameButeMgr.h"
 #include "ClientServerShared.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "CommonUtilities.h"
 
 #include "GameClientShell.h"
-#include "WinUtil.h"
+#include "platform/user_files.h"
 extern CGameClientShell* g_pGameClientShell;
 extern LTBOOL g_bAllowAllMissions;
 
@@ -89,19 +89,11 @@ LTBOOL CIntelItemMgr::Init(const char* szAttributeFile)
 
 	strncpy(s_aAttributeFile, szAttributeFile, sizeof(s_aAttributeFile));
 
-	//hack to create a intel.sav
-	if (!CWinUtil::FileExist(s_aAttributeFile))
-	{
-		fstream f;
-		f.open(s_aAttributeFile, ios::out);
-		f.write(" ",5);
-		f.close();
-	}
 
 	if (!Parse(szAttributeFile))
 	{
 		m_buteMgr.SetPoint("temp","temp", CPoint(0,0));
-		m_buteMgr.Save(s_aAttributeFile);
+		m_buteMgr.Save(m_strAttributeFile);
 		RefreshData();
 	}
     return LTTRUE;
@@ -137,7 +129,7 @@ void CIntelItemMgr::AddItem(uint8 nType, uint32 nID)
 	{
 		g_pLTClient->CPrint("%s,%s (%d,%d)",s_aTagName,s_aAttName, item.x, item.y);
 		m_buteMgr.SetPoint(s_aTagName,s_aAttName, item);
-		m_buteMgr.Save(s_aAttributeFile);
+		m_buteMgr.Save(m_strAttributeFile);
 		RefreshData();
 	}
 }
@@ -189,7 +181,8 @@ LTBOOL CIntelItemMgr::Parse(const char* sButeFile)
 
 	BOOL bRet = TRUE;
 
-	m_strAttributeFile = sButeFile;
+    try { m_strAttributeFile=nolf::platform::UserFiles{}.path(sButeFile).string().c_str(); }
+    catch (const std::exception& error) { GBM_DisplayError(error.what()); return LTFALSE; }
 
 	if (m_pCryptKey)
 	{

@@ -8,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "object/p6_master.h"
 #include "GameSpyMgr.h"
 #include "ServerUtilities.h"

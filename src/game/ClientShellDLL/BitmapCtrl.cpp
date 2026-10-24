@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "BitmapCtrl.h"
 #include "InterfaceResMgr.h"
 

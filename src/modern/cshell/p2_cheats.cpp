@@ -12,7 +12,7 @@
 // are compiled out of the retail final build and back in this one
 // (MessageMgr.cpp, CCheatMgr::Process).
 
-#include "stdafx.h"
+#include "Stdafx.h"
 
 namespace
 {

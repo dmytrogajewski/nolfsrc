@@ -1,11 +1,11 @@
 //////////////////////////////////////////////////////////////////////////////
 // Debug new handler implementation
 
-#include "StdAfx.h"
+#include "Stdafx.h"
 
 #ifdef _DEBUG
 
-#include <windows.h>
+#include "platform/system.h"
 #include <stdio.h>
 
 static int32 g_nDebugAlloc_AllocCount = 0;
@@ -40,8 +40,8 @@ void dump_debug_info_new(const char *pFile, unsigned int nLine, unsigned int nSi
 	else
 	{
 		char temp[512];
-		sprintf(temp, "new at %s:%d (%d)\n", pFile, nLine, nSize);
-		OutputDebugString(temp);
+		snprintf(temp, sizeof(temp), "new at %s:%d (%d)\n", pFile, nLine, nSize);
+		nolf::platform::log("allocation", temp);
 	}
 }
 
@@ -75,8 +75,8 @@ void dump_debug_info_delete(const char *pFile, unsigned int nLine)
 	else
 	{
 		char temp[512];
-		sprintf(temp, "delete at %s:%d\n", pFile, nLine);
-		OutputDebugString(temp);
+		snprintf(temp, sizeof(temp), "delete at %s:%d\n", pFile, nLine);
+		nolf::platform::log("allocation", temp);
 	}
 }
 

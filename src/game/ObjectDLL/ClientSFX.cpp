@@ -8,7 +8,7 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "ClientSFX.h"
 
 BEGIN_CLASS(CClientSFX)

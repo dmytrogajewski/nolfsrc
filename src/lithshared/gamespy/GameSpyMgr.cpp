@@ -1,385 +1,200 @@
-// *********************************************************************** //
-//
-//  MODULE:   GAMESPYMGR (.CPP)  -- our replacement for GameSpyMgr.lib
-//
-//  PURPOSE:  The server-side GameSpy query responder Object.lto links
-//            (CGameSpyMgr, src/LT2/lithshared/incs/GameSpyMgr.h; the game
-//            derives CMyGameSpyMgr from it).
-//
-//  WHY THIS IS NOT A RECONSTRUCTION.  The library the source release
-//  ships prebuilt is GameSpy middleware, not Monolith code, and it is
-//  deliberately not byte-matched. The
-//  build compiles every binary from our own source, so this file stands
-//  in for it: the same interface, written from the header alone.
-//
-//  WHAT IT DOES.  It answers GameSpy-protocol status queries that reach
-//  the game port (GameServerShell::ProcessPacket hands every packet that
-//  starts with a backslash to OnQuery): \basic\ \info\ \rules\ \players\
-//  \status\ and \echo\, each answered as `\key\value...` pairs closed by
-//  `\queryid\<id>.<packet>` and, on the last packet, `\final\`, sent
-//  through the game's CGameSpySender. A LAN query tool still sees the
-//  server. What it does NOT do is talk to master.gamespy.com: that
-//  service was shut down in 2013, so there is no heartbeat, and \secure\
-//  (the master's challenge) gets no answer.
-//
-// *********************************************************************** //
-
-#include <windows.h>
-#include <stdio.h>
-#include <string.h>
+// GameSpy v1 query responder. Transport and name resolution are supplied by
+// the native platform/engine services; protocol state belongs to each manager.
 #include "GameSpyMgr.h"
-#ifdef NOLFSRC_MODERN
-//  THE MODERN BUILD (NOLFSRC_MODERN, M-P6-02) does report to a master: a
-//  heartbeat every minute to the address the game sets with
-//  SetGameSpyAddr (default master.openspy.net), and the answer to its
-//  \secure\ challenge; see gsmaster.h.
-#include "gsmaster.h"
-#endif
+#include "gs_protocol.h"
+#include "platform/sockets.h"
+#include "platform/system.h"
+#include <charconv>
+#include <optional>
+#include <string>
+#include <utility>
 
-#define GSM_PACKET_LIMIT	1300	// flush before a UDP datagram grows past this
-
-
-#ifdef NOLFSRC_MODERN
-// M-P6-02: the master's address, resolved at the first heartbeat and again
-// every 30 minutes (or after a failure).
-static char          s_sMasterAddr[128];
-static unsigned long s_nMasterIP      = 0;
-static int           s_nMasterPort    = 0;
-static DWORD         s_dwResolveTime  = 0;
-static BOOL          s_bWinsock       = FALSE;
-
-#define GSM_RESOLVE_INTERVAL	(30 * 60 * 1000)
-
-static BOOL GSM_GetMaster(const char* sAddr, char* sIP, int* pPort)
-{
-	DWORD dwNow = GetTickCount();
-
-	if (stricmp(sAddr, s_sMasterAddr) != 0 || !s_nMasterIP ||
-	    (dwNow - s_dwResolveTime) > GSM_RESOLVE_INTERVAL)
-	{
-		strncpy(s_sMasterAddr, sAddr, sizeof(s_sMasterAddr) - 1);
-		s_sMasterAddr[sizeof(s_sMasterAddr) - 1] = '\0';
-		s_dwResolveTime = dwNow;
-		if (!GSM_Resolve(sAddr, GSM_HEARTBEAT_PORT, &s_nMasterIP, &s_nMasterPort))
-		{
-			s_nMasterIP = 0;
-			return(FALSE);
-		}
-	}
-
-	struct in_addr in;
-	in.s_addr = s_nMasterIP;
-	strcpy(sIP, inet_ntoa(in));
-	*pPort = s_nMasterPort;
-	return(TRUE);
+namespace {
+constexpr std::size_t packet_limit = 1300;
+constexpr std::uint64_t heartbeat_period = 60ull * 1000000000;
+constexpr std::uint64_t resolve_period = 30ull * 60 * 1000000000;
+struct Response {
+    std::string address, text, query;
+    DWORD port = 0, id = 0;
+    unsigned packet = 1;
+    std::size_t cursor = 0;
+};
+std::string next_token(Response& response) {
+    auto& pos = response.cursor;
+    while (pos < response.query.size() && response.query[pos] == '\\') ++pos;
+    const auto start = pos;
+    while (pos < response.query.size() && response.query[pos] != '\\') ++pos;
+    return response.query.substr(start, pos - start);
 }
-#endif
-BOOL CGameSpyMgr::Init(const char* sGameName, const char* sGameVer, const char* sGameKey,
-                       int nGameLoc, int nGamePort, int nSpyPort, DWORD dwFlags)
-{
-	Term();
-#ifdef NOLFSRC_MODERN
-	// M-P6-02: name lookups need Winsock (the engine has it running
-	// already; this only takes a reference)
-	if (!s_bWinsock)
-	{
-		WSADATA wsaData;
-		s_bWinsock = (WSAStartup(MAKEWORD(1, 1), &wsaData) == 0);
-	}
-#endif
-
-	if (!sGameName || !sGameName[0]) return(FALSE);
-
-	m_sGameName = sGameName;
-	m_sGameVer  = sGameVer ? sGameVer : "";
-	m_sGameKey  = sGameKey ? sGameKey : "";
-	m_sGameLoc.Format("%i", nGameLoc);
-
-	m_dwGamePort = (DWORD)nGamePort;
-	m_dwSpyPort  = (DWORD)nSpyPort;
-	m_dwFlags    = dwFlags;
-	m_bInit      = TRUE;
-
-	return(TRUE);
 }
-
-void CGameSpyMgr::Term()
-{
-#ifdef NOLFSRC_MODERN
-	// M-P6-02: tell the master we are gone (statechanged 2), so the server
-	// leaves the list at once rather than when it expires
-	if (m_bInit && m_pSender && m_timerHeartbeat)
-	{
-		char sIP[32];
-		int  nPort;
-		if (GSM_GetMaster(m_sGameSpyAddr, sIP, &nPort))
-		{
-			char sBeat[256];
-			sprintf(sBeat, "\\heartbeat\\%d\\gamename\\%.64s\\statechanged\\2",
-			        (int)m_dwGamePort, (const char*)m_sGameName);
-			SendSocketString(sIP, (DWORD)nPort, sBeat);
-		}
-	}
-	m_timerHeartbeat = 0;
-#endif
-	m_bInit = FALSE;
+struct CGameSpyMgr::State {
+    bool alive = true;
+    std::shared_ptr<Response> response;
+    std::optional<nolf::platform::Endpoint> endpoint;
+    std::optional<std::uint64_t> heartbeat;
+    std::uint64_t resolved_at = 0;
+    std::string requested_master;
+    std::optional<nolf::platform::Endpoint> master(const char* configured) {
+        const std::string requested = configured && *configured ? configured : "master.openspy.net";
+        if (nolf::ascii_compare(requested.c_str(), "none") == 0) { endpoint.reset(); return {}; }
+        const auto now = nolf::platform::monotonic_nanoseconds();
+        if (endpoint && requested_master == requested && now - resolved_at < resolve_period) return endpoint;
+        requested_master = requested; resolved_at = now; endpoint.reset();
+        nolf::platform::Endpoint host{requested, 27900};
+        if (const auto colon = requested.find(':'); colon != requested.npos) {
+            host.address = requested.substr(0, colon);
+            unsigned port = 0;
+            const auto part = std::string_view(requested).substr(colon + 1);
+            const auto [end, error] = std::from_chars(part.data(), part.data() + part.size(), port);
+            if (error != std::errc{} || end != part.data() + part.size() || !port || port > 65535) return {};
+            host.port = static_cast<std::uint16_t>(port);
+        }
+        try { endpoint = nolf::platform::resolve_ipv4(host); }
+        catch (const std::exception& error) { nolf::platform::log("master", error.what()); }
+        return endpoint;
+    }
+};
+CGameSpyMgr::CGameSpyMgr() : state_(std::make_shared<State>()) { Clear(); }
+CGameSpyMgr::~CGameSpyMgr() {
+    state_->alive = false;
+    try { Term(); } catch (...) {}
 }
-
-void CGameSpyMgr::Update()
-{
-	if (!m_bInit) return;
-	UpdateHeartbeat();
+void CGameSpyMgr::Clear() {
+    m_sGameName.Empty(); m_sGameVer.Empty(); m_sGameKey.Empty(); m_sGameLoc.Empty();
+    m_sGameSpyAddr.Empty(); m_sResponseAddr.Empty(); m_sResponse[0] = 0;
+    m_dwQueryID = 1; m_nPacket = 0; m_timerHeartbeat = 0;
+    m_dwGamePort = m_dwSpyPort = m_dwResponsePort = m_dwFlags = 0;
+    m_pSender = nullptr; m_bInit = FALSE;
+    state_->response.reset(); state_->endpoint.reset(); state_->heartbeat.reset();
 }
-
-BOOL CGameSpyMgr::UpdateHeartbeat()
-{
-#ifdef NOLFSRC_MODERN
-	// M-P6-02: a heartbeat every TIMER_HEARTBEAT, sent from the game port
-	// (the port the master is told to query, GSMF_USEGAMEPORTFORHEARTBEAT)
-	if (!m_pSender) return(FALSE);
-
-	DWORD dwNow = GetTickCount();
-	if (m_timerHeartbeat && (dwNow - m_timerHeartbeat) < TIMER_HEARTBEAT) return(FALSE);
-	m_timerHeartbeat = dwNow ? dwNow : 1;
-
-	char sIP[32];
-	int  nPort;
-	if (!GSM_GetMaster(m_sGameSpyAddr, sIP, &nPort)) return(FALSE);
-
-	char sBeat[256];
-	sprintf(sBeat, "\\heartbeat\\%d\\gamename\\%.64s",
-	        (int)m_dwGamePort, (const char*)m_sGameName);
-	return(SendSocketString(sIP, (DWORD)nPort, sBeat));
-#else
-	// The master server this used to report to no longer exists.
-	return(FALSE);
-#endif
+BOOL CGameSpyMgr::Init(const char* name, const char* version, const char* key,
+                       int location, int game_port, int query_port, DWORD flags) {
+    const auto state = state_;
+    Term();
+    const bool query_port_valid = query_port >= 1 && query_port <= 65535;
+    if (!state->alive || !name || !*name || game_port < 1 || game_port > 65535 ||
+        (!query_port_valid && !(flags & GSMF_USEGAMEPORTFORHEARTBEAT))) return FALSE;
+    m_sGameName = name; m_sGameVer = version ? version : ""; m_sGameKey = key ? key : "";
+    m_sGameLoc.Format("%d", location);
+    m_dwGamePort = game_port; m_dwSpyPort = query_port_valid ? query_port : game_port; m_dwFlags = flags; m_bInit = TRUE;
+    return TRUE;
 }
-
-
-// ----------------------------------------------------------------------- //
-//  Queries
-// ----------------------------------------------------------------------- //
-
-BOOL CGameSpyMgr::OnQuery(CGameSpyQueryInfo* pQueryInfo)
-{
-	if (!pQueryInfo || !pQueryInfo->IsValid()) return(FALSE);
-
-	CString sData = pQueryInfo->GetData();
-	CString sAddr = pQueryInfo->GetAddr();
-
-	return(OnQuery((char*)(LPCTSTR)sAddr, pQueryInfo->GetPort(),
-	               (char*)(LPCTSTR)sData, sData.GetLength()));
+void CGameSpyMgr::Term() {
+    const auto state = state_;
+    const bool announce = m_bInit && m_pSender && state->heartbeat && state->endpoint;
+    auto* sender = m_pSender;
+    const auto endpoint = state->endpoint;
+    const auto text = "\\heartbeat\\" + std::to_string(m_dwGamePort) + "\\gamename\\" +
+        std::string(static_cast<const char*>(m_sGameName)) + "\\statechanged\\2";
+    m_bInit = FALSE; m_timerHeartbeat = 0; state->heartbeat.reset();
+    if (announce) sender->SendTo(text.data(), text.size(), endpoint->address.c_str(), endpoint->port);
 }
-
-BOOL CGameSpyMgr::OnQuery(char* sAddr, DWORD dwPort, char* sData, int nLen)
-{
-	if (!m_bInit || !sAddr || !sData || nLen <= 0) return(FALSE);
-
-	// The packet is not NUL-terminated on the wire.
-	char sQuery[MAX_RESPONSE];
-	if (nLen >= (int)sizeof(sQuery)) nLen = sizeof(sQuery) - 1;
-	memcpy(sQuery, sData, nLen);
-	sQuery[nLen] = '\0';
-
-	StartResponse(sAddr, dwPort);
-
-	BOOL bAnswered = FALSE;
-#ifdef NOLFSRC_MODERN
-	// M-P6-02: the master reads \validate\ as the first key of the reply,
-	// so a challenge is answered before anything else asked with it
-	char sChallenge[80];
-	if (GSM_FindKey(sQuery, "secure", sChallenge, sizeof(sChallenge)))
-	{
-		bAnswered |= OnSecureQuery(sChallenge);
-	}
-#endif
-	CString sToken = GetFirstQueryToken(sQuery);
-
-	while (!sToken.IsEmpty())
-	{
-		if (sToken.CompareNoCase("basic") == 0)
-		{
-			bAnswered |= OnBasicQuery();
-		}
-		else if (sToken.CompareNoCase("info") == 0)
-		{
-			bAnswered |= OnInfoQuery();
-		}
-		else if (sToken.CompareNoCase("rules") == 0)
-		{
-			bAnswered |= OnRulesQuery();
-		}
-		else if (sToken.CompareNoCase("players") == 0)
-		{
-			bAnswered |= OnPlayersQuery();
-		}
-		else if (sToken.CompareNoCase("status") == 0)
-		{
-			bAnswered |= OnStatusQuery();
-		}
-		else if (sToken.CompareNoCase("echo") == 0)
-		{
-			CString sValue = GetNextQueryToken();
-			bAnswered |= OnEchoQuery(sValue);
-		}
-		else if (sToken.CompareNoCase("secure") == 0)
-		{
-			CString sValue = GetNextQueryToken();
-#ifndef NOLFSRC_MODERN
-			bAnswered |= OnSecureQuery(sValue);
-#endif
-		}
-
-		sToken = GetNextQueryToken();
-	}
-
-	if (bAnswered) SendResponse();
-
-	return(bAnswered);
+void CGameSpyMgr::Update() { if (m_bInit) UpdateHeartbeat(); }
+BOOL CGameSpyMgr::UpdateHeartbeat() {
+    const auto state = state_;
+    if (!m_pSender) return FALSE;
+    const auto now = nolf::platform::monotonic_nanoseconds();
+    if (state->heartbeat && now - *state->heartbeat < heartbeat_period) return FALSE;
+    state->heartbeat = now;
+    const auto endpoint = state->master(m_sGameSpyAddr);
+    if (!endpoint) return FALSE;
+    const auto text = "\\heartbeat\\" + std::to_string(m_dwGamePort) + "\\gamename\\" +
+        std::string(static_cast<const char*>(m_sGameName));
+    return SendSocketString(endpoint->address.c_str(), endpoint->port, text.c_str());
 }
-
-BOOL CGameSpyMgr::OnEchoQuery(const char* sQuery)
-{
-	SendResponseInfo("echo", sQuery ? sQuery : "");
-	return(TRUE);
+BOOL CGameSpyMgr::OnQuery(CGameSpyQueryInfo* info) {
+    if (!info || !info->IsValid()) return FALSE;
+    auto data = info->GetData(), address = info->GetAddr();
+    return OnQuery(address.GetBuffer(0), info->GetPort(), data.GetBuffer(0), data.GetLength());
 }
-
-BOOL CGameSpyMgr::OnSecureQuery(const char* sValue)
-{
-#ifdef NOLFSRC_MODERN
-	// M-P6-02: prove to the master that we know the game's secret key
-	if (!sValue || !sValue[0] || m_sGameKey.IsEmpty()) return(FALSE);
-
-	char sResponse[96];
-	GSM_Validate(sValue, m_sGameKey, sResponse);
-	SendResponseInfo("validate", sResponse);
-	return(TRUE);
-#else
-	// The master's validation challenge: nothing left to validate against.
-	return(FALSE);
-#endif
+BOOL CGameSpyMgr::OnQuery(char* address, DWORD port, char* data, int length) {
+    if (!m_bInit || !address || !data || length <= 0 || length >= MAX_RESPONSE || !port || port > 65535) return FALSE;
+    const auto state = state_;
+    const auto previous = state->response;
+    auto response = std::make_shared<Response>();
+    response->address = address; response->port = port; response->id = ++m_dwQueryID;
+    response->query.assign(data, length);
+    if (response->query.find('\0') != response->query.npos) response->query.resize(response->query.find('\0'));
+    state->response = response;
+    struct Restore { std::shared_ptr<State> state; std::shared_ptr<Response> previous; ~Restore() { state->response = previous; } } restore{state, previous};
+    BOOL answered = FALSE;
+    char challenge[80];
+    if (nolf::gamespy::find_key(response->query.c_str(), "secure", challenge, sizeof(challenge))) answered |= OnSecureQuery(challenge);
+    for (;;) {
+        const auto token = next_token(*response);
+        if (token.empty()) break;
+        if (nolf::ascii_compare(token.c_str(), "basic") == 0) answered |= OnBasicQuery();
+        else if (nolf::ascii_compare(token.c_str(), "info") == 0) answered |= OnInfoQuery();
+        else if (nolf::ascii_compare(token.c_str(), "rules") == 0) answered |= OnRulesQuery();
+        else if (nolf::ascii_compare(token.c_str(), "players") == 0) answered |= OnPlayersQuery();
+        else if (nolf::ascii_compare(token.c_str(), "status") == 0) answered |= OnStatusQuery();
+        else if (nolf::ascii_compare(token.c_str(), "echo") == 0) answered |= OnEchoQuery(next_token(*response).c_str());
+        else if (nolf::ascii_compare(token.c_str(), "secure") == 0) next_token(*response);
+        if (!state->alive) return answered;
+    }
+    if (answered) SendResponse();
+    return answered;
 }
-
-BOOL CGameSpyMgr::OnBasicQuery()
-{
-	SendResponseInfo("gamename", m_sGameName);
-	SendResponseInfo("gamever", m_sGameVer);
-	SendResponseInfo("location", m_sGameLoc);
-	return(TRUE);
+BOOL CGameSpyMgr::OnEchoQuery(const char* query) { SendResponseInfo("echo", query ? query : ""); return TRUE; }
+BOOL CGameSpyMgr::OnSecureQuery(const char* value) {
+    if (!value || !*value || m_sGameKey.IsEmpty()) return FALSE;
+    char response[96];
+    nolf::gamespy::validate(value, m_sGameKey, response);
+    SendResponseInfo("validate", response);
+    return TRUE;
 }
-
-BOOL CGameSpyMgr::OnStatusQuery()
-{
-	OnBasicQuery();
-	OnInfoQuery();
-	OnRulesQuery();
-	OnPlayersQuery();
-	return(TRUE);
+BOOL CGameSpyMgr::OnBasicQuery() {
+    const auto state = state_;
+    const auto name = m_sGameName, version = m_sGameVer, location = m_sGameLoc;
+    SendResponseInfo("gamename", name);
+    if (!state->alive) return TRUE;
+    SendResponseInfo("gamever", version);
+    if (!state->alive) return TRUE;
+    SendResponseInfo("location", location);
+    return TRUE;
 }
-
-
-// ----------------------------------------------------------------------- //
-//  Responses
-// ----------------------------------------------------------------------- //
-
-void CGameSpyMgr::StartResponse(const char* sAddr, DWORD dwPort)
-{
-	m_sResponseAddr  = sAddr;
-	m_dwResponsePort = dwPort;
-	m_sResponse[0]   = '\0';
-	m_nPacket        = 0;
-	m_dwQueryID++;
+BOOL CGameSpyMgr::OnStatusQuery() {
+    const auto state = state_;
+    OnBasicQuery(); if (!state->alive) return TRUE;
+    OnInfoQuery(); if (!state->alive) return TRUE;
+    OnRulesQuery(); if (!state->alive) return TRUE;
+    OnPlayersQuery(); return TRUE;
 }
-
-void CGameSpyMgr::SendResponseInfo(const char* sKey, const char* sValue)
-{
-	if (!sKey) return;
-	if (!sValue) sValue = "";
-
-	int nAdd = 2 + (int)strlen(sKey) + (int)strlen(sValue);
-	if ((int)strlen(m_sResponse) + nAdd > GSM_PACKET_LIMIT) FlushResponse();
-	if ((int)strlen(m_sResponse) + nAdd > MAX_RESPONSE) return;
-
-	strcat(m_sResponse, "\\");
-	strcat(m_sResponse, sKey);
-	strcat(m_sResponse, "\\");
-	strcat(m_sResponse, sValue);
+void CGameSpyMgr::SendResponseInfo(const char* key, const char* value) {
+    const auto state = state_;
+    const auto response = state->response;
+    if (!response || !key) return;
+    const auto text = '\\' + std::string(key) + '\\' + (value ? value : "");
+    if (text.size() > MAX_RESPONSE) return;
+    if (response->text.size() + text.size() > packet_limit) {
+        FlushResponse();
+        if (!state->alive) return;
+    }
+    response->text += text;
 }
-
-void CGameSpyMgr::SendResponseInfo(const char* sKey, int nValue)
-{
-	char sValue[32];
-	sprintf(sValue, "%i", nValue);
-	SendResponseInfo(sKey, sValue);
+void CGameSpyMgr::SendResponseInfo(const char* key, int value) { SendResponseInfo(key, std::to_string(value).c_str()); }
+void CGameSpyMgr::AddResponseQueryID() {
+    const auto response = state_->response;
+    if (response) response->text += "\\queryid\\" + std::to_string(response->id) + '.' + std::to_string(response->packet++);
 }
-
-void CGameSpyMgr::AddResponseQueryID()
-{
-	char sID[64];
-	sprintf(sID, "\\queryid\\%i.%i", (int)m_dwQueryID, m_nPacket + 1);
-	strcat(m_sResponse, sID);
+void CGameSpyMgr::FlushResponse() {
+    const auto response = state_->response;
+    if (!response || response->text.empty()) return;
+    AddResponseQueryID();
+    const auto text = std::exchange(response->text, {});
+    SendSocketString(response->address.c_str(), response->port, text.c_str());
 }
-
-// Sends what has accumulated as one packet and starts the next.
-void CGameSpyMgr::FlushResponse()
-{
-	if (!m_sResponse[0]) return;
-	AddResponseQueryID();
-	SendSocketString(m_sResponseAddr, m_dwResponsePort, m_sResponse);
-	m_sResponse[0] = '\0';
-	m_nPacket++;
+void CGameSpyMgr::SendResponse() {
+    const auto response = state_->response;
+    if (!response) return;
+    response->text += "\\final\\";
+    FlushResponse();
 }
-
-// Sends the last packet of a response.
-void CGameSpyMgr::SendResponse()
-{
-	strcat(m_sResponse, "\\final\\");
-	AddResponseQueryID();
-	SendSocketString(m_sResponseAddr, m_dwResponsePort, m_sResponse);
-	m_sResponse[0] = '\0';
-	m_nPacket = 0;
-}
-
-BOOL CGameSpyMgr::SendSocketString(const char* sAddr, DWORD dwPort, const char* sText, int nLength)
-{
-	if (!m_pSender || !sAddr || !sText) return(FALSE);
-	if (nLength < 0) nLength = (int)strlen(sText);
-	m_pSender->SendTo(sText, (unsigned long)nLength, sAddr, dwPort);
-	return(TRUE);
-}
-
-
-// ----------------------------------------------------------------------- //
-//  Query tokens: "\basic\\info\" -> "basic", "info"; empty when done.
-// ----------------------------------------------------------------------- //
-
-static char s_sQueryBuf[MAX_RESPONSE];
-static char* s_pQueryPos = NULL;
-
-CString CGameSpyMgr::GetFirstQueryToken(const char* sQuery)
-{
-	strncpy(s_sQueryBuf, sQuery ? sQuery : "", sizeof(s_sQueryBuf) - 1);
-	s_sQueryBuf[sizeof(s_sQueryBuf) - 1] = '\0';
-	s_pQueryPos = s_sQueryBuf;
-	return(GetNextQueryToken());
-}
-
-CString CGameSpyMgr::GetNextQueryToken()
-{
-	CString sToken;
-	if (!s_pQueryPos) return(sToken);
-
-	while (*s_pQueryPos == '\\') s_pQueryPos++;
-	if (!*s_pQueryPos) { s_pQueryPos = NULL; return(sToken); }
-
-	char* pStart = s_pQueryPos;
-	while (*s_pQueryPos && *s_pQueryPos != '\\') s_pQueryPos++;
-
-	char c = *s_pQueryPos;
-	*s_pQueryPos = '\0';
-	sToken = pStart;
-	*s_pQueryPos = c;
-
-	return(sToken);
+BOOL CGameSpyMgr::SendSocketString(const char* address, DWORD port, const char* text, int length) {
+    if (!m_pSender || !address || !text) return FALSE;
+    const std::string data(text, length < 0 ? std::strlen(text) : static_cast<std::size_t>(length));
+    const std::string peer(address);
+    auto* sender = m_pSender;
+    sender->SendTo(data.data(), data.size(), peer.c_str(), port);
+    return TRUE;
 }

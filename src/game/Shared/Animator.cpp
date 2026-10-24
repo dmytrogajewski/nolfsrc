@@ -8,7 +8,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "Animator.h"
 
 // ----------------------------------------------------------------------- //
@@ -61,14 +63,14 @@ CAnimator::~CAnimator()
 
 void CAnimator::Init(ILTCSBase *pInterface, HOBJECT hObject)
 {
-	_ASSERT(hObject);
+	GAME_ASSERT(hObject);
 
 	m_pInterface = pInterface;
 
 	m_hObject = hObject;
 
     LTRESULT dwResult = g_pModelLT->GetMainTracker(m_hObject, m_aAniTrackers[eAniTrackerMain].m_pAnimTracker);
-	_ASSERT(LT_OK == dwResult);
+	GAME_ASSERT(LT_OK == dwResult);
 
 	m_eAniTrackerDims = eAniTrackerInvalid;
 
@@ -97,12 +99,12 @@ void CAnimator::Update()
 
 LTBOOL CAnimator::IsAniTrackerDone(AniTracker eAniTracker) const
 {
-	_ASSERT(eAniTracker != eAniTrackerInvalid);
+	GAME_ASSERT(eAniTracker != eAniTrackerInvalid);
     if ( eAniTrackerInvalid == eAniTracker ) return LTTRUE;
 
     uint32 dwFlags;
     uint32 dwResult = g_pModelLT->GetPlaybackState(m_aAniTrackers[eAniTracker].m_pAnimTracker, dwFlags);
-	_ASSERT(LT_OK == dwResult);
+	GAME_ASSERT(LT_OK == dwResult);
 
     return (dwFlags & MS_PLAYDONE) ? LTTRUE : LTFALSE;
 }
@@ -117,12 +119,12 @@ LTBOOL CAnimator::IsAniTrackerDone(AniTracker eAniTracker) const
 
 AniTracker CAnimator::AddAniTracker(const char* szWeightset)
 {
-	_ASSERT(szWeightset);
+	GAME_ASSERT(szWeightset);
 	if (!szWeightset) return eAniTrackerInvalid;
 
     if ( LT_OK != g_pModelLT->AddTracker(m_hObject, &m_aAniTrackers[m_cAniTrackers].m_AnimTracker) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return eAniTrackerInvalid;
 	}
 
@@ -141,20 +143,20 @@ AniTracker CAnimator::AddAniTracker(const char* szWeightset)
 
 void CAnimator::EnableAniTracker(AniTracker eAniTracker)
 {
-	_ASSERT((eAniTrackerInvalid != eAniTracker) && (eAniTrackerMain != eAniTracker));
+	GAME_ASSERT((eAniTrackerInvalid != eAniTracker) && (eAniTrackerMain != eAniTracker));
 	if ((eAniTrackerInvalid == eAniTracker) || (eAniTrackerMain == eAniTracker)) return;
 
 	HMODELWEIGHTSET hWeightset;
 
 	if ( LT_OK != g_pModelLT->FindWeightSet(m_hObject, (char*)m_aAniTrackers[eAniTracker].m_szWeightset, hWeightset) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
     if ( LT_OK != g_pModelLT->SetWeightSet(m_aAniTrackers[eAniTracker].m_pAnimTracker, hWeightset) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -171,20 +173,20 @@ void CAnimator::EnableAniTracker(AniTracker eAniTracker)
 
 void CAnimator::DisableAniTracker(AniTracker eAniTracker)
 {
-	_ASSERT((eAniTrackerInvalid != eAniTracker) && (eAniTrackerMain != eAniTracker));
+	GAME_ASSERT((eAniTrackerInvalid != eAniTracker) && (eAniTrackerMain != eAniTracker));
 	if ((eAniTrackerInvalid == eAniTracker) || (eAniTrackerMain == eAniTracker)) return;
 
 	HMODELWEIGHTSET hWeightset;
 
 	if ( LT_OK != g_pModelLT->FindWeightSet(m_hObject, (char*)"Null", hWeightset) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 
     if ( LT_OK != g_pModelLT->SetWeightSet(m_aAniTrackers[eAniTracker].m_pAnimTracker, hWeightset) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 }
@@ -199,12 +201,12 @@ void CAnimator::DisableAniTracker(AniTracker eAniTracker)
 
 void CAnimator::StartAniTracker(AniTracker eAniTracker)
 {
-	_ASSERT(eAniTrackerInvalid != eAniTracker);
+	GAME_ASSERT(eAniTrackerInvalid != eAniTracker);
 	if (eAniTrackerInvalid == eAniTracker) return;
 
     if ( LT_OK != g_pModelLT->SetPlaying(m_aAniTrackers[eAniTracker].m_pAnimTracker, LTTRUE) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 }
@@ -219,12 +221,12 @@ void CAnimator::StartAniTracker(AniTracker eAniTracker)
 
 void CAnimator::StopAniTracker(AniTracker eAniTracker)
 {
-	_ASSERT(eAniTrackerInvalid != eAniTracker);
+	GAME_ASSERT(eAniTrackerInvalid != eAniTracker);
 	if (eAniTrackerInvalid == eAniTracker) return;
 
     if ( LT_OK != g_pModelLT->SetPlaying(m_aAniTrackers[eAniTracker].m_pAnimTracker, LTFALSE) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 }
@@ -239,7 +241,7 @@ void CAnimator::StopAniTracker(AniTracker eAniTracker)
 
 void CAnimator::PositionAniTracker(AniTracker eAniTracker, LTFLOAT fPercent)
 {
-	_ASSERT(eAniTrackerInvalid != eAniTracker);
+	GAME_ASSERT(eAniTrackerInvalid != eAniTracker);
 	if (eAniTrackerInvalid == eAniTracker) return;
 
     LTAnimTracker* pTracker = m_aAniTrackers[eAniTracker].m_pAnimTracker;
@@ -251,7 +253,7 @@ void CAnimator::PositionAniTracker(AniTracker eAniTracker, LTFLOAT fPercent)
 
 	if ( LT_OK != g_pModelLT->SetCurAnimTime(pTracker, dwAnimTime) )
 	{
-        _ASSERT(LTFALSE);
+        GAME_ASSERT(LTFALSE);
 		return;
 	}
 }
@@ -322,7 +324,7 @@ Ani CAnimator::AddAni(const char* szAni)
 		{
 			// We couldn't even find the normal ani.
 
-//          _ASSERT(LTFALSE);
+//          GAME_ASSERT(LTFALSE);
 			return eAniInvalid;
 		}
 		else
@@ -370,7 +372,7 @@ Ani CAnimator::AddAni(const char* szAni)
 
 void CAnimator::SetAni(Ani eAni, AniTracker eAniTracker)
 {
-//	_ASSERT(eAni != eAniInvalid && eAniTracker != eAniTrackerInvalid);
+//	GAME_ASSERT(eAni != eAniInvalid && eAniTracker != eAniTrackerInvalid);
 	if ( eAni == eAniInvalid || eAniTracker == eAniTrackerInvalid ) return;
 
 	// Get the animation that's currently playing on the tracker
@@ -404,13 +406,13 @@ void CAnimator::SetAni(Ani eAni, AniTracker eAniTracker)
 			if ( SetDims(hNewAni) )
 			{
                 LTRESULT dwResult = g_pModelLT->SetCurAnim(m_aAniTrackers[eAniTracker].m_pAnimTracker, hNewAni);
-				_ASSERT(LT_OK == dwResult);
+				GAME_ASSERT(LT_OK == dwResult);
 			}
 		}
 		else
 		{
             LTRESULT dwResult = g_pModelLT->SetCurAnim(m_aAniTrackers[eAniTracker].m_pAnimTracker, hNewAni);
-			_ASSERT(LT_OK == dwResult);
+			GAME_ASSERT(LT_OK == dwResult);
 		}
 	}
 	else if ( hCurAni == hNewAni )

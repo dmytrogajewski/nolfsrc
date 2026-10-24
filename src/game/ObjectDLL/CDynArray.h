@@ -1,91 +1,35 @@
 #ifndef __DYNARRAY_H
 #define __DYNARRAY_H
+#include <limits>
+#include <stdexcept>
+#include <vector>
 
-template <class T>
-class CDynArray
-{
+// Indexed game storage retains its original block-growth policy. Typed
+// ownership handles copying, exceptions and nontrivial element lifetimes.
+// The old memcpy hint is redundant with the standard container.
+template<class T> class CDynArray {
 public:
-
-	CDynArray (int bMemCopyable = 0, long nGrowBy = 128);
-	~CDynArray();
-
-	T&		operator[] (int nIndex);
-	void	Flush();
-	
-	long	ArraySize()							{ return m_nArraySize; }
-	void	SetMemCopyable (int bMemCopyable)	{ m_bMemCopyable = bMemCopyable; }
-	void	SetGrowBy (long nGrowBy)			{ m_nGrowBy = nGrowBy; }
-
-protected:
-
-	int		Grow();
-
-	T*		m_pItems;
-	long	m_nArraySize;
-	long	m_nGrowBy;
-	int		m_bMemCopyable;
+    explicit CDynArray(int = 0, long grow_by = 128) { SetGrowBy(grow_by); }
+    T& operator[](int index) {
+        if (index < 0) throw std::out_of_range("negative game array index");
+        const auto required = static_cast<std::size_t>(index)+1;
+        if (required > items_.size()) {
+            const auto extent = ((required+grow_by_-1)/grow_by_)*grow_by_;
+            if (extent > static_cast<std::size_t>(std::numeric_limits<int>::max()) || extent > items_.max_size())
+                throw std::length_error("game array exceeds index range");
+            items_.resize(extent);
+        }
+        return items_[static_cast<std::size_t>(index)];
+    }
+    void Flush() { std::vector<T>().swap(items_); }
+    long ArraySize() const { return static_cast<long>(items_.size()); }
+    void SetMemCopyable(int) {}
+    void SetGrowBy(long value) {
+        if (value <= 0 || value > std::numeric_limits<int>::max()) throw std::invalid_argument("invalid game array growth");
+        grow_by_ = static_cast<std::size_t>(value);
+    }
+private:
+    std::vector<T> items_;
+    std::size_t grow_by_;
 };
-
-template <class T>
-CDynArray<T>::CDynArray (int bMemCopyable, long nGrowBy)
-{
-	m_bMemCopyable = bMemCopyable;
-	m_nGrowBy = nGrowBy;
-
-	m_pItems = NULL;
-	m_nArraySize = 0;
-}
-
-template <class T>
-CDynArray<T>::~CDynArray()
-{
-	Flush();
-}
-
-template <class T>
-T& CDynArray<T>::operator[] (int nIndex)
-{
-	_ASSERT(nIndex >= 0);
-
-	while (nIndex >= m_nArraySize)
-	{
-		Grow();
-	}
-
-	return m_pItems[nIndex];
-}
-
-template <class T>
-void CDynArray<T>::Flush()
-{
-	debug_deletea(m_pItems);
-	m_pItems = NULL;
-	m_nArraySize = 0;
-}
-
-template <class T>
-int CDynArray<T>::Grow()
-{
-	T* pNewArray = debug_newa(T, m_nArraySize + m_nGrowBy);
-	if (!pNewArray) return 0;
-
-	if (m_bMemCopyable)
-	{
-		memcpy (pNewArray, m_pItems, m_nArraySize * sizeof(T));
-	}
-	else
-	{
-		for (long i = 0; i < m_nArraySize; i++)
-		{
-			pNewArray[i] = m_pItems[i];
-		}
-	}
-
-	debug_deletea(m_pItems);
-	m_pItems = pNewArray;
-	m_nArraySize += m_nGrowBy;
-
-	return 1;
-}
-
 #endif

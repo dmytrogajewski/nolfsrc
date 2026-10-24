@@ -3,23 +3,7 @@
 #define __LTBASETYPES_H__
 
 	#include <math.h>
-
-	// Portable integer types.	
-	typedef unsigned int		uint; // This is guaranteed to be 16 bits or larger.
-	typedef char				int8;
-	typedef unsigned char		uint8;
-	typedef short				int16;
-	typedef unsigned short		uint16;
-	typedef long				int32;
-	typedef unsigned long		uint32;
-	typedef __int64				int64;
-	typedef unsigned __int64	uint64;
-
-	// Base types.
-	typedef unsigned int LTBOOL;
-	typedef float LTFLOAT;
-	typedef double LTDFLOAT;
-	typedef uint32 LTRESULT;
+	#include "ltintegertypes.h"
 
 	// Base type values (enumeration emulation)
 	// LTBOOL
@@ -36,29 +20,29 @@
 	typedef LTObject* HLOCALOBJ;
 
 	// Model handles
-	typedef unsigned long HMODELPIECE;
+	typedef uint32 HMODELPIECE;
 	#define INVALID_MODEL_PIECE ((HMODELPIECE)-1)
 
-	typedef unsigned long HMODELSOCKET;
+	typedef uint32 HMODELSOCKET;
 	#define INVALID_MODEL_SOCKET ((HMODELNODE)-1)
 
-	typedef unsigned long HMODELNODE;
+	typedef uint32 HMODELNODE;
 	#define INVALID_MODEL_NODE ((HMODELNODE)-1)
 
-	typedef unsigned long HMODELWEIGHTSET;
+	typedef uint32 HMODELWEIGHTSET;
 	#define INVALID_MODEL_WEIGHTSET ((HMODELWEIGHTSET)-1)
 
-	typedef unsigned long HMODELANIM;
+	typedef uint32 HMODELANIM;
 	#define INVALID_MODEL_ANIM ((HMODELANIM)-1)
 
 	// Poly reference
-	typedef unsigned long HPOLY;
+	typedef uint32 HPOLY;
 	#define INVALID_HPOLY 0xFFFFFFFF
 
 	// Globally unique identifier.
 	struct LTGUID
 	{
-		unsigned long	a;
+		uint32 a;
 		unsigned short	b;
 		unsigned short	c;
 		unsigned char   d[8];

@@ -1,13 +1,44 @@
 //////////////////////////////////////////////////////////////////////////////
 // CRC-32 calculation routines
 
-#include "stdafx.h"
+#include "Stdafx.h"
 
 #include "CRC32.h"
 #include "CommonUtilities.h"
 #include <stdio.h>
+#ifdef NOLFSRC_NATIVE
+#include "engine/portable/compatibility.h"
+#include <array>
+#include <memory>
+#endif
 
 using namespace CRC32;
+
+#ifdef NOLFSRC_NATIVE
+bool CRC32::ClientShellCompatibilityCRC(uint32& result)
+{
+	if (!g_pBaseLT) return false;
+	auto release = [](ILTStream* stream) { if (stream) stream->Release(); };
+	auto open = [&](char* name) {
+		ILTStream* stream = nullptr;
+		const auto status = g_pBaseLT->OpenFile(name, &stream);
+		std::unique_ptr<ILTStream, decltype(release)> owner(stream, release);
+		if (status != LT_OK) owner.reset();
+		return owner;
+	};
+	auto metadata = open(const_cast<char*>("native/compatibility/cshell.dll"));
+	auto shell = open(const_cast<char*>("cshell.dll"));
+	if (!metadata || !shell || metadata->GetLen() != 16) return false;
+	std::array<std::byte,16> bytes;
+	if (metadata->Read(bytes.data(), bytes.size()) != LT_OK) return false;
+	try {
+		const auto identity = nolf::read_compatibility_identity(bytes);
+		if (identity.size != shell->GetLen()) return false;
+		result = identity.crc32;
+		return true;
+	} catch (const std::exception&) { return false; }
+}
+#endif
 
 // Table management class
 class CRC32Table

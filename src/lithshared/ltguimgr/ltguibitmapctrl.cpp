@@ -3,7 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "ltguimgr.h"
-#include "ltguibitmapctrl.h"
+#include "LTGUIBitmapCtrl.h"
 #include "ltguifont.h"
 
 extern ILTClient *g_pLTClient;

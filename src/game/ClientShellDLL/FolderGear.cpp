@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderGear.h"
 #include "FolderCommands.h"
 #include "MissionData.h"
@@ -534,7 +534,7 @@ void CFolderGear::SkipOutfitting()
 		pData->AddGear(nGID);
 		nSlotsUsed++;
 	}
-	for (i=0; i< pMission->nNumOneTimeGear; i++)
+	for (int i=0; i< pMission->nNumOneTimeGear; i++)
 	{
 		nGID = pMission->aOneTimeGear[i];
 		pGear = g_pWeaponMgr->GetGear(nGID);
@@ -545,7 +545,7 @@ void CFolderGear::SkipOutfitting()
 	int nNumSlots	= pMission->nNumGear;
 	if (nNumSlots == -1 || nNumSlots > MAX_SELECTION_SLOTS)
 		nNumSlots = MAX_SELECTION_SLOTS;
-	for (i=0; nSlotsUsed < nNumSlots && i < pMission->nNumOneTimeGear; i++)
+	for (int i=0; nSlotsUsed < nNumSlots && i < pMission->nNumOneTimeGear; i++)
 	{
 		nGID = pMission->aOneTimeGear[i];
 		pGear = g_pWeaponMgr->GetGear(nGID);

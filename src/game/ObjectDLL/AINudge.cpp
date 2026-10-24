@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "StdAfx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include "AINudge.h"
 #include "AIHuman.h"
 
@@ -59,7 +61,7 @@ void CNudge::Update(LTBOOL bMoving)
 	CAIHuman* apAIs[64];
 	uint32 cAIs = 0;
 
-    static HCLASS hClass = g_pLTServer->GetClass("CAIHuman");
+    const HCLASS hClass = g_pLTServer->GetClass("CAIHuman");
 
     ObjectList* pObjectList = g_pLTServer->FindObjectsTouchingSphere(&vPos, fRadius);
 	ObjectLink* pObject = pObjectList ? pObjectList->m_pFirstLink : LTNULL;
@@ -129,5 +131,5 @@ void CNudge::Update(LTBOOL bMoving)
         m_vNudge += vNudgeDir*fNudgeAmount*g_pLTServer->GetFrameTime();
 	}
 
-	_ASSERT((LTFLOAT)fabs(m_vNudge.y < MATH_EPSILON));
+	GAME_ASSERT((LTFLOAT)fabs(m_vNudge.y < MATH_EPSILON));
 }

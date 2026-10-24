@@ -13,7 +13,7 @@
 #define _LTMASKEDWND_H_
 
 // Includes
-#include "LTWnd.h"
+#include "LtWnd.h"
 
 // Classes
 class CLTMaskedWnd : public CLTWnd

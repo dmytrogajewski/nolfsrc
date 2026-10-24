@@ -13,6 +13,7 @@
 
 
 #include "iservershell.h"
+#include <random>
 #include "ClientServerShared.h"
 #include "CheatDefs.h"
 #include "CharacterMgr.h"
@@ -163,6 +164,7 @@ class CGameServerShell : public IServerShell
 		void		ProcessHandshake(HCLIENT hClient, HMESSAGEREAD hMessage);
 
 	private :
+        uint32 m_handshakeMask = std::random_device{}();
 
 		void HandleUpdatePlayerMsg(HCLIENT hSender, HMESSAGEREAD hMessage);
         void HandleCheatCode(CPlayerObj* pPlayer, CheatCode nCheatCode, uint8 nData);

@@ -1,8 +1,10 @@
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "engine/portable/string.h"
 #include "FolderMgr.h"
 #include "BaseFolder.h"
 #include "JoystickAxis.h"
-#include "clientres.h"
+#include "ClientRes.h"
 
 
 // Slider ranges
@@ -280,7 +282,7 @@ BOOL CJoystickAxisBase::SetDeviceName(ILTClient *pClientDE)
 	{
 		if ((pObj->m_ObjectName != NULL) && (pObj->m_DeviceName != NULL) && (pObj->m_DeviceType == DEVICETYPE_JOYSTICK))
 		{
-			if (stricmp(pObj->m_DeviceName, m_sDeviceName) == 0) bDeviceNameFound = TRUE;
+			if (nolf::ascii_compare(pObj->m_DeviceName, m_sDeviceName) == 0) bDeviceNameFound = TRUE;
 		}
 		pObj = pObj->m_pNext;
 	}
@@ -327,7 +329,7 @@ void CJoystickAxisBase::CreateAxisArray(ILTClient *pClientDE)
 		if ((pObj->m_ObjectName != NULL) && (pObj->m_DeviceName != NULL))
 		{
 			if ((pObj->m_DeviceType == DEVICETYPE_JOYSTICK) &&
-				(stricmp(pObj->m_DeviceName, m_sDeviceName) == 0) &&
+				(nolf::ascii_compare(pObj->m_DeviceName, m_sDeviceName) == 0) &&
 				((pObj->m_ObjectType == CONTROLTYPE_XAXIS) ||
 				 (pObj->m_ObjectType == CONTROLTYPE_YAXIS) ||
 				 (pObj->m_ObjectType == CONTROLTYPE_ZAXIS) ||
@@ -369,7 +371,7 @@ void CJoystickAxisBase::GetJoystickBindingInfo(ILTClient *pClientDE)
 	DeviceBinding* pCurrentBinding = pBinding;
 	while (pCurrentBinding != NULL)
 	{
-		if ((stricmp(pCurrentBinding->strDeviceName, m_sDeviceName) == 0) &&
+		if ((nolf::ascii_compare(pCurrentBinding->strDeviceName, m_sDeviceName) == 0) &&
 			(GetAxisIndex(pClientDE, pCurrentBinding->strTriggerName) > 0))
 		{
 //			pClientDE->CPrint("Checking device = %s trigger = %s", pCurrentBinding->strDeviceName, pCurrentBinding->strTriggerName ); // BLB TEMP
@@ -387,9 +389,9 @@ void CJoystickAxisBase::GetJoystickBindingInfo(ILTClient *pClientDE)
 				if (sActionName != NULL)
 				{
 //					pClientDE->CPrint("Checking action = %s", sActionName ); // BLB TEMP
-					if (stricmp(sActionName, m_sActionAnalog) == 0) pAnalogAction = pAction;
-					if (stricmp(sActionName, m_sActionDigitalHigh) == 0) pDigitalHighAction = pAction;
-					if (stricmp(sActionName, m_sActionDigitalLow) == 0) pDigitalLowAction = pAction;
+					if (nolf::ascii_compare(sActionName, m_sActionAnalog) == 0) pAnalogAction = pAction;
+					if (nolf::ascii_compare(sActionName, m_sActionDigitalHigh) == 0) pDigitalHighAction = pAction;
+					if (nolf::ascii_compare(sActionName, m_sActionDigitalLow) == 0) pDigitalLowAction = pAction;
 				}
 				pAction = pAction->pNext;
 				if (pAction == pCurrentBinding->pActionHead) break;
@@ -464,9 +466,9 @@ void CJoystickAxisBase::GetJoystickBindingInfo(ILTClient *pClientDE)
 // Send out a rangebind to the console
 void CJoystickAxisBase::DoRangeBind(ILTClient *pClientDE, char *lpszDevice, char *lpszControlName, char *lpszActionName, float nRangeLow, float nRangeHigh)
 {
-	assert(lpszControlName);
-	assert(lpszActionName);
-	assert(lpszDevice);
+	GAME_ASSERT(lpszControlName);
+	GAME_ASSERT(lpszActionName);
+	GAME_ASSERT(lpszDevice);
 
 	if (lpszControlName == NULL) return;
 	if (lpszActionName == NULL) return;
@@ -482,8 +484,8 @@ void CJoystickAxisBase::DoRangeBind(ILTClient *pClientDE, char *lpszDevice, char
 // Clear a rangebind to the console
 void CJoystickAxisBase::ClearRangeBind(ILTClient *pClientDE, char *lpszDevice, char *lpszControlName)
 {
-	assert(lpszControlName);
-	assert(lpszDevice);
+	GAME_ASSERT(lpszControlName);
+	GAME_ASSERT(lpszDevice);
 
 	if (lpszControlName == NULL) return;
 	if (lpszDevice == NULL) return;
@@ -498,8 +500,8 @@ void CJoystickAxisBase::ClearRangeBind(ILTClient *pClientDE, char *lpszDevice, c
 // Send out a rangescale to the console
 void CJoystickAxisBase::DoRangeScale(ILTClient *pClientDE, char *lpszDevice, char *lpszControlName, float nScale, float nRangeScaleMin, float nRangeScaleMax, float nRangeScalePreCenterOffset)
 {
-	assert(lpszControlName);
-	assert(lpszDevice);
+	GAME_ASSERT(lpszControlName);
+	GAME_ASSERT(lpszDevice);
 
 	if (lpszControlName == NULL) return;
 	if (lpszDevice == NULL) return;
@@ -514,7 +516,7 @@ void CJoystickAxisBase::DoRangeScale(ILTClient *pClientDE, char *lpszDevice, cha
 // Set a consolve var to a float
 void CJoystickAxisBase::SetConsoleVar(ILTClient *pClientDE, char *lpszName, float nVal)
 {
-	assert(lpszName);
+	GAME_ASSERT(lpszName);
 
 	if (lpszName == NULL) return;
 
@@ -531,7 +533,7 @@ int CJoystickAxisBase::GetAxisIndex(ILTClient *pClientDE, char* sAxisName)
 	// loop through all axis trying to find the matching axis (skip 0 becaus it is the none axis)
 	for (int i = 1; i < m_nNumJoystickAxis; i++)
 	{
-		if (stricmp(sAxisName, m_aryAxisInfo[i].GetName()) == 0) return i;
+		if (nolf::ascii_compare(sAxisName, m_aryAxisInfo[i].GetName()) == 0) return i;
 	}
 	return 0;
 }
@@ -597,7 +599,7 @@ void CJoystickAxisBase::LoadFromConsole(ILTClient *pClientDE)
 		}
 		else
 		{
-			if (stricmp(m_sActionName, m_sActionDigitalLow) == 0)
+			if (nolf::ascii_compare(m_sActionName, m_sActionDigitalLow) == 0)
 			{
                 if (m_fRangeLow < m_fRangeLow2) m_bInvertAxis = LTFALSE;
                 else m_bInvertAxis = LTTRUE;
@@ -855,7 +857,6 @@ void CJoystickAxisTurn::SaveToConsole(ILTClient *pClientDE)
 // Constructor
 CJoystickAxisLook::CJoystickAxisLook()
 {
-	CJoystickAxisBase::CJoystickAxisBase();
 
 	// Members
     m_bFixedPosition=LTTRUE;
@@ -992,7 +993,6 @@ void CJoystickAxisLook::SaveToConsole(ILTClient *pClientDE)
 // Contructor
 CJoystickAxisMove::CJoystickAxisMove()
 {
-	CJoystickAxisBase::CJoystickAxisBase();
 }
 
 // Load from the console

@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMain.h"
 #include "FolderMgr.h"
 #include "LayoutMgr.h"

@@ -1,3 +1,4 @@
+#include "engine/portable/string.h"
 //*********************************************************************************
 //*********************************************************************************
 // Project:		Lith Tech Font Manager
@@ -45,8 +46,7 @@ LithFont* CreateLithFont(ILTClient *pClient, LITHFONTCREATESTRUCT *lfCS, LTBOOL 
 
 void FreeLithFont(LithFont *lf)
 {
-	if (lf)
-		lf->Free();
+	delete lf;
 }
 
 //*********************************************************************************
@@ -72,8 +72,7 @@ LithCursor* CreateLithCursor(ILTClient *pClient, LITHCURSORCREATESTRUCT *lcCS)
 
 void FreeLithCursor(LithCursor *lc)
 {
-	if (lc)
-		lc->Free();
+	delete lc;
 }
 
 //*********************************************************************************
@@ -88,7 +87,7 @@ LithFontMgr::LithFontMgr()
 	for (int i = 0; i < LTF_MGR_MAX_FONTS; i++)
 		m_pFontList[i] = LTNULL;
 
-	for (i = 0; i < LTF_MGR_MAX_CURSORS; i++)
+	for (uint32 i = 0; i < LTF_MGR_MAX_CURSORS; i++)
 		m_pCursorList[i] = LTNULL;
 
 	m_bEnglish = LTFALSE;
@@ -116,7 +115,7 @@ void LithFontMgr::Free()
 	m_pClient = LTNULL;
 
 	int i;
-	for (i = 0; i < LTF_MGR_MAX_FONTS; i++)
+	for (uint32 i = 0; i < LTF_MGR_MAX_FONTS; i++)
 	{
 		if (m_pFontList[i])
 		{
@@ -126,7 +125,7 @@ void LithFontMgr::Free()
 		}
 	}
 
-	for (i = 0; i < LTF_MGR_MAX_CURSORS; i++)
+	for (uint32 i = 0; i < LTF_MGR_MAX_CURSORS; i++)
 	{
 		if (m_pCursorList[i])
 		{
@@ -141,7 +140,7 @@ void LithFontMgr::Free()
 
 LithFont* LithFontMgr::AddFont(LITHFONTCREATESTRUCT *lfCS, int nIndex)
 {
-	if (!m_pClient || (!lfCS->szFontBitmap && !lfCS->szFontName))
+	if (!m_pClient || !lfCS || (!lfCS->szFontBitmap && !lfCS->szFontName) || nIndex < -1 || nIndex >= LTF_MGR_MAX_FONTS)
 		return LTNULL;
 
 	if (nIndex == -1)
@@ -171,7 +170,10 @@ LithFont* LithFontMgr::AddFont(LITHFONTCREATESTRUCT *lfCS, int nIndex)
 	if (!m_pFontList[nIndex])
 		return LTNULL;
 
-	m_pFontList[nIndex]->Init(m_pClient, lfCS);
+	if (!m_pFontList[nIndex]->Init(m_pClient, lfCS)) {
+		delete m_pFontList[nIndex]; m_pFontList[nIndex] = LTNULL;
+		return LTNULL;
+	}
 
 	return m_pFontList[nIndex];
 }
@@ -200,13 +202,12 @@ LTBOOL LithFontMgr::DeleteFont(char *szName)
 	if (!szName)
 		return LTFALSE;
 
-	strupr(szName);
 
 	for (int i = 0; i < LTF_MGR_MAX_FONTS; i++)
 	{
 		if (m_pFontList[i])
 		{
-			if (!strcmp(m_pFontList[i]->GetRefName(), szName))
+			if (nolf::ascii_compare(m_pFontList[i]->GetRefName(), szName) == 0)
 			{
 				m_pFontList[i]->Free();
 				delete m_pFontList[i];
@@ -237,13 +238,12 @@ LithFont* LithFontMgr::Font(char *szName)
 	if (!szName)
 		return LTNULL;
 
-	strupr(szName);
 
 	for (int i = 0; i < LTF_MGR_MAX_FONTS; i++)
 	{
 		if (m_pFontList[i])
 		{
-			if (!strcmp(m_pFontList[i]->GetRefName(), szName))
+			if (nolf::ascii_compare(m_pFontList[i]->GetRefName(), szName) == 0)
 				return m_pFontList[i];
 		}
 	}
@@ -255,16 +255,13 @@ LithFont* LithFontMgr::Font(char *szName)
 
 LithCursor* LithFontMgr::AddCursor(LITHCURSORCREATESTRUCT *lcCS, int nIndex)
 {
-	if (!m_pClient)
+	if (!m_pClient || !lcCS || nIndex < -1 || nIndex >= LTF_MGR_MAX_CURSORS)
 		return LTNULL;
 
 	if (nIndex == -1)
 	{
-		// Find the first available slot
-		// NOTE: the shipped code scans only LTF_MGR_MAX_FONTS (32) slots of
-		// the 64-entry cursor list here — an original Monolith bug,
-		// preserved for byte-identity.
-		for (int i = 0; i < LTF_MGR_MAX_FONTS; i++)
+		// Find the first available cursor slot.
+		for (int i = 0; i < LTF_MGR_MAX_CURSORS; i++)
 		{
 			if (!m_pCursorList[i])
 				return AddCursor(lcCS, i);
@@ -280,7 +277,10 @@ LithCursor* LithFontMgr::AddCursor(LITHCURSORCREATESTRUCT *lcCS, int nIndex)
 
 	if (m_pCursorList[nIndex])
 	{
-		m_pCursorList[nIndex]->Init(m_pClient, lcCS);
+		if (!m_pCursorList[nIndex]->Init(m_pClient, lcCS)) {
+			delete m_pCursorList[nIndex]; m_pCursorList[nIndex] = LTNULL;
+			return LTNULL;
+		}
 		return m_pCursorList[nIndex];
 	}
 
@@ -311,13 +311,12 @@ LTBOOL LithFontMgr::DeleteCursor(char *szName)
 	if (!szName)
 		return LTFALSE;
 
-	strupr(szName);
 
 	for (int i = 0; i < LTF_MGR_MAX_CURSORS; i++)
 	{
 		if (m_pCursorList[i])
 		{
-			if (!strcmp(m_pCursorList[i]->GetRefName(), szName))
+			if (nolf::ascii_compare(m_pCursorList[i]->GetRefName(), szName) == 0)
 			{
 				m_pCursorList[i]->Free();
 				delete m_pCursorList[i];
@@ -348,13 +347,12 @@ LithCursor* LithFontMgr::Cursor(char *szName)
 	if (!szName)
 		return LTNULL;
 
-	strupr(szName);
 
 	for (int i = 0; i < LTF_MGR_MAX_CURSORS; i++)
 	{
 		if (m_pCursorList[i])
 		{
-			if (!strcmp(m_pCursorList[i]->GetRefName(), szName))
+			if (nolf::ascii_compare(m_pCursorList[i]->GetRefName(), szName) == 0)
 				return m_pCursorList[i];
 		}
 	}

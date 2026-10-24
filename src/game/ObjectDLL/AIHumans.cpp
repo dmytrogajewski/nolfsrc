@@ -1,5 +1,5 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "AIHumans.h"
 #include "AISense.h"
 

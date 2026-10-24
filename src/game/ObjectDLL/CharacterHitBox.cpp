@@ -10,14 +10,14 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "CharacterHitBox.h"
 #include "Character.h"
 #include "Body.h"
 #include "Projectile.h"
 #include "ServerUtilities.h"
 #include "CVarTrack.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 #include "ObjectMsgs.h"
 #include "Attachments.h"
 #ifdef NOLFSRC_MODERN

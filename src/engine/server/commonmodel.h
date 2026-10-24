@@ -21,59 +21,18 @@
 #ifndef __COMMONMODEL_H__
 #define __COMMONMODEL_H__
 
+#include <vector>
+#include <array>
+#include <atomic>
+#include <memory>
+#include <span>
+#include "observer.h"
 #include "ltanimtracker.h"
+#include "iltmodel.h"
 #include "ltobject_internal.h"
 #include "collection.h"
+#include "engine/portable/arena.h"
 
-// The array allocator with constructor arguments. stdlith's own `BaseNew`
-// (collection.h) default-constructs its elements; the model reader needs the
-// two forms that pass the element's constructor one and two arguments, and
-// the shipped image carries six such instantiations in one run at
-// 0x1001cc25-0x1001cdd5 — element sizes 0x30, 0xb4, 0x34, 0x28, 0x6c and
-// 0x5c, each with its own element constructor baked in and each reached with
-// a five- or four-dword cdecl argument list.
-//
-// THESE BELONG IN collection.h, next to the three-argument BaseNew they
-// overload; they are here only because that file is not ours to edit.
-template<class T, class A1>
-inline T* BaseNew(LAlloc* pAlloc, T* dummy, uint32 nElements, A1 arg1)
-{
-	T *ptr, *pTemp;
-
-	ptr = (T*)pAlloc->Alloc(sizeof(T) * nElements);
-	if (!ptr)
-		return 0;
-
-	pTemp = ptr;
-	while (nElements)
-	{
-		--nElements;
-		::new(pTemp, (DummyClassBlahBlah*)0) T(arg1);
-		++pTemp;
-	}
-
-	return ptr;
-}
-
-template<class T, class A1, class A2>
-inline T* BaseNew(LAlloc* pAlloc, T* dummy, uint32 nElements, A1 arg1, A2 arg2)
-{
-	T *ptr, *pTemp;
-
-	ptr = (T*)pAlloc->Alloc(sizeof(T) * nElements);
-	if (!ptr)
-		return 0;
-
-	pTemp = ptr;
-	while (nElements)
-	{
-		--nElements;
-		::new(pTemp, (DummyClassBlahBlah*)0) T(arg1, arg2);
-		++pTemp;
-	}
-
-	return ptr;
-}
 
 // LTAnimTracker::m_Flags. ltanimtracker.h refers to "AT_ flags above" but the
 // SDK copy does not define them — they are engine-internal. Bit 0 is tested by
@@ -163,7 +122,7 @@ public:
 class CModelXform
 {
 public:
-	CModelXform() {}
+	CModelXform() : m_Pos(0,0,0) { m_Rot.Init(); }
 
 	CModelXform(const CModelXform& other)
 	{
@@ -240,99 +199,99 @@ public:
 	float m_f;
 };
 
-class ModelAnim
-{
-public:
-	// 0x1001690b — how long the animation runs, which is the time on its
-	// last keyframe. An animation with no keyframes has no length.
-	uint32 GetLength();
+class ModelAnim;
+class ModelAnimationNode;
 
-	// THIS CLASS AND `CUnknownD9E4` IN commonmodel.cpp ARE THE SAME CLASS.
-	// The reader at 0x1001bc69 is what proves it: reached as
-	// `AnimInfo::m_pAnim->...`, it fills +0x0c/+0x10 with a keyframe array
-	// of 0x14-byte records (this class's m_pKeyFrames / m_nKeyFrames), the
-	// dword at +0x1c with the file's interpolation time
-	// (m_nInterpolationTime), and +0x24 with the name (m_pName) — every one
-	// of them at the offset this class already had, and CUnknownD9E4's own
-	// constructor at 0x1001674d allocates exactly 0x5c bytes for them.
-	//
-	// They are still two declarations, and the reason is a real conflict
-	// rather than an oversight. The keyframe table is a
-	// `CMoArray<AnimKeyFrame, NoCache>` member at +0x08 — the destructor at
-	// 0x100167b4 re-stores that collection's vtable and Term()s it, so it
-	// HAS to be a member for the teardown to be emitted — but GetLength
-	// below needs the element count `volatile`, which a collection member
-	// cannot carry. Unifying them means finding the spelling that gets
-	// both, and it is not `volatile` on the member (which would make the
-	// whole collection volatile) nor a volatile-qualified GetLength (not
-	// probed yet).
-
-	uint8         m_pad_00[0x0c];
-	AnimKeyFrame* m_pKeyFrames;              // 0x0c
-	// volatile, and the bytes insist on it: GetLength compares the count
-	// against memory and then loads it a second time for the subscript,
-	// which no non-volatile source shape reproduces (twelve probed — the
-	// guard as `> 0`, `!= 0`, `== 0`, `>= 1`, through an inline accessor,
-	// through an inline predicate, as a ternary, through a result variable,
-	// and with the pointer volatile instead; every one of them loads the
-	// count once into a register). A model is loaded on the worker thread
-	// and its keyframes are published to whoever is already animating it,
-	// so a volatile count is what the shipped source meant.
-	volatile uint32 m_nKeyFrames;            // 0x10
-	uint8         m_pad_14[0x1c - 0x14];
-	// How long a blend into this animation lasts. at_Advance runs the
-	// tracker's own interpolation counter up against this and divides by it
-	// for the blend percentage, so it is the total in milliseconds (name
-	// ours).
-	uint32        m_nInterpolationTime;      // 0x1c
-	// 0x20 — the model this animation belongs to. Model's own release
-	// (0x100170f2) walks the animation table and gives back exactly the
-	// records whose +0x20 is itself, so an animation that came in with a
-	// child model is left for that model to free (name ours).
-	class Model*  m_pModel;                  // 0x20
-	char*         m_pName;                   // 0x24
-
-	// An in-class one-liner, and FindAnimInModel is what says it exists: the
-	// shipped call there materialises the name into a register first
-	// (`mov 0x24(%eax),%eax; push %eax`) where a raw member read gives
-	// `push 0x24(%eax)`. That is the documented accessor fingerprint. Model's
-	// own FindAnim reads the field directly and matches that way, so the
-	// original had both spellings.
-	char* GetName() { return m_pName; }
-};
-
-// THIS CLASS AND `Model::CModelSub20C` BELOW ARE THE SAME CLASS. Three
-// independent facts say so: the record is 0xb4 bytes (CModelSub20C's own
-// factory allocates exactly that) and the name is at +0xb0 in both; the
-// reader's node pass (0x1001bd54) builds the tree out of CModelSub20C's own
-// factory slot and stores the results in Model::m_Nodes; and 0x10017517
-// walks m_Nodes reading the 4x4 at +0x2c, which is CModelSub20C's m_Mat2c.
-// They are still two declarations because CModelSub20C is nested inside
-// Model — which is declared after this — and one of its instances is
-// embedded in Model by value, so it cannot simply be moved up here.
-//
-// The fields below are the ones 0x10017517 and 0x1001c1a5 reach; the rest of
-// the layout is on CModelSub20C (names ours).
 class ModelNode
-{
-public:
-	uint8    m_pad_00[0x04];
-	// 0x04, 0x08, 0x0c — where this node sits relative to its parent,
-	// recomputed by 0x10017517 as the translation of the parent's inverse
-	// times this node's own transform. A root node (no parent in range)
-	// gets zero.
-	float    m_fRelX;                        // 0x04
-	float    m_fRelY;                        // 0x08
-	float    m_fRelZ;                        // 0x0c
-	uint8    m_pad_10[0x28 - 0x10];
-	// 0x28 — this node's parent, as an index into the model's node array.
-	// A root's index is out of range (the tree writes all-ones), which is
-	// the test 0x10017517 makes.
-	uint32   m_iParent;                      // 0x28
-	LTMatrix m_Transform;                    // 0x2c
-	uint8    m_pad_6c[0xb0 - 0x6c];
-	char*    m_pName;                        // +0xb0
-};
+	{
+	public:
+		// 0x1001bd54 — the "Nodes" chunk: the node tree out of the file
+		// (name ours).
+		LTBOOL sub_1001bd54(class ILTStream* pStream);
+
+		ModelNode();
+        ModelNode(const ModelNode&) = delete;
+        ModelNode& operator=(const ModelNode&) = delete;                      // 0x1001694e
+		// 0x10016990 — the same object built against a model: identical to
+		// the default constructor except that the model goes into +0xac
+		// instead of a zero. It is what slot 0x08 news up.
+		ModelNode(Model* pModel);         // 0x10016990
+		virtual ~ModelNode();
+		// 0x100169dd — the destructor's whole body, and the model's own
+		// release (0x10017016) calls it too, which is what says it is a
+		// member rather than the destructor written inline: it hands the
+		// collection at +0x18 back to the model's data block (the model is
+		// at +0xac and its block at +0x174) and then runs the reset below
+		// (names ours).
+		void   sub_100169dd();               // 0x100169dd
+		// 0x10016a00 — the reset the constructor ends with and the release
+		// runs again: three floats, two counters and a name pointer back to
+		// their defaults, plus two sub-records at +0x2c and +0x6c cleared
+		// through 0x10011e2b. Declared only — its fields are not named yet
+		// (name ours).
+		void   sub_10016a00();               // 0x10016a00
+		// Slot 0x04 is `ret $0xc` — three dwords of arguments and no body,
+		// which is all that fixes its shape. Slot 0x08 is a factory: it
+		// asks the engine allocator for 0xb4 bytes — this class's own size,
+		// which is the independent confirmation of the extent — and runs
+		// the model-taking constructor on it. Slot 0x0c is the one Model's
+		// constructor calls (names ours).
+		virtual void _v04(uint32 a, uint32 b, uint32 c);   // 0x10016971
+		virtual ModelNode* Create(Model* pModel);       // 0x10016a37
+		virtual void SetModel(Model* pModel);              // 0x10016a58
+
+		// 0x10016a9b — how many nodes this subtree is: itself plus every
+		// child's answer, recursively. Forty bytes, and the one that says
+		// the array at +0x18 is the child list (name ours).
+		uint32 sub_10016a9b();
+		// 0x10016ac3 — walk the subtree into the owning model's node array,
+		// taking the next index from the caller's counter. Declared only
+		// (name ours).
+		LTBOOL sub_10016ac3(uint32* pnIndex);
+		// 0x10016b11 — set this subtree's own index, recursively.
+		// Declared only (name ours).
+		void   sub_10016b11(uint32 nIndex);
+
+		// 0x10016304 — do two node trees have the same SHAPE? A free
+		// function rather than a member: it compares child counts level by
+		// level and recurses pairwise, and the first node whose count
+		// disagrees goes out through the third argument. Deeper mismatches
+		// are reported by the recursion that found them, which is why this
+		// level only stores on its own test (name ours).
+		friend LTBOOL mod_SameNodeTree(ModelNode* pA, ModelNode* pB,
+		                               ModelNode** ppMismatch);
+
+		// 0x04 .. 0x12 — what the reset at 0x10016a00 writes: three floats
+		// zeroed through `fldz`/`fstps`, a word and a byte cleared with
+		// `andw`/`andb` (which is what fixes their widths), and the name
+		// pointer at 0xb0 put on the shared empty string. Named for their
+		// offsets; nothing reads them in the reconstructed set.
+		float  m_f04;                        // 0x04
+		float  m_f08;                        // 0x08
+		float  m_f0c;                        // 0x0c
+		uint16 m_n10;                        // 0x10
+		uint8  m_b12;                        // 0x12
+
+		// The elements are ModelNode* and the walk in SetModel says so:
+		// it calls slot 0x0c on each of them, with the same model, which is
+		// this class's own SetModel and no other (name ours).
+		CMoArray<ModelNode*, NoCache> m_Array18;   // 0x18
+		uint32 m_iParent = 0xffffffff;
+		// 0x2c and 0x6c — two 4x4s, and the pair is what closes this class:
+		// the reset runs LTMatrix::Identity (0x10011e2b, the same call
+		// GetNodeTransform makes) over +0x2c and then over +0x6c, and
+		// 0x6c + 0x40 lands exactly on the model back-pointer below.
+		LTMatrix m_Mat2c;                    // 0x2c
+		LTMatrix m_Mat6c;                    // 0x6c
+		// 0xac — the model this belongs to, and not merely a pointer: the
+		// release at 0x100169dd loads it and then reads +0x174 off it,
+		// which is Model::m_pDataBlock. SetModel (slot 0x0c) is what fills
+		// it; Model's constructor calls that with `this`.
+		Model* m_pModel;                     // 0xac
+		char*  m_pName;                      // 0xb0  the shared empty string
+	};
+
+
 // EvalSocket reads every field of a socket: the offset the attachment sits
 // at, the rotation it sits at, and the node it hangs off. The name's extent
 // is fixed by the node index that follows it (names ours).
@@ -367,41 +326,69 @@ public:
 // 0x1001bf85 reads, which is called both on the piece itself and on each
 // element of the 0x24-strided collection at +0x34, so the piece opens with
 // one of them and carries a list of the rest (names ours).
-class ModelPiece
+class ModelVertex
 {
 public:
-	// 0x1001c1a5 — this piece off the wire. The second argument is a running
-	// base the reader advances (name ours).
+    CModelVertRec* weights=nullptr;
+    uint16 weight_count=0,replacement=0;
+    LTVector position{0,0,0},normal{0,0,0};
+};
+using ModelPieceLod=ModelVertex;
+
+class ModelTriangle
+{
+public:
+    uint16 indices[3]{};
+    float uv[3][2]{};
+};
+using ModelPieceDimension=ModelTriangle;
+
+class ModelPieceData
+{
+public:
+	// 0x1001bf85 / 0x0044d3f0.
+	LTBOOL ReadVertexData(class ILTStream* pStream, uint32* pnBase);
+	// 0x00446090 -- `mov 0x4(%esp),%eax; mov %eax,0x20(%ecx); ret $0x4`.
+	void   SetModel(class Model* pModel);
+	ModelPieceData() : m_pModel(nullptr) {}
+    ModelPieceData(const ModelPieceData& other);
+    ModelPieceData& operator=(const ModelPieceData& other);
+    explicit ModelPieceData(Model* model) : m_pModel(model) {}                        // through BaseNew at 0x0044cae0
+	~ModelPieceData();
+
+	CMoArray<ModelPieceLod, NoCache> m_Array00;   // 0x00
+	CMoArray<ModelPieceDimension, NoCache> m_Array10;   // 0x10
+    std::span<const ModelVertex> vertices() const { return {m_Array00.GetArray(),m_Array00.GetSize()}; }
+    std::span<const ModelTriangle> triangles() const { return {m_Array10.GetArray(),m_Array10.GetSize()}; }
+	class Model* m_pModel;                        // 0x20
+};
+
+// commonmodel.h's ModelPiece with the first 0x24 bytes and m_Array34 given
+// their real types.  Same offsets, same size (0x6c).
+class ModelPiece : public ModelPieceData
+{
+public:
+    explicit ModelPiece(Model* model);
+    ~ModelPiece();
+    ModelPiece(const ModelPiece&) = delete;
+    ModelPiece& operator=(const ModelPiece&) = delete;
+    ModelPieceData* GetPieceData(uint32 i) { return i == 0 ? this : i <= m_Array34.GetSize() ? &m_Array34[i - 1] : nullptr; }
+    const ModelPieceData* GetPieceData(uint32 i) const { return i == 0 ? this : i <= m_Array34.GetSize() ? &m_Array34[i - 1] : nullptr; }
+    uint32& m_nSize = m_Array00.m_nElements;
+	// 0x1001c1a5 / 0x0044d6e0.
 	LTBOOL sub_1001c1a5(class ILTStream* pStream, uint32* pnBase);
 
-	// 0x10016bdb and 0x10016c14 — build one against a model, and take it
-	// apart. Both declared only: the reader that allocates pieces
-	// (0x1001c604) is not reconstructed yet, and the destructor is reached
-	// only through BaseDelete (names ours).
-	ModelPiece(class Model* pModel);
-	~ModelPiece();
-
-	uint8  m_pad_00[0x08];
-	// 0x08 and 0x28 — how much of the model's vertex data this piece takes,
-	// and where it starts. 0x100171f4 walks the piece table assigning each
-	// one the running total of the sizes before it, which is what pairs
-	// them (names ours).
-	uint32 m_nSize;                          // +0x08
-	uint8  m_pad_0c[0x24 - 0x0c];
-	// 0x24 — a word off the wire, widened to a dword (`movzwl` then a
-	// four-byte store), read first of everything the piece carries.
-	uint32 m_Unknown24;                      // +0x24
-	uint32 m_nOffset;                        // +0x28
-	float  m_f2c;                            // +0x2c
-	float  m_f30;                            // +0x30
-	// 0x34 — the rest of the piece's vertex-data records, 0x24 bytes each,
-	// one per whatever the model counts at its own +0x94.
-	uint8  m_Array34[0x44 - 0x34];           // +0x34
-	// 0x44 — one more dword, and only for file version 10 and up.
-	uint32 m_Unknown44;                      // +0x44
-	char   m_Name[0x68 - 0x48];              // +0x48
-	class Model* m_pModel;                   // +0x68
+	uint32 m_Unknown24;                      // 0x24
+	uint32 m_nOffset;                        // 0x28
+	float  m_f2c;                            // 0x2c
+	float  m_f30;                            // 0x30
+	CMoArray<ModelPieceData, NoCache> m_Array34;  // 0x34
+	uint32 m_Unknown44;                      // 0x44
+	char   m_Name[0x68 - 0x48];              // 0x48
+	class Model* m_pModel68;                 // 0x68
 };
+
+
 
 // One weight set: a sixteen-byte name and one four-byte weight per node.
 // 0x28 bytes, which is what its own allocator bakes in (0x1001cce3), and its
@@ -423,7 +410,7 @@ public:
 	// The name is read with ILTStream::ReadString straight into the record
 	// with a limit of 0x10, which is what fixes its size.
 	char   m_Name[0x10];                     // +0x00
-	CMoArray<uint32, DefaultCache> m_Weights;// +0x10 .. 0x24
+	CMoArray<float, DefaultCache> m_Weights;// +0x10 .. 0x24
 	class Model* m_pModel;                   // +0x24
 };
 
@@ -454,42 +441,7 @@ public:
 	LTVector   m_vAnimBinding;               // 0x14
 };
 
-// What a model's memory is taken from: an interface whose vtable slot 1 is
-// the allocate. Nothing here needs more of it than that (name ours; the two
-// `uint32*` allocator parameters elsewhere in this file are the same thing
-// seen without its shape).
-class IMoAllocator
-{
-public:
-	virtual void  _v00() = 0;
-	virtual void* Alloc(uint32 nBytes) = 0;   // 0x04
-};
-
-// 0x1003d3f0 — take a run of bytes from one of those. The size is rounded up
-// to a multiple of four and a zero-length request allocates nothing and still
-// succeeds; a refused request leaves the null in the data pointer and answers
-// LTFALSE. The four fields below are every field that function touches — it
-// also calls something on `this` first, so the record is longer than 0x14 and
-// its extent is not pinned by anything read so far (names ours).
-class CMoMemBlock
-{
-public:
-	// 0x1003d330 — stores a vptr (0x1004eb00) and sets up an SEH frame, so
-	// it owns something whose construction can unwind. Model's constructor
-	// only calls it, and calls it through a masked relocation, so the
-	// declaration is all that is needed here.
-	CMoMemBlock();                           // 0x1003d330
-	// 0x1003d3a0 — above the app-region cut with its constructor, so only
-	// the declaration is needed; Model's destructor calls it at +0x17c.
-	~CMoMemBlock();                          // 0x1003d3a0
-	LTBOOL Alloc(IMoAllocator* pAlloc, uint32 nSize);   // 0x1003d3f0
-
-	uint8         m_pad_00[0x04];
-	IMoAllocator* m_pAlloc;                  // 0x04
-	void*         m_pData;                   // 0x08
-	uint32        m_Unknown_0c;              // 0x0c  set to zero by Alloc
-	uint32        m_nSize;                   // 0x10  the rounded size
-};
+using IMoAllocator = LAlloc;
 
 // 0x100163fa — a slot that can be filled once: a second call is refused with
 // LTFALSE and changes nothing. Model builds one at +0x84 with the first of
@@ -594,7 +546,15 @@ public:
 	CModelFileCounts m_Counts;               // 0x00 .. 0x34
 };
 
-class Model
+// Shared native model state. Instance construction and tracker initialization
+// need these records independently of the file loader's polymorphic lifetime.
+struct ModelRuntimeData {
+    char* m_pFilename = nullptr;
+    float m_f0a8 = 50;
+    CMoArray<AnimInfo, NoCache> m_AnimArray;
+};
+
+class Model : public ModelRuntimeData
 {
 public:
 	// Two allocators, and the same two at both call sites: the manager's
@@ -631,7 +591,7 @@ public:
 	// code still recomputes the address with `lea -0x10(%ebp),%eax` instead
 	// of using that return value, which is what a named local does and a
 	// temporary does not.
-	Model(uint32* pAlloc1, uint32* pAlloc2);   // 0x10016cc5
+	Model(LAlloc* pAlloc1, LAlloc* pAlloc2);   // 0x10016cc5
 
 	// Polymorphic: FreeUnusedModels deletes through vtable slot 0.
 	// 0x10016f26 — the body is three statements (the release call below and
@@ -742,14 +702,13 @@ public:
 	                    Model* pModel, char* pName);
 	// 0x10017b69 — whatever a child record's +0x2c holds, derived from the
 	// model at its +0x28. Reached only when that model is set.
-	uint32 sub_10017b69(Model* pModel, uint32* pOut);
+	uint32 sub_10017b69(Model* pModel, ModelNode** pOut);
 	// 0x1001c36c — the "AnimBindings" chunk (271 bytes, not reconstructed).
 	LTBOOL sub_1001c36c(class CModelLoadRequest* pRequest,
 	                    class ILTStream* pStream, int nFlag);
 	// 0x100176dc — the property table (1001 bytes, not reconstructed).
 	void   sub_100176dc();
 
-	char*      m_pFilename;                  // 0x004
 	// Things to run when this model goes; a child model puts the callback
 	// that unhooks it from the manager's hash in here (name ours).
 	uint8      m_Cleanups[0x10 - 0x008];     // 0x008 .. a list head at 0x014
@@ -772,21 +731,7 @@ public:
 	//
 	// The setter takes its second field by argument and returns LTBOOL, which
 	// is an Init rather than a constructor body; the names here are ours.
-	class CModelSub14
-	{
-	public:
-		CModelSub14();                       // 0x100243f6
-		// 0x10024404 — five bytes, a tail `jmp` into the member below.
-		~CModelSub14();                      // 0x10024404
-		// 0x10024419 — reached both from the destructor and from Model's
-		// own release at +0x14, so it is a member and not the destructor
-		// body (name ours).
-		void   sub_10024419();               // 0x10024419
-		LTBOOL Init(uint32 nValue);          // 0x10024409
-
-		uint32 m_Unknown00;                  // 0x00  zeroed by Init
-		uint32 m_Unknown04;                  // 0x04  Init's argument
-	};
+	using CModelSub14 = ::CModelSub14;
 
 	CModelSub14 m_Sub014;                    // 0x014
 
@@ -853,7 +798,7 @@ public:
 	// order puts it and nowhere the body could be scheduled to.
 	float      m_f0a0;                       // 0x0a0  0.0f
 	float      m_f0a4;                       // 0x0a4  96.0f
-	float      m_f0a8;                       // 0x0a8  50.0f
+
 	uint32     m_Unknown0ac;                 // 0x0ac  zeroed
 	// Two lengths and each one's square, set together by the member below
 	// and by nothing else that is reconstructed; the constructor's default
@@ -902,7 +847,7 @@ public:
 	uint32     m_Unknown14c;                 // 0x14c  zeroed
 	uint32     m_Unknown150;                 // 0x150  zeroed
 	CMoArray<class ModelSocket*, NoCache> m_Sockets;    // 0x154
-	CMoArray<AnimInfo, NoCache>           m_AnimArray;  // 0x164
+
 
 	// Name lookups, each returning LTFALSE when the name is not in the model.
 	// Three out-parameters' worth of one lookup: the index, the whole
@@ -916,6 +861,7 @@ public:
 	// constructor puts &m_Sub1d4 there), so a false flag means "the children
 	// only". Records whose owner is null are skipped (name ours).
 	uint32 GetTotalAnimCount(LTBOOL bIncludeSelf);
+    uint32 OwnedAnimationCount() const;
 	// 0x100174b9 — FindAnim narrowed to one model: the same walk over
 	// m_AnimArray, but an entry only qualifies when its animation's m_pModel
 	// is the one asked for. It answers the ENTRY rather than a flag, and the
@@ -962,7 +908,7 @@ public:
 	// accessors materializing `this`.
 	class LAlloc* GetAlloc() { return (class LAlloc*)m_pDataBlock; }
 
-	CMoMemBlock* m_pDataBlock;               // 0x174
+	LAlloc* m_pDataBlock;               // 0x174
 	IMoAllocator* m_pAlloc;                  // 0x178
 	CMoMemBlock m_DataBlock;                 // 0x17c .. 0x190
 	// 0x1d4 — the twelfth sub-object, and its size is pinned rather than
@@ -1046,7 +992,7 @@ public:
 	uint32     m_nChildModels;               // 0x1d0
 	CModelSub1D4 m_Sub1d4;                   // 0x1d4 .. 0x204
 	uint32     m_nFileVersion;               // 0x204  9, 10, 11 or 12
-	int        m_CacheCount;                 // 0x208  FreeUnusedModels' scratch counter
+	std::atomic_int m_CacheCount;                 // 0x208  FreeUnusedModels' scratch counter
 	// The class runs to 0x2c4, which is what both places that build one
 	// allocate; the rest is not reached from the reconstructed set.
 	// 0x20c — the thirteenth, 0xb4 bytes, ending at 0x2c0 where Model stores
@@ -1054,186 +1000,226 @@ public:
 	// member at +0x18 first, then its own vptr, then a body call, then zeroes
 	// 0xac; its destructor (0x100169b8) stores the same vptr and tears that
 	// member down, which confirms the member from the other end (names ours).
-	class CModelSub20C
-	{
-	public:
-		// 0x1001bd54 — the "Nodes" chunk: the node tree out of the file
-		// (name ours).
-		LTBOOL sub_1001bd54(class ILTStream* pStream);
-
-		CModelSub20C();                      // 0x1001694e
-		// 0x10016990 — the same object built against a model: identical to
-		// the default constructor except that the model goes into +0xac
-		// instead of a zero. It is what slot 0x08 news up.
-		CModelSub20C(Model* pModel);         // 0x10016990
-		virtual ~CModelSub20C();             // slot 0x00, 0x100169b8
-		// 0x100169dd — the destructor's whole body, and the model's own
-		// release (0x10017016) calls it too, which is what says it is a
-		// member rather than the destructor written inline: it hands the
-		// collection at +0x18 back to the model's data block (the model is
-		// at +0xac and its block at +0x174) and then runs the reset below
-		// (names ours).
-		void   sub_100169dd();               // 0x100169dd
-		// 0x10016a00 — the reset the constructor ends with and the release
-		// runs again: three floats, two counters and a name pointer back to
-		// their defaults, plus two sub-records at +0x2c and +0x6c cleared
-		// through 0x10011e2b. Declared only — its fields are not named yet
-		// (name ours).
-		void   sub_10016a00();               // 0x10016a00
-		// Slot 0x04 is `ret $0xc` — three dwords of arguments and no body,
-		// which is all that fixes its shape. Slot 0x08 is a factory: it
-		// asks the engine allocator for 0xb4 bytes — this class's own size,
-		// which is the independent confirmation of the extent — and runs
-		// the model-taking constructor on it. Slot 0x0c is the one Model's
-		// constructor calls (names ours).
-		virtual void _v04(uint32 a, uint32 b, uint32 c);   // 0x10016971
-		virtual CModelSub20C* Create(Model* pModel);       // 0x10016a37
-		virtual void SetModel(Model* pModel);              // 0x10016a58
-
-		// 0x10016a9b — how many nodes this subtree is: itself plus every
-		// child's answer, recursively. Forty bytes, and the one that says
-		// the array at +0x18 is the child list (name ours).
-		uint32 sub_10016a9b();
-		// 0x10016ac3 — walk the subtree into the owning model's node array,
-		// taking the next index from the caller's counter. Declared only
-		// (name ours).
-		LTBOOL sub_10016ac3(uint32* pnIndex);
-		// 0x10016b11 — set this subtree's own index, recursively.
-		// Declared only (name ours).
-		void   sub_10016b11(uint32 nIndex);
-
-		// 0x10016304 — do two node trees have the same SHAPE? A free
-		// function rather than a member: it compares child counts level by
-		// level and recurses pairwise, and the first node whose count
-		// disagrees goes out through the third argument. Deeper mismatches
-		// are reported by the recursion that found them, which is why this
-		// level only stores on its own test (name ours).
-		friend LTBOOL mod_SameNodeTree(CModelSub20C* pA, CModelSub20C* pB,
-		                               CModelSub20C** ppMismatch);
-
-		// 0x04 .. 0x12 — what the reset at 0x10016a00 writes: three floats
-		// zeroed through `fldz`/`fstps`, a word and a byte cleared with
-		// `andw`/`andb` (which is what fixes their widths), and the name
-		// pointer at 0xb0 put on the shared empty string. Named for their
-		// offsets; nothing reads them in the reconstructed set.
-		float  m_f04;                        // 0x04
-		float  m_f08;                        // 0x08
-		float  m_f0c;                        // 0x0c
-		uint16 m_n10;                        // 0x10
-		uint8  m_b12;                        // 0x12
-		uint8  m_pad_13[0x18 - 0x13];
-		// The elements are CModelSub20C* and the walk in SetModel says so:
-		// it calls slot 0x0c on each of them, with the same model, which is
-		// this class's own SetModel and no other (name ours).
-		CMoArray<CModelSub20C*, NoCache> m_Array18;   // 0x18
-		uint8  m_pad_28[0x2c - 0x28];
-		// 0x2c and 0x6c — two 4x4s, and the pair is what closes this class:
-		// the reset runs LTMatrix::Identity (0x10011e2b, the same call
-		// GetNodeTransform makes) over +0x2c and then over +0x6c, and
-		// 0x6c + 0x40 lands exactly on the model back-pointer below.
-		LTMatrix m_Mat2c;                    // 0x2c
-		LTMatrix m_Mat6c;                    // 0x6c
-		// 0xac — the model this belongs to, and not merely a pointer: the
-		// release at 0x100169dd loads it and then reads +0x174 off it,
-		// which is Model::m_pDataBlock. SetModel (slot 0x0c) is what fills
-		// it; Model's constructor calls that with `this`.
-		Model* m_pModel;                     // 0xac
-		char*  m_pName;                      // 0xb0  the shared empty string
-	};
+	using CModelSub20C = ModelNode;
 
 	CModelSub20C m_Sub20c;                   // 0x20c .. 0x2c0
-	class CModelSub20C* m_pSub20c;           // 0x2c0
+    std::array<std::shared_ptr<Model>,16> m_ChildOwners;
+	CModelSub20C* m_pSub20c;           // 0x2c0
 };
 
-// A model object carries its main tracker inline.
-class ModelInstance : public LTObject
+class ModelAnim;
+
+class ModelAnimationNode
 {
 public:
-	// (LTObject runs to 0x1b4 now that m_pWMIface is named)
-	ModelInstanceHookFn m_HookFn;            // 0x1b4
-	uint8               m_pad_1b8[0x1c0 - 0x1b8];
-	LTAnimTracker       m_AnimTracker;       // 0x1c0
-	LTAnimTracker*      m_pTrackerList;      // 0x1f8  extra trackers, singly linked
-	uint8               m_pad_1fc[0x204 - 0x1fc];
-	uint32              m_HiddenPieces;      // 0x204  one bit per piece
+	ModelAnimationNode();
+    ModelAnimationNode(const ModelAnimationNode&) = delete;
+    ModelAnimationNode& operator=(const ModelAnimationNode&) = delete;                          // 0x10016534
+	// 0x10016578 — the same record with its owner and its 0x18 word given
+	// by argument, which is what slot 0x0c news up.
+	ModelAnimationNode(ModelAnim* pOwner, ModelAnimationNode* parent);
+
+	virtual ~ModelAnimationNode();
+	// Slots 1 and 2 are the getter and the setter for the owner at +0x2c —
+	// four bytes and ten, and ModelAnim's own constructor calls the
+	// setter on its embedded copy with itself, which is what says what the
+	// field holds. Slot 3 is the factory: 0x30 bytes out of the engine
+	// allocator, which pins this class's size, and then the two-argument
+	// constructor on them (names ours).
+	virtual ModelAnim* _v04();            // 0x10016558
+	virtual void _v08(ModelAnim* pOwner); // 0x1001665e
+	virtual ModelAnimationNode* _v0c(ModelAnim* pOwner, ModelAnimationNode* parent);  // 0x10016668
+
+	// 0x100165e5 — three fields cleared and the 0x20-element collection
+	// assigned from a fresh empty one, exactly the shape Model's own
+	// constructor uses for two of its collections (name ours).
+	void sub_100165e5();
+	// 0x1001662c — hands both collections back to the allocator the model
+	// below answers with (name ours).
+	void sub_1001662c();
+	// 0x1001671c — the model this hangs off, reached through the owner at
+	// +0x2c and its own +0x20. Seven bytes (name ours).
+	Model* sub_1001671c();
+	// 0x1001b5c9 — the twin of 0x1001b605 for this collection: every
+	// element back to the allocator, then the array emptied. Declared only
+	// (name ours).
+	// 0x100166de — reached from ModelAnim's slot 1 with the model's
+	// +0x2c0 record: re-point this record, and every child under it, at
+	// the matching node of a node tree (name ours).
+	LTBOOL sub_100166de(Model::CModelSub20C* pSub20c);
+	// 0x1001668a — flatten this record and everything under it into the
+	// owner's per-node array, in depth-first order, advancing the caller's
+	// counter. LTFALSE when the array is missing or the counter has reached
+	// the model's node count, and a failure anywhere below aborts the whole
+	// walk (name ours).
+	LTBOOL sub_1001668a(uint32* pnCount);
+
+	// 0x1001bb37 — this node's animation data, off the wire, and the whole
+	// subtree under it. One CModelXform per keyframe of the owning
+	// animation, then one child record per child of the node at +0x04 —
+	// read recursively through this same function, which is what makes the
+	// animation data a tree with the same shape as the node tree. A child
+	// that fails to read takes the whole array with it: the child is handed
+	// back to the allocator and every sibling already read is released
+	// through 0x1001b5c9 (name ours).
+	LTBOOL sub_1001bb37(class ILTStream* pStream);
+
+	// 0x04 — the node this record animates. Its +0x1c/+0x20 are
+	// CModelSub20C::m_Array18's array and count, which is how 0x1001bb37
+	// knows how many children to read (name ours).
+	Model::CModelSub20C* m_pSub20c04;        // 0x04
+	CMoArray<CModelXform, NoCache> m_Array08;// 0x08 .. 0x18
+	ModelAnimationNode* m_pParent;                 // parent animation node
+	// The elements are ModelAnimationNode*, which the release names: the
+	// BaseDelete the array's own teardown reaches (0x1001ba94) is this
+	// class's own, and 0x1001bb37 fills the array with recursively-read
+	// children of exactly this type.
+	CMoArray<ModelAnimationNode*, NoCache> m_Array1c;  // 0x1c .. 0x2c
+	ModelAnim* m_pOwner2c;                // 0x2c
 };
 
-// The engine's own ILTModel vtable carries one slot the public SDK header
-// lost (header drift, the third instance after ILTSoundMgr and
-// _CVector::DistSqr): every virtual sits one slot later than iltmodel.h
-// says. Virtual calls dispatch through this view (names per the SDK).
-class ILTModelI
+class ModelAnim
 {
 public:
-	virtual void _v00() = 0;
-	virtual LTRESULT GetSocket(HOBJECT hObj, char* pSocketName, HMODELSOCKET& hSocket) = 0;
-	virtual LTRESULT GetNode(HOBJECT hObj, char* pNodeName, HMODELNODE& hNode) = 0;
-	virtual LTRESULT GetPiece(HOBJECT hObj, char* pPieceName, HMODELPIECE& hPiece) = 0;
-	virtual LTRESULT FindWeightSet(HOBJECT hObj, char* pSetName, HMODELWEIGHTSET& hSet) = 0;
-	virtual LTRESULT GetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTBOOL& bHidden) = 0;
-	virtual LTRESULT SetPieceHideStatus(HOBJECT hObj, HMODELPIECE hPiece, LTBOOL bHidden) = 0;
-	virtual LTRESULT GetNodeTransform(HOBJECT hObj, HMODELNODE hNode,
-	                                  LTransform& transform, LTBOOL bWorldSpace) = 0;
-	virtual LTRESULT GetSocketTransform(HOBJECT hObj, HMODELSOCKET hSocket,
-	                                    LTransform& transform, LTBOOL bWorldSpace) = 0;
+	// 0x1001674d — 0x5c bytes, which is exactly what slot 2 allocates and
+	// exactly where the embedded ModelAnimationNode at +0x28 ends plus the
+	// pointer that follows it. The two constants it plants are read off the
+	// bytes: -1 into +0x18 (`orl $0xffffffff`, VC6's four-byte store of a
+	// negative one) and 0xc8 into +0x1c.
+	ModelAnim(Model* pModel = nullptr);             // 0x1001674d
+
+	virtual ~ModelAnim();                 // 0x100167b4, vtable 0x1004d9e4
+	virtual void _v04(Model* pModel);        // 0x1001682b
+	virtual ModelAnim* _v08(Model* pModel);   // 0x10016856
+
+	// 0x100167e1 — the release: the block at +0x04 given back through the
+	// owning model's allocator, the collection at +0x08 emptied, the
+	// sub-object at +0x28 released and then 0x10016874 run (name ours).
+	void sub_100167e1();
+	// 0x10016874 — put the +0x58 slot back on the embedded record, giving
+	// back whatever else was in it first (name ours).
+	void sub_10016874();
+	// 0x10016897 — twelve bytes, `push 0x4(%esp); call 0x100168a3; ret $4`:
+	// the out-of-line copy of a one-line forwarder onto the member below
+	// it. The reader at 0x1001bc69 ends with its answer (name ours).
+	LTBOOL sub_10016897(LTBOOL bFlag);
+	// 0x100168a3 — (re)build the flat node array from the record tree
+	// (name ours).
+	LTBOOL sub_100168a3(LTBOOL bForce);
+	// 0x1001bc69 — the animation, out of the model file: its name, two
+	// version-gated dwords, the keyframe table, and then the whole node
+	// tree's animation data through the record at +0x58. THIS CLASS IS
+	// `ModelAnim` (see the note on ModelAnim in commonmodel.h): every
+	// offset this function touches lands on a field ModelAnim already had
+	// (name ours).
+	LTBOOL sub_1001bc69(class ILTStream* pStream);
+
+	// 0x04 — a FLAT array of the node records under this animation, one slot
+	// per model node: 0x1001668a walks the record tree depth-first and
+	// stores each record into it, bounded by the model's node-transform
+	// count. The release frees it, which is all the old `void*` reading had
+	// (name ours).
+	ModelAnimationNode** m_ppNodeRecords;          // 0x04
+	// The keyframe table: ModelAnim::m_pKeyFrames and m_nKeyFrames are this
+	// collection's m_pArray and m_nElements. 0x1001bc69 sizes it off the
+	// wire and then fills each record's m_Time and m_pString, and the
+	// allocator it reaches (0x1001b730) bakes in both the 0x14 element size
+	// and the constructor at 0x1001651d.
+	CMoArray<AnimKeyFrame, NoCache> m_Array08;  // 0x08 .. 0x18
+	int32  m_n18;                            // 0x18  the constructor's -1;
+	                                         //       read off the wire for
+	                                         //       file version >= 11
+	uint32 m_Unknown1c;                      // 0x1c  the constructor's 0xc8;
+	                                         //       read off the wire for
+	                                         //       file version >= 12, and
+	                                         //       ModelAnim's
+	                                         //       m_nInterpolationTime
+	Model* m_pModel;                         // 0x20
+	char*  m_pName;                          // 0x24  the shared empty string
+	ModelAnimationNode  m_Sub28;                   // 0x28 .. 0x58
+	ModelAnimationNode* m_p58;                     // 0x58  normally &m_Sub28
+    ModelAnim(const ModelAnim&) = delete;
+    ModelAnim& operator=(const ModelAnim&) = delete;
+    uint32 GetLength();
+    char* GetName() { return m_pName; }
+    AnimKeyFrame*& m_pKeyFrames = m_Array08.m_pArray;
+    uint32& m_nKeyFrames = m_Array08.m_nElements;
+    uint32& m_nInterpolationTime = m_Unknown1c;
+
 };
+
+
+extern std::atomic_size_t g_nModelDataBytes;
+
+class ModelInstance : public CObjBase
+{
+public:
+	ModelInstance();
+
+	~ModelInstance() override;
+
+	float _v2c() override;
+
+	void   SetupModelWalker(class ModelWalker* pOut) override;
+	void   SetupModelWalkerRefsOnly(class ModelWalker* pOut) override;
+	LTBOOL FindTracker(LTAnimTracker* pTracker,
+	                               LTAnimTracker*** pppLink) override;
+	float  GetScaledRadius() override;
+
+    void BindModel(std::shared_ptr<Model> model, bool pending = false, bool preserve = true);
+    std::shared_ptr<Model> m_ModelOwner;
+
+	uint32 GetTrackerCount();
+
+	// Unlinks the trackers game code added; their storage is the game's and
+
+	// goes with the game object. The instance keeps its own main tracker.
+
+	void DetachExternalTrackers();
+	char*  GetFilename();
+
+public:
+	void*             m_pUnknown1a8;
+	void*             m_pUnknown1ac;
+	void*             m_pUnknown1b0;
+	ModelInstanceHookFn m_HookFn;
+	void*             m_pUnknown1b8;
+	void*             m_pUnknown1bc;
+	LTAnimTracker m_AnimTracker;
+	LTAnimTracker* m_pTrackerList;
+	NodeControlFn     m_Unknown1fc;
+	void*             m_Unknown200;
+	uint32            m_HiddenPieces;
+	void*             m_pUnknown208;
+	void*             m_pUnknown20c;
+	float             m_f244;
+};
+
+
+using CObjModel = ModelInstance;
 
 // The scratch object the node evaluator walks a model's skeleton in: 0x248
 // bytes on the caller's stack, set up from the object through LTObject's
 // vtable and then handed the object's own transform. Names ours; only the
 // three fields the two transform accessors reach are known.
-class ModelWalker
-{
+// Native evaluator scratch. Callbacks and data retain their native types.
+class ModelWalker {
 public:
-	// 0x100386c6, 49 bytes. Declared here because sub_100176dc calls it;
-	// it is NOT Evaluate.
-	LTBOOL sub_100386c6();                                  // 0x100386c6
-	ModelWalker();                           // 0x100175b6
-
-	// 0x100386f7 — evaluate up to and including one node, filling the
-	// model's node-transform array.
-	LTBOOL Evaluate(HMODELNODE hNode);
-
-	// The array also makes VC6 emit an unreferenced vector-constructor
-	// iterator (`??_H@YGXPAXIHP6EX0@Z@Z`, 34 bytes) into the object, the
-	// same COMDAT `new T[n]` leaves behind. The shipped constructor
-	// inlines the loop and never calls it, so the shipped link dropped it;
-	// it shows up in our object's unmatched list and is not a function to
-	// reconstruct.
-	//
-	// The constructor's loop is what says this: eight records of 0x1c
-	// bytes, each given -1 in its last dword and then cleared by a call —
-	// which is AnimTimeRef's own constructor, inlined, over a member array
-	// of eight. (The called body at 0x100175fd is the out-of-line copy of
-	// AnimTimeRef::Clear the header's inline definition leaves behind.)
-	AnimTimeRef m_TimeRefs[8];               // 0x000 .. 0x0e0
-	uint32     m_Unknown_e0;                // 0x0e0  cleared last, after the
-	                                         //        five below, so it is a
-	                                         //        later addition to the
-	                                         //        constructor's body
-	LTMatrix*  m_pObjTransform;              // 0x0e4  where the model sits
-	uint32     m_Unknown_e8;                 // 0x0e8
-	uint32     m_Unknown_ec;                 // 0x0ec  set by the setup call:
-	                                         //        nonzero = the transforms
-	                                         //        come back world-relative
-	uint32     m_Unknown_f0;                 // 0x0f0
-	uint32     m_Unknown_f4;                 // 0x0f4
-	uint8      m_pad_0f8[0x248 - 0x0f8];
-};
-
-// CommonModelLT's own vtable is not the one m_pModelLT points at. Reached
-// through the interface pointer, GetNodeTransform is slot 0x1c — that is what
-// SharedCommonLT::GetAttachmentTransform calls and byte-matches on. Reached
-// through `this` from inside the implementation, the same function is slot
-// 0x18, one earlier, which is the second-base shape: the interface the engine
-// hands out is a separate sub-object. Only the one slot is needed here.
-class ILTModelSelf
-{
+    ModelWalker() = default;
+    LTBOOL sub_100386c6();
+    LTBOOL Evaluate(HMODELNODE node);
+    LTBOOL IsValid();
+private:
+    LTBOOL EvaluateNodes(const std::vector<uint32>& nodes);
+    bool NodePose(uint32 reference, uint32 node, bool relative, LTRotation& rotation, LTVector& position);
 public:
-	virtual void _v00()=0; virtual void _v04()=0; virtual void _v08()=0;
-	virtual void _v0c()=0; virtual void _v10()=0; virtual void _v14()=0;
-	virtual LTRESULT GetNodeTransform(HOBJECT hObj, HMODELNODE hNode,
-	                                  LTransform& transform, LTBOOL bWorldSpace)=0;  // 0x18
+    AnimTimeRef m_TimeRefs[8];
+    uint32 m_Unknown_e0 = 0;
+    LTMatrix* m_pObjTransform = nullptr;
+    LTMatrix* m_Unknown_e8 = nullptr;
+    NodeControlFn m_Unknown_ec = nullptr;
+    void* m_Unknown_f0 = nullptr;
+    HOBJECT m_Unknown_f4 = nullptr;
 };
 
 // 0x10011b1e is the SDK's own MatMul from ltmatrix.h, emitted out of line —
@@ -1277,6 +1263,8 @@ void   at_Init(LTAnimTracker* pTracker, Model* pModel, uint32 iAnim);   // 0x100
 // 0x100136c2 — resolve an animation by name on the object's model (names
 // ours; GetAnimIndex forwards to it, commonmodel.cpp defines it).
 HMODELANIM ci_GetAnimIndex(LTObject* pObj, char* pAnimName);
+LTRESULT ci_GetNextModelNode(HOBJECT,HMODELNODE,HMODELNODE*);
+LTRESULT ci_GetModelNodeName(HOBJECT,HMODELNODE,char*,uint32);
 
 // 0x10052edc — a char* holding the address of a zero byte at 0x10056ff4: the
 // name a model with no file of its own carries, so that every reader can
@@ -1287,7 +1275,6 @@ extern char* g_pEmptyFilename;
 // 0x10058724 — the running total of the bytes every model's data block has
 // taken. Load adds each block's rounded size to it and nothing here takes
 // any back (name ours).
-extern uint32 g_nModelDataBytes;
 
 // Give every element of a pointer collection back to an allocator and then
 // empty the collection. Sixty bytes, one instantiation per element type, and
@@ -1334,7 +1321,7 @@ void at_UpdateTracker(LTAnimTracker* pTracker, uint32 nMS);
 // which fixes every slot without a guess. The order matters: UpdateMainTracker
 // reaches GetMainTracker at 0x28 through `this`, which is index ten and
 // nothing else.
-class CommonModelLT
+class CommonModelLT : public ILTModel
 {
 public:
 	virtual LTRESULT GetSocket(HOBJECT hObj, char* pSocketName, HMODELSOCKET& hSocket);

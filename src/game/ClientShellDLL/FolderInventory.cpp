@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderInventory.h"
 #include "FolderCommands.h"
 #include "MissionMgr.h"
@@ -144,24 +144,24 @@ void	CFolderInventory::BuildInventoryList()
 		nID = pMission->aAllowedAmmo[i];
 		m_nAmmo[nID] = 0;
 	}
-	for (i=0; i < pMission->nNumRequiredAmmo; i++)
+	for (int i=0; i < pMission->nNumRequiredAmmo; i++)
 	{
 		nID = pMission->aRequiredAmmo[i];
 		m_nAmmo[nID] = 0;
 	}
-	for (i=0; i < pMission->nNumOneTimeAmmo; i++)
+	for (int i=0; i < pMission->nNumOneTimeAmmo; i++)
 	{
 		nID = pMission->aOneTimeAmmo[i];
 		m_nAmmo[nID] = 0;
 	}
-	for (i=0; i < pMission->nNumDeniedAmmo; i++)
+	for (int i=0; i < pMission->nNumDeniedAmmo; i++)
 	{
 		nID = pMission->aDeniedAmmo[i];
 		m_nAmmo[nID] = -1;
 	}
 
 	int numCurrWeapons = m_pData->GetWeapons(currWeapons,MAX_SELECTION_SLOTS*2);
-	for (i=0; i< numCurrWeapons; i++)
+	for (int i=0; i< numCurrWeapons; i++)
 	{
 		nID = currWeapons[i]->m_nID;
 		CalculateAmmo(nID);
@@ -169,7 +169,7 @@ void	CFolderInventory::BuildInventoryList()
 
 
 	//add weapons
-	for (i=0; i< numCurrWeapons; i++)
+	for (int i=0; i< numCurrWeapons; i++)
 	{
 		nID = currWeapons[i]->m_nID;
 		pWeapon = g_pWeaponMgr->GetWeapon(nID);
@@ -178,7 +178,7 @@ void	CFolderInventory::BuildInventoryList()
 	}
 
 	//add gadgets
-	for (i=0; i< numCurrWeapons; i++)
+	for (int i=0; i< numCurrWeapons; i++)
 	{
 		nID = currWeapons[i]->m_nID;
 		pWeapon = g_pWeaponMgr->GetWeapon(nID);
@@ -189,7 +189,7 @@ void	CFolderInventory::BuildInventoryList()
 	//add gear
 	CGearData* currGear[MAX_SELECTION_SLOTS];
 	int numCurrGear = m_pData->GetGear(currGear,MAX_SELECTION_SLOTS);
-	for (i=0; i< numCurrGear; i++)
+	for (int i=0; i< numCurrGear; i++)
 	{
 		nID = currGear[i]->m_nID;
 		AddGear(nID);

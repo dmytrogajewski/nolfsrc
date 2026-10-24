@@ -1,13 +1,16 @@
-#if !defined(_BLOWFISH_H_)
-#define _BLOWFISH_H_
+#pragma once
+#include <cstdint>
+#include <span>
 
-#define UWORD_32bits  unsigned long
-#define UWORD_16bits  unsigned short
-#define UBYTE_08bits  unsigned char
-
-short InitializeBlowfish(UBYTE_08bits key[], short keybytes);
-void Blowfish_encipher(UWORD_32bits *xl, UWORD_32bits *xr);
-void Blowfish_decipher(UWORD_32bits *xl, UWORD_32bits *xr);
-
-
-#endif
+namespace nolf::attributes {
+// Used for compatibility with original attribute files, not new cryptography.
+class Blowfish {
+public:
+    explicit Blowfish(std::span<const std::uint8_t> key);
+    void encipher(std::uint32_t& left, std::uint32_t& right) const;
+    void decipher(std::uint32_t& left, std::uint32_t& right) const;
+private:
+    std::uint32_t function(std::uint32_t) const;
+    std::uint32_t p_[18], s_[4][256];
+};
+}

@@ -3,7 +3,7 @@
 #ifndef __MFCS_STRING_H__
 #define __MFCS_STRING_H__
 
-#include "..\mfcstub\mfcs_types.h"
+#include "../mfcstub/mfcs_types.h"
 
 #include <stdarg.h> // for va_list
 
@@ -13,8 +13,7 @@
 	- Most of the functions aren't implemented because of non-use
 	- UniCode is not used
 	- ReleaseBuffer is only necessary if you've changed the length of the string
-	- I64's are not supported by FormatV
-	- in FormatV, doubles can't take up more than 318 characters in the string (gasp!)
+	- FormatV uses the standard printf format specifiers
 	- The data class is a little different
 */
 
@@ -40,7 +39,7 @@ public:
 	void Empty() { ShrinkBuffer(0); };
 
 	LPSTR GetBuffer() { return m_pBuffer; }
-	LPCTSTR GetBuffer() const { return m_pBuffer; }
+	LPCTSTR GetBuffer() const { return m_pBuffer ? m_pBuffer : ""; }
 	LPSTR GetBuffer(DWORD minLength);
 	DWORD GetBufferSize() const { if (!GetData()) return 0; else return GetData()->m_BufferSize; }
 	void ReleaseBuffer(SDWORD length = -1);
@@ -71,7 +70,7 @@ public:
 	void SetAt(int nIndex, char ch) { if (!GetBuffer()) return; else GetBuffer()[nIndex] = ch; }
 
 	// Operators
-	operator LPCTSTR () const { return m_pBuffer; }
+	operator LPCTSTR () const { return GetBuffer(); }
 	char &operator[](int nIndex) { return GetBuffer()[nIndex]; }
 	const char &operator[](int nIndex) const { return GetBuffer()[nIndex]; }
 	const CString& operator+=(const CString& string) { Concat(string); return *this; }

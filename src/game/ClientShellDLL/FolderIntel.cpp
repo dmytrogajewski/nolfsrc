@@ -2,12 +2,12 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderIntel.h"
 #include "FolderMgr.h"
 #include "ClientRes.h"
 #include "GameClientShell.h"
-#include "MsgIds.h"
+#include "MsgIDs.h"
 
 extern CGameClientShell* g_pGameClientShell;
 namespace

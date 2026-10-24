@@ -10,14 +10,16 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
-#include "door.h"
+#include "Stdafx.h"
+#include "TriggerMessage.h"
+#include "engine/portable/string.h"
+#include "Door.h"
 #include "Trigger.h"
 #include "ClientServerShared.h"
 #include "ServerUtilities.h"
 #include "ObjectMsgs.h"
 #include "keyframer_light.h"
-#include "hingeddoor.h"
+#include "HingedDoor.h"
 #include "CommandMgr.h"
 #ifdef NOLFSRC_MODERN
 // M-P5-03: doors and switches with no move direction
@@ -187,11 +189,11 @@ LTRESULT CDoorPlugin::PreHook_Light(
 	if(pInterface->GetClassName(hObject, className, sizeof(className)) != LT_OK)
 		return LT_OK;
 
-	if(stricmp(className, "Door") == 0)
+	if(nolf::ascii_compare(className, "Door") == 0)
 		pTransformFn = SetupTransform_Door;
-	else if(stricmp(className, "HingedDoor") == 0)
+	else if(nolf::ascii_compare(className, "HingedDoor") == 0)
 		pTransformFn = SetupTransform_HingedDoor;
-	else if(stricmp(className, "RotatingDoor") == 0)
+	else if(nolf::ascii_compare(className, "RotatingDoor") == 0)
 		pTransformFn = SetupTransform_RotatingDoor;
 	else
 		return LT_OK;
@@ -214,7 +216,7 @@ LTRESULT CDoorPlugin::PreHook_Light(
 		// Look for the object and make sure it's a keyframer light.
 		if(pInterface->FindObject(cParse.m_Args[0], hShadowLight) != LT_OK ||
 			pInterface->GetClassName(hShadowLight, className, sizeof(className)) != LT_OK ||
-			stricmp(className, KEYFRAMERLIGHT_CLASSNAME) != 0)
+			nolf::ascii_compare(className, KEYFRAMERLIGHT_CLASSNAME) != 0)
 		{
 			continue;
 		}
@@ -1946,36 +1948,36 @@ void Door::TriggerMsg(HOBJECT hSender, const char* szMsg)
 	{
 		if (parse.m_nArgs > 0 && parse.m_Args[0])
 		{
-			if (_stricmp(parse.m_Args[0], g_szTouch) == 0)
+			if (nolf::ascii_compare(parse.m_Args[0], g_szTouch) == 0)
 			{
 				TouchNotify(hSender);
 			}
-			else if (_stricmp(parse.m_Args[0], g_szActivate) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szActivate) == 0)
 			{
 				Activate(hSender);
 			}
-			else if (_stricmp(parse.m_Args[0], g_szTrigger) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szTrigger) == 0)
 			{
 				TriggerHandler();
 			}
-			else if (_stricmp(parse.m_Args[0], g_szTriggerClose) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szTriggerClose) == 0)
 			{
 				TriggerClose();
 			}
-			else if (_stricmp(parse.m_Args[0], g_szAttach) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szAttach) == 0)
 			{
                 char* pObjName = parse.m_nArgs > 1 ? parse.m_Args[1] : LTNULL;
 				HandleAttach(pObjName);
 			}
-			else if (_stricmp(parse.m_Args[0], g_szDetach) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szDetach) == 0)
 			{
 				HandleDetach();
 			}
-			else if (_stricmp(parse.m_Args[0], g_szLock) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szLock) == 0)
 			{
                 m_bLocked = LTTRUE;
 			}
-			else if (_stricmp(parse.m_Args[0], g_szUnLock) == 0)
+			else if (nolf::ascii_compare(parse.m_Args[0], g_szUnLock) == 0)
 			{
                 m_bLocked = LTFALSE;
 			}
@@ -1997,7 +1999,8 @@ uint32 Door::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGEREAD hRe
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 			TriggerMsg(hSender, szMsg);
 		}
 		break;
@@ -2046,7 +2049,7 @@ void Door::StartSound(HSTRING hstrSoundName, LTBOOL bLoop)
 		playSoundInfo.m_dwFlags |= PLAYSOUND_LOOP | PLAYSOUND_GETHANDLE;
 	}
 
-	strncpy(playSoundInfo.m_szSoundName, pSoundName, _MAX_PATH);
+	strncpy(playSoundInfo.m_szSoundName, pSoundName, LT_MAX_PATH);
 	playSoundInfo.m_hObject = m_hObject;
 	playSoundInfo.m_fOuterRadius = m_fSoundRadius;
 	playSoundInfo.m_fInnerRadius = m_fSoundRadius * 0.5f;

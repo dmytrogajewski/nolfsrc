@@ -10,9 +10,9 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "PolyGridFX.h"
-#include "Plasma.h"
+#include "plasma.h"
 #include "iltclient.h"
 #include "ClientServerShared.h"
 #include "GameClientShell.h"

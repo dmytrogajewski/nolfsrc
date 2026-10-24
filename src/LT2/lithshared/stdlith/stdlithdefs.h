@@ -19,6 +19,7 @@
 	#include <stdio.h>
 	#include <string.h>
 	#include <assert.h>
+	#include <stdint.h>
 
 
 
@@ -27,11 +28,11 @@
 	#endif
 
 	#ifndef DWORD
-		#define DWORD	unsigned long
+		#define DWORD	uint32_t
 	#endif
 
 	#ifndef SDWORD
-		#define SDWORD	long
+		#define SDWORD	int32_t
 	#endif
 
 	#ifndef WORD

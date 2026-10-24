@@ -12,8 +12,8 @@
 
 // Includes...
 
-#include "stdafx.h"
-#include "teammgr.h"
+#include "Stdafx.h"
+#include "TeamMgr.h"
 
 
 // Functions...

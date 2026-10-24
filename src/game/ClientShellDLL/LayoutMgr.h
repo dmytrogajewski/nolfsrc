@@ -5,9 +5,6 @@
 #if !defined(AFX_LAYOUTMGR_H__D238C1C0_8635_11D3_B2DB_006097097C7B__INCLUDED_)
 #define AFX_LAYOUTMGR_H__D238C1C0_8635_11D3_B2DB_006097097C7B__INCLUDED_
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
 
 #include "GameButeMgr.h"
 #include "ltbasetypes.h"

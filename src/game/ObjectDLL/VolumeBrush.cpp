@@ -10,7 +10,11 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "VolumeBrush.h"
 #include "iltserver.h"
 #include "ServerUtilities.h"
@@ -218,7 +222,8 @@ uint32 VolumeBrush::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGER
 	{
 		case MID_TRIGGER:
 		{
-            const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+            const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+            const char* szMsg = szMsgStorage.c_str();
 			HandleTrigger(hSender, szMsg);
 		}
 		break;
@@ -238,7 +243,7 @@ uint32 VolumeBrush::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAGER
 
 void VolumeBrush::HandleTrigger(HOBJECT hSender, const char* szMsg)
 {
-	if (m_bHidden && (stricmp(szMsg, TRIGGER_MSG_ON) == 0))
+	if (m_bHidden && (nolf::ascii_compare(szMsg, TRIGGER_MSG_ON) == 0))
 	{
         uint32 dwFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
         g_pLTServer->SetObjectUserFlags(m_hObject, dwFlags | USRFLG_VISIBLE);
@@ -252,7 +257,7 @@ void VolumeBrush::HandleTrigger(HOBJECT hSender, const char* szMsg)
 
         m_bHidden = LTFALSE;
 	}
-	else if (!m_bHidden && (stricmp(szMsg, TRIGGER_MSG_OFF) == 0))
+	else if (!m_bHidden && (nolf::ascii_compare(szMsg, TRIGGER_MSG_OFF) == 0))
 	{
         m_dwSaveFlags  = g_pLTServer->GetObjectFlags(m_hObject);
         uint32 dwFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
@@ -834,10 +839,10 @@ LTRESULT CVolumePlugin::PreHook_EditStringList(const char* szRezPath,
 {
 	// See if we can handle the property...
 
-	if (_strcmpi("DamageType", szPropName) == 0)
+	if (nolf::ascii_compare("DamageType", szPropName) == 0)
 	{
 	   if (!aszStrings || !pcStrings) return LT_UNSUPPORTED;
-		_ASSERT(aszStrings && pcStrings);
+		GAME_ASSERT(aszStrings && pcStrings);
 
 		// Add an entry for each supported damage type
 
@@ -845,7 +850,7 @@ LTRESULT CVolumePlugin::PreHook_EditStringList(const char* szRezPath,
 		{
 			if (!DTInfoArray[i].bGadget)
 			{
-				_ASSERT(cMaxStrings > (*pcStrings) + 1);
+				GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 
 				uint32 dwNameLen = strlen(DTInfoArray[i].pName);
 
@@ -859,7 +864,7 @@ LTRESULT CVolumePlugin::PreHook_EditStringList(const char* szRezPath,
 
 		return LT_OK;
 	}
-	else if (_strcmpi("SoundFilter", szPropName) == 0)
+	else if (nolf::ascii_compare("SoundFilter", szPropName) == 0)
 	{
 		m_SoundFilterMgrPlugin.PreHook_EditStringList(szRezPath, szPropName,
 			aszStrings, pcStrings, cMaxStrings, cMaxStringLength);

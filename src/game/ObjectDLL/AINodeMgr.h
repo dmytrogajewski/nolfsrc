@@ -19,7 +19,7 @@ class CAINodeMgr
 		// Ctors/Dtors/Etc
 
 		CAINodeMgr();
-		~CAINodeMgr() { Term(); }
+		~CAINodeMgr() { Term(); if (g_pAINodeMgr == this) g_pAINodeMgr = LTNULL; }
 
 		void Init();
 		void Term();

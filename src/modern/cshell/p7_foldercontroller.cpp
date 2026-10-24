@@ -5,7 +5,7 @@
 // mouse's are left alone). The buttons themselves are bound in Controls'
 // Customize, like any key.
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderMgr.h"
 #include "FolderCommands.h"
 #include "ClientRes.h"

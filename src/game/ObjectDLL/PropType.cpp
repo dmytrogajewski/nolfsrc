@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "PropType.h"
 
 BEGIN_CLASS(PropType)
@@ -55,7 +56,7 @@ LTRESULT CPropTypePlugin::PreHook_EditStringList(
 	{
 		return LT_OK;
 	}
-	else if (_strcmpi("Type", szPropName) == 0)
+	else if (nolf::ascii_compare("Type", szPropName) == 0)
 	{
 		if (m_PropTypeMgrPlugin.PreHook_EditStringList(szRezPath,
 			szPropName, aszStrings, pcStrings, cMaxStrings, cMaxStringLength) == LT_OK)

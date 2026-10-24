@@ -1,6 +1,8 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
 #include <limits.h>
 #include "AIVolume.h"
 #include "ContainerCodes.h"
@@ -485,7 +487,7 @@ void CAIVolume::Init(int32 iVolume, const AIVolume& vol)
 			{
 				if ( m_cDoors == cm_nMaxDoors )
 				{
-					_ASSERT(!"Max number of doors in a volume exceeded!!!!");
+					GAME_ASSERT(!"Max number of doors in a volume exceeded!!!!");
                     g_pLTServer->CPrint("Max number of doors in a volume exceeded!!!!");
 				}
 				else
@@ -516,7 +518,7 @@ void CAIVolume::Init(int32 iVolume, const AIVolume& vol)
 			{
 				if ( m_cDoors == cm_nMaxDoors )
 				{
-					_ASSERT(!"Max number of doors in a volume exceeded!!!!");
+					GAME_ASSERT(!"Max number of doors in a volume exceeded!!!!");
                     g_pLTServer->CPrint("Max number of doors in a volume exceeded!!!!");
 				}
 				else
@@ -766,7 +768,7 @@ LTBOOL CAIVolume::HasRegion() const
 
 CAIRegion* CAIVolume::GetRegion() const
 {
-	_ASSERT(HasRegion());
+	GAME_ASSERT(HasRegion());
 	return g_pAIRegionMgr->GetRegionByIndex(m_iRegion);
 }
 

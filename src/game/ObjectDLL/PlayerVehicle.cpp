@@ -10,7 +10,11 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include "TriggerMessage.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "PlayerVehicle.h"
 #include "PlayerButes.h"
 #include "ServerButeMgr.h"
@@ -250,9 +254,10 @@ uint32 PlayerVehicle::ObjectMessageFn(HOBJECT hSender, uint32 messageID, HMESSAG
 	{
 		case MID_TRIGGER:
 		{
-			const char* szMsg = (const char*)g_pLTServer->ReadFromMessageDWord(hRead);
+			const auto szMsgStorage = ReadTriggerMessage(*g_pLTServer, hRead);
+			const char* szMsg = szMsgStorage.c_str();
 
-			if (szMsg && (_stricmp(szMsg, s_szActivate) == 0))
+			if (szMsg && (nolf::ascii_compare(szMsg, s_szActivate) == 0))
 			{
 				DoActivate(hSender);
 			}
@@ -465,11 +470,11 @@ LTRESULT CPlayerVehiclePlugin::PreHook_EditStringList(
 
 	// Handle vehicle type...
 
-	if (_strcmpi("VehicleType", szPropName) == 0)
+	if (nolf::ascii_compare("VehicleType", szPropName) == 0)
 	{
 		for (int i=PPM_FIRST; i < PPM_NUM_MODELS; i++)
 		{
-			_ASSERT(cMaxStrings > (*pcStrings) + 1);
+			GAME_ASSERT(cMaxStrings > (*pcStrings) + 1);
 			if (cMaxStrings > (*pcStrings) + 1)
 			{
 				strcpy(aszStrings[(*pcStrings)++], GetPropertyNameFromPlayerPhysicsModel((PlayerPhysicsModel)i));

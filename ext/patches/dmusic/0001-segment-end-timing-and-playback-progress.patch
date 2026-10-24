@@ -1,0 +1,113 @@
+diff --git a/include/dmusic.h b/include/dmusic.h
+index 7165d1e..c49001f 100644
+--- a/include/dmusic.h
++++ b/include/dmusic.h
+@@ -488,8 +488,23 @@ typedef enum DmTiming {
+ 
+ 	/// \brief Timing flag indicating start at the next possible measure boundary.
+ 	DmTiming_MEASURE = 4,
++
++	/// \brief Timing flag indicating start once the playing segment ends, replacing its pending repeats.
++	DmTiming_SEGMENT = 5,
+ } DmTiming;
+ 
++/// \brief The playing segment's progress, sampled between render calls.
++typedef struct DmPlayback {
++	/// \brief Changes whenever a segment starts, repeats or playback stops.
++	uint32_t serial;
++
++	/// \brief Sample frames until the playing segment ends at the current tempo, zero once it has.
++	size_t remaining;
++
++	/// \brief Non-zero while a segment is playing, even after its end until another starts.
++	int playing;
++} DmPlayback;
++
+ /// \brief Embellishment types for choosing transition patterns.
+ typedef enum DmEmbellishmentType {
+ 	/// \brief Don't choose a pattern.
+@@ -620,4 +635,10 @@ DMAPI DmResult DmPerformance_renderPcm(DmPerformance* slf, void* buf, size_t num
+ /// \param vol The new volume to set (between 0 and 1).
+ DMAPI void DmPerformance_setVolume(DmPerformance* slf, float vol);
+ 
++/// \brief Get the playing segment's progress.
++/// \param slf[in] The performance to query.
++/// \param out[out] The progress at the end of the last render call.
++/// \return #DmResult_SUCCESS on success, #DmResult_INVALID_ARGUMENT or #DmResult_MUTEX_ERROR otherwise.
++DMAPI DmResult DmPerformance_getPlayback(DmPerformance* slf, DmPlayback* out);
++
+ /// \}
+diff --git a/src/Performance.c b/src/Performance.c
+index 36a059b..c5d8b24 100644
+--- a/src/Performance.c
++++ b/src/Performance.c
+@@ -101,6 +101,17 @@ static uint32_t Dm_getBoundaryOffset(DmPerformance* slf, DmTiming timing) {
+ 	case DmTiming_MEASURE:
+ 		timing_unit_length = Dm_getMeasureLength(slf->time_signature);
+ 		break;
++	case DmTiming_SEGMENT: {
++		if (slf->segment == NULL) {
++			return slf->time;
++		}
++
++		// A segment message at the same time replaces the pending repeat.
++		uint32_t end = slf->segment_start + slf->segment->length;
++		return end > slf->time ? end : slf->time;
++	}
++	default:
++		return slf->time;
+ 	}
+ 
+ 	uint32_t delay = 0;
+@@ -685,6 +696,7 @@ static void DmPerformance_handleCommandMessage(DmPerformance* slf, DmMessage_Com
+ static void DmPerformance_handleSegmentMessage(DmPerformance* slf, DmMessage_SegmentChange* msg) {
+ 	DmSegment* sgt = msg->segment;
+ 	DmSegment_release(slf->segment);
++	slf->segment_serial += 1;
+ 
+ 	// Get rid of the currently playing segment.
+ 	DmMessageQueue_clear(&slf->control_queue);
+@@ -996,6 +1008,31 @@ DmPerformance_playTransition(DmPerformance* slf, DmSegment* sgt, DmEmbellishment
+ 	return DmResult_SUCCESS;
+ }
+ 
++DmResult DmPerformance_getPlayback(DmPerformance* slf, DmPlayback* out) {
++	if (slf == NULL || out == NULL) {
++		return DmResult_INVALID_ARGUMENT;
++	}
++
++	if (mtx_lock(&slf->lock) != thrd_success) {
++		return DmResult_MUTEX_ERROR;
++	}
++
++	out->serial = slf->segment_serial;
++	out->playing = slf->segment != NULL;
++	out->remaining = 0;
++
++	if (slf->segment != NULL) {
++		uint32_t end = slf->segment_start + slf->segment->length;
++		if (end > slf->time) {
++			out->remaining =
++			    Dm_getSampleCountForDuration(end - slf->time, slf->time_signature, slf->tempo, slf->sample_rate, 1);
++		}
++	}
++
++	(void) mtx_unlock(&slf->lock);
++	return DmResult_SUCCESS;
++}
++
+ void DmPerformance_setVolume(DmPerformance* slf, float vol) {
+ 	if (slf == NULL) {
+ 		return;
+diff --git a/src/_Internal.h b/src/_Internal.h
+index 902a55f..07e48d2 100644
+--- a/src/_Internal.h
++++ b/src/_Internal.h
+@@ -545,6 +545,7 @@ struct DmPerformance {
+ 
+ 	DmSegment* segment;
+ 	uint32_t segment_start;
++	uint32_t segment_serial;
+ 	DmStyle* style;
+ 	DmBand* band;
+ 	DmSynth synth;

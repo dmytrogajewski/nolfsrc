@@ -1,6 +1,9 @@
 // (c) 1997-2000 Monolith Productions, Inc.  All Rights Reserved
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "AssertMgr.h"
+#include <cassert>
+#include "engine/portable/string.h"
 #include "AIHuman.h"
 #include "AIHumanState.h"
 #include "AIHumanStrategy.h"
@@ -211,25 +214,25 @@ void CAIHumanState::UpdateAnimation()
 
 void CAIHumanState::HandleNameValuePair(char *szName, char *szValue)
 {
-	_ASSERT(szName && szValue);
+	GAME_ASSERT(szName && szValue);
 	if ( !szName || !szValue ) return;
 
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "POSE") )
+	if ( !nolf::ascii_compare(szName, "POSE") )
 	{
-		if ( !_stricmp(szValue, "STAND") ||
-			 !_stricmp(szValue, "LEAN") ) // support LEAN for backwards compatibility
+		if ( !nolf::ascii_compare(szValue, "STAND") ||
+			 !nolf::ascii_compare(szValue, "LEAN") ) // support LEAN for backwards compatibility
 		{
 			m_ePose = ePoseStand;
 		}
-		else if ( !_stricmp(szValue, "SIT") ||
-				  !_stricmp(szValue, "CHAIR") ) // support CHAIR for backwards compatibility
+		else if ( !nolf::ascii_compare(szValue, "SIT") ||
+				  !nolf::ascii_compare(szValue, "CHAIR") ) // support CHAIR for backwards compatibility
 		{
 			m_ePose = ePoseSit;
 		}
 	}
-	else if ( !_stricmp(szName, "INTERRUPT") )
+	else if ( !nolf::ascii_compare(szName, "INTERRUPT") )
 	{
 		m_bInterrupt = IsTrueChar(szValue[0]);
 	}
@@ -369,7 +372,7 @@ void CAIHumanStateIdle::UpdateAnimation()
 			break;
 
 		default:
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 			break;
 	}
 
@@ -496,7 +499,7 @@ void CAIHumanStateLookAt::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "POSITION") )
+	if ( !nolf::ascii_compare(szName, "POSITION") )
 	{
 		LTVector vPos;
 		sscanf(szValue, "%f,%f,%f", &vPos.x, &vPos.y, &vPos.z);
@@ -690,7 +693,7 @@ void CAIHumanStateDrowsy::Asleep()
 
 LTBOOL CAIHumanStateDrowsy::HandleCommand(char** pTokens, int nArgs)
 {
-	_ASSERT(pTokens && (nArgs >= 1));
+	GAME_ASSERT(pTokens && (nArgs >= 1));
 	if (!pTokens || nArgs < 1) return LTFALSE;
 
 	if ( super::HandleCommand(pTokens, nArgs) )
@@ -698,13 +701,13 @@ LTBOOL CAIHumanStateDrowsy::HandleCommand(char** pTokens, int nArgs)
 		return LTTRUE;
 	}
 
-	if ( !_stricmp(pTokens[0], "AWAKE") )
+	if ( !nolf::ascii_compare(pTokens[0], "AWAKE") )
 	{
 		Awake();
 
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "ASLEEP") )
+	else if ( !nolf::ascii_compare(pTokens[0], "ASLEEP") )
 	{
 		Asleep();
 
@@ -793,11 +796,11 @@ void CAIHumanStateUnconscious::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "AWARE") )
+	if ( !nolf::ascii_compare(szName, "AWARE") )
 	{
 		m_bAware = IsTrueChar(*szValue);
 	}
-	else if ( !_stricmp(szName, "TIME") )
+	else if ( !nolf::ascii_compare(szName, "TIME") )
 	{
 		m_fUnconsciousTime = (LTFLOAT)atof(szValue);
 		m_fRegainConsciousnessTime = g_pLTServer->GetTime() + LOWER_BY_DIFFICULTY(m_fUnconsciousTime);
@@ -1189,7 +1192,7 @@ void CAIHumanStatePatrol::Update()
 		// Get the node
 
 		CAINode *pNode = SafeGetPatrolNode(iNode);
-		_ASSERT(pNode);
+		GAME_ASSERT(pNode);
 
 		if ( !m_pStrategyFollowPath->Set(pNode) )
 		{
@@ -1267,7 +1270,7 @@ void CAIHumanStatePatrol::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "PTS") )
+	if ( !nolf::ascii_compare(szName, "PTS") )
 	{
 		m_cNodes = 0;
 
@@ -1293,47 +1296,47 @@ void CAIHumanStatePatrol::HandleNameValuePair(char *szName, char *szValue)
 			szPoint = strtok(NULL, ",");
 		}
 	}
-	else if ( !_stricmp(szName, "FACE") )
+	else if ( !nolf::ascii_compare(szName, "FACE") )
 	{
 		m_bFace = IsTrueChar(szValue[0]);
 	}
-	else if ( !_stricmp(szName, "TASK") )
+	else if ( !nolf::ascii_compare(szName, "TASK") )
 	{
-		if ( !_stricmp(szValue, "WAIT") )
+		if ( !nolf::ascii_compare(szValue, "WAIT") )
 		{
 			m_eTask = eTaskWait;
 		}
-		else if ( !_stricmp(szValue, "CLIPBOARD") )
+		else if ( !nolf::ascii_compare(szValue, "CLIPBOARD") )
 		{
 			m_eTask = eTaskAnimate;
 			m_aniTask = aniClipboard;
 		}
-		else if ( !_stricmp(szValue, "DUST") )
+		else if ( !nolf::ascii_compare(szValue, "DUST") )
 		{
 			m_eTask = eTaskAnimate;
 			m_aniTask = aniDust;
 		}
-		else if ( !_stricmp(szValue, "SWEEP") )
+		else if ( !nolf::ascii_compare(szValue, "SWEEP") )
 		{
 			m_eTask = eTaskAnimate;
 			m_aniTask = aniSweep;
 		}
-		else if ( !_stricmp(szValue, "WIPE") )
+		else if ( !nolf::ascii_compare(szValue, "WIPE") )
 		{
 			m_eTask = eTaskAnimate;
 			m_aniTask = aniWipe;
 		}
-		else if ( !_stricmp(szValue, "TICKET") )
+		else if ( !nolf::ascii_compare(szValue, "TICKET") )
 		{
 			m_eTask = eTaskAnimate;
 			m_aniTask = aniTicket;
 		}
 	}
-	else if ( !_stricmp(szName, "LOOP") )
+	else if ( !nolf::ascii_compare(szName, "LOOP") )
 	{
 		m_bLoop = IsTrueChar(*szValue);
 	}
-	else if ( !_stricmp(szName, "CIRCLE") )
+	else if ( !nolf::ascii_compare(szName, "CIRCLE") )
 	{
 		m_bCircle = IsTrueChar(*szValue);
 	}
@@ -1408,7 +1411,7 @@ void CAIHumanStatePatrol::Save(HMESSAGEREAD hWrite)
 
 HSTRING CAIHumanStatePatrol::CreateReturnString()
 {
-	_ASSERT(m_cNodes > 0);
+	GAME_ASSERT(m_cNodes > 0);
 
 	char szBuffer[1024];
 	sprintf(szBuffer, "PATROL PTS=");
@@ -1648,12 +1651,12 @@ void CAIHumanStateGoto::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "PT") )
+	if ( !nolf::ascii_compare(szName, "PT") )
 	{
 		sscanf(szValue, "%f,%f,%f", &m_vDest.x, &m_vDest.y, &m_vDest.z);
 		m_cNodes = 0;
 	}
-	else if ( !_stricmp(szName, "PTS") )
+	else if ( !nolf::ascii_compare(szName, "PTS") )
 	{
 		m_cNodes = 0;
 
@@ -1679,31 +1682,31 @@ void CAIHumanStateGoto::HandleNameValuePair(char *szName, char *szValue)
 			szPoint = strtok(NULL, ",");
 		}
 	}
-	if ( !_stricmp(szName, "MOVE") )
+	if ( !nolf::ascii_compare(szName, "MOVE") )
 	{
 		char* szMove = strtok(szValue, ",");
 
-		if ( !_stricmp(szMove, "WALK") )
+		if ( !nolf::ascii_compare(szMove, "WALK") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniWalk);
 			m_pStrategyFollowPath->SetMedium(CAIHumanStrategyFollowPath::eMediumGround);
 		}
-		else if ( !_stricmp(szMove, "RUN") )
+		else if ( !nolf::ascii_compare(szMove, "RUN") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniRun);
 			m_pStrategyFollowPath->SetMedium(CAIHumanStrategyFollowPath::eMediumGround);
 		}
-		else if ( !_stricmp(szMove, "SWIM") )
+		else if ( !nolf::ascii_compare(szMove, "SWIM") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniSwim);
 			m_pStrategyFollowPath->SetMedium(CAIHumanStrategyFollowPath::eMediumUnderwater);
 		}
 	}
-	else if ( !_stricmp(szName, "FACE") )
+	else if ( !nolf::ascii_compare(szName, "FACE") )
 	{
 		m_bFace = IsTrueChar(szValue[0]);
 	}
-	else if ( !_stricmp(szName, "LOOP") )
+	else if ( !nolf::ascii_compare(szName, "LOOP") )
 	{
 		m_bLoop = IsTrueChar(*szValue);
 	}
@@ -1808,7 +1811,7 @@ void CAIHumanStateFlee::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DANGER") )
+	if ( !nolf::ascii_compare(szName, "DANGER") )
 	{
 		GetAI()->Unlink(m_hDanger);
 		m_hDanger = LTNULL;
@@ -1935,7 +1938,7 @@ const CAnimationProp& CAIHumanStateSearch::GetRandomSearch(CAINode* pNode) const
 
 	if ( 0 == nAvailableSearchs )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
         g_pLTServer->CPrint("GetRandomSearch - couldn't get random search action for node %s", g_pLTServer->GetStringData(pNode->GetName()));
 		return aniAlert1;
 	}
@@ -1951,7 +1954,7 @@ const CAnimationProp& CAIHumanStateSearch::GetRandomSearch(CAINode* pNode) const
 	if ( dwSearch == CAINode::kSearchFlagAlert2 )			return aniAlert2;
 	if ( dwSearch == CAINode::kSearchFlagAlert3 )			return aniAlert3;
 
-	_ASSERT(LTFALSE);
+	GAME_ASSERT(LTFALSE);
     g_pLTServer->CPrint("GetRandomSearch - couldn't get search action for node %s", g_pLTServer->GetStringData(pNode->GetName()));
 	return aniAlert1;
 }
@@ -2194,7 +2197,7 @@ void CAIHumanStateSearch::UpdateAnimation()
 	}
 	else if ( m_pStrategyFollowPath->IsDone() )
 	{
-		_ASSERT(m_bSearching);
+		GAME_ASSERT(m_bSearching);
 		GetAnimationContext()->SetProp(m_aniSearch);
 		GetAnimationContext()->Lock();
 	}
@@ -2206,15 +2209,15 @@ void CAIHumanStateSearch::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "ENGAGE") )
+	if ( !nolf::ascii_compare(szName, "ENGAGE") )
 	{
 		m_bEngage = IsTrueChar(*szValue);
 	}
-	else if ( !_stricmp(szName, "FACE") )
+	else if ( !nolf::ascii_compare(szName, "FACE") )
 	{
 		m_bFace = IsTrueChar(*szValue);
 	}
-	else if ( !_stricmp(szName, "PAUSE") )
+	else if ( !nolf::ascii_compare(szName, "PAUSE") )
 	{
 		m_bPause = IsTrueChar(*szValue);
 	}
@@ -2379,7 +2382,7 @@ void CAIHumanStateUseObject::Update()
 				break;
 				default:
 				{
-					_ASSERT(LTFALSE);
+					GAME_ASSERT(LTFALSE);
 				}
 				break;
 			}
@@ -2411,7 +2414,7 @@ void CAIHumanStateUseObject::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		GetAI()->Unlink(m_hObject);
 		m_hObject = LTNULL;
@@ -2480,15 +2483,15 @@ void CAIHumanStateUseObject::HandleNameValuePair(char *szName, char *szValue)
             g_pLTServer->CPrint("USEOBJECT OBJECT=%s -- unable to find path!", szValue);
 		}
 	}
-	else if ( !_stricmp(szName, "MOVE") )
+	else if ( !nolf::ascii_compare(szName, "MOVE") )
 	{
 		char* szMove = strtok(szValue, ",");
 
-		if ( !_stricmp(szMove, "WALK") )
+		if ( !nolf::ascii_compare(szMove, "WALK") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniWalk);
 		}
-		else if ( !_stricmp(szMove, "RUN") )
+		else if ( !nolf::ascii_compare(szMove, "RUN") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniRun);
 		}
@@ -2637,7 +2640,7 @@ void CAIHumanStatePickupObject::Update()
 					DoPickupWeapon();
 					break;
 				default :
-					_ASSERT(LTFALSE);
+					GAME_ASSERT(LTFALSE);
 					break;
 			}
 
@@ -2669,7 +2672,7 @@ void CAIHumanStatePickupObject::Update()
 				break;
 				default:
 				{
-					_ASSERT(LTFALSE);
+					GAME_ASSERT(LTFALSE);
 				}
 				break;
 			}
@@ -2721,7 +2724,7 @@ void CAIHumanStatePickupObject::HandleModelString(ArgList* pArgList)
 	char* szKey = pArgList->argv[0];
 	if ( !szKey ) return;
 
-	if ( !_stricmp(szKey, c_szKeyPickUp) )
+	if ( !nolf::ascii_compare(szKey, c_szKeyPickUp) )
 	{
 		m_bPickedUp = LTTRUE;
 	}
@@ -2733,7 +2736,7 @@ void CAIHumanStatePickupObject::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		GetAI()->Unlink(m_hObject);
 		m_hObject = LTNULL;
@@ -2789,15 +2792,15 @@ void CAIHumanStatePickupObject::HandleNameValuePair(char *szName, char *szValue)
             g_pLTServer->CPrint("PICKUPOBJECT OBJECT=%s -- unable to find path!", szValue);
 		}
 	}
-	else if ( !_stricmp(szName, "MOVE") )
+	else if ( !nolf::ascii_compare(szName, "MOVE") )
 	{
 		char* szMove = strtok(szValue, ",");
 
-		if ( !_stricmp(szMove, "WALK") )
+		if ( !nolf::ascii_compare(szMove, "WALK") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniWalk);
 		}
-		else if ( !_stricmp(szMove, "RUN") )
+		else if ( !nolf::ascii_compare(szMove, "RUN") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniRun);
 		}
@@ -2895,7 +2898,7 @@ void CAIHumanStateTail::HandleModelString(ArgList* pArgList)
 
 	if ( !pArgList || !pArgList->argv || pArgList->argc == 0 || !pArgList->argv[0] ) return;
 
-	if ( !_stricmp(pArgList->argv[0], "WHISTLE") && (GetRandom(0.0f, 1.0f) > 0.50f) )
+	if ( !nolf::ascii_compare(pArgList->argv[0], "WHISTLE") && (GetRandom(0.0f, 1.0f) > 0.50f) )
 	{
 		GetAI()->PlaySound(aisTail);
 	}
@@ -2998,7 +3001,7 @@ void CAIHumanStateTail::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "PTS") )
+	if ( !nolf::ascii_compare(szName, "PTS") )
 	{
 		m_cTailNodes = 0;
 
@@ -3134,7 +3137,7 @@ void CAIHumanStateFollowFootprint::Update()
 		bDone = LTTRUE;
 
         CCharacter* pCharacter = (CCharacter*)g_pLTServer->HandleToObject(GetAI()->GetTarget()->GetObject());
-		_ASSERT(pCharacter);
+		GAME_ASSERT(pCharacter);
 
 		CTList<CharFootprintInfo*>* plistFootprints = pCharacter->GetFootprints();
 		CharFootprintInfo** ppFootprint = plistFootprints->GetItem(TLIT_FIRST);
@@ -3240,7 +3243,7 @@ void CAIHumanStateFollowFootprint::HandleNameValuePair(char *szName, char *szVal
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "SEARCH") )
+	if ( !nolf::ascii_compare(szName, "SEARCH") )
 	{
 		m_bSearch = IsTrueChar(*szValue);
 	}
@@ -3487,7 +3490,7 @@ void CAIHumanStateInvestigate::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "ENEMY") )
+	if ( !nolf::ascii_compare(szName, "ENEMY") )
 	{
 		GetAI()->Unlink(m_hEnemy);
 		m_hEnemy = LTNULL;
@@ -3509,15 +3512,15 @@ void CAIHumanStateInvestigate::HandleNameValuePair(char *szName, char *szValue)
             g_pLTServer->CPrint("Investigate ENEMY=%s -- this object does not exist!", szName);
 		}
 	}
-	else if ( !_stricmp(szName, "SENSE") )
+	else if ( !nolf::ascii_compare(szName, "SENSE") )
 	{
 		m_stSenseType = (SenseType)atol(szValue);
 	}
-	else if ( !_stricmp(szName, "POSITION") )
+	else if ( !nolf::ascii_compare(szName, "POSITION") )
 	{
 		sscanf(szValue, "%f,%f,%f", &m_vPosition.x, &m_vPosition.y, &m_vPosition.z);
 	}
-	else if ( !_stricmp(szName, "SEARCH") )
+	else if ( !nolf::ascii_compare(szName, "SEARCH") )
 	{
 		m_bSearch = IsTrueChar(*szValue);
 	}
@@ -3821,7 +3824,7 @@ void CAIHumanStateCheckBody::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "BODY") )
+	if ( !nolf::ascii_compare(szName, "BODY") )
 	{
 		GetAI()->Unlink(m_hBody);
 		m_hBody = LTNULL;
@@ -3843,7 +3846,7 @@ void CAIHumanStateCheckBody::HandleNameValuePair(char *szName, char *szValue)
             g_pLTServer->CPrint("CHECKBODY BODY=%s -- this object does not exist!", szName);
 		}
 	}
-	else if ( !_stricmp(szName, "SEARCH") )
+	else if ( !nolf::ascii_compare(szName, "SEARCH") )
 	{
 		m_bSearch = IsTrueChar(*szValue);
 	}
@@ -4227,7 +4230,7 @@ void CAIHumanStateDraw::HandleModelString(ArgList* pArgList)
 
 	if ( !pArgList || !pArgList->argv || pArgList->argc == 0 || !pArgList->argv[0] ) return;
 
-	if ( GetAI()->HasHolsterString() && !_stricmp(pArgList->argv[0], "DRAW") )
+	if ( GetAI()->HasHolsterString() && !nolf::ascii_compare(pArgList->argv[0], "DRAW") )
 	{
 		char szAttachment[128];
 		sprintf(szAttachment, "ATTACH RightHand (%s)", GetAI()->GetHolsterString());
@@ -4334,26 +4337,26 @@ void CAIHumanStateAttack::HandleDamage(const DamageStruct& damage)
 
 void CAIHumanStateAttack::HandleNameValuePair(char *szName, char *szValue)
 {
-	_ASSERT(szName && szValue);
+	GAME_ASSERT(szName && szValue);
 	if ( !szName || !szValue ) return;
 
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "CHASE") )
+	if ( !nolf::ascii_compare(szName, "CHASE") )
 	{
 		m_bChase = IsTrueChar(*szValue);
 	}
-	else if ( !_stricmp(szName, "CHASEDELAY") )
+	else if ( !nolf::ascii_compare(szName, "CHASEDELAY") )
 	{
 		m_fChaseDelay = (LTFLOAT)atof(szValue) + g_pLTServer->GetTime();
 	}
-	else if ( !_stricmp(szName, "POSTURE") )
+	else if ( !nolf::ascii_compare(szName, "POSTURE") )
 	{
-		if ( !_stricmp(szValue, "CROUCH") )
+		if ( !nolf::ascii_compare(szValue, "CROUCH") )
 		{
 			m_aniPosture = aniCrouch;
 		}
-		else if ( !_stricmp(szValue, "STAND") )
+		else if ( !nolf::ascii_compare(szValue, "STAND") )
 		{
 			m_aniPosture = aniStand;
 		}
@@ -4673,12 +4676,12 @@ void CAIHumanStateAttackProp::HandleBrokenLink(HOBJECT hObject)
 
 void CAIHumanStateAttackProp::HandleNameValuePair(char *szName, char *szValue)
 {
-	_ASSERT(szName && szValue);
+	GAME_ASSERT(szName && szValue);
 	if ( !szName || !szValue ) return;
 
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "PROP") )
+	if ( !nolf::ascii_compare(szName, "PROP") )
 	{
 		GetAI()->Unlink(m_hProp);
 		m_hProp = LTNULL;
@@ -4810,7 +4813,7 @@ void CAIHumanStateAttackOnSight::HandleNameValuePair(char *szName, char *szValue
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "CHASEDELAY") )
+	if ( !nolf::ascii_compare(szName, "CHASEDELAY") )
 	{
 		m_bChaseDelay = IsTrueChar(*szValue);
 	}
@@ -4937,7 +4940,7 @@ void CAIHumanStateAssassinate::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		if ( !IsVector(szValue) )
 		{
@@ -4967,20 +4970,20 @@ void CAIHumanStateAssassinate::HandleNameValuePair(char *szName, char *szValue)
 			}
 		}
 	}
-	else if ( !_stricmp(szName, "MOVE") )
+	else if ( !nolf::ascii_compare(szName, "MOVE") )
 	{
 		char* szMove = strtok(szValue, ",");
 
-		if ( !_stricmp(szMove, "WALK") )
+		if ( !nolf::ascii_compare(szMove, "WALK") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniWalk);
 		}
-		else if ( !_stricmp(szMove, "RUN") )
+		else if ( !nolf::ascii_compare(szMove, "RUN") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniRun);
 		}
 	}
-	else if ( !_stricmp(szName, "IGNOREVIS") )
+	else if ( !nolf::ascii_compare(szName, "IGNOREVIS") )
 	{
 		m_bIgnoreVisibility = IsTrueChar(*szValue);
 	}
@@ -5326,7 +5329,7 @@ void CAIHumanStateAttackFromCover::UpdateGotoCover()
 
 void CAIHumanStateAttackFromCover::UpdateUseCover()
 {
-	_ASSERT(m_pStrategyCover);
+	GAME_ASSERT(m_pStrategyCover);
 	if ( !m_pStrategyCover ) return;
 
 	if ( m_pStrategyCover->IsCovered() )
@@ -5458,7 +5461,7 @@ void CAIHumanStateAttackFromCover::HandleDamage(const DamageStruct& damage)
 
 LTBOOL CAIHumanStateAttackFromCover::HandleCommand(char** pTokens, int nArgs)
 {
-	_ASSERT(pTokens && (nArgs >= 1));
+	GAME_ASSERT(pTokens && (nArgs >= 1));
 	if (!pTokens || nArgs < 1) return LTFALSE;
 
 	if ( super::HandleCommand(pTokens, nArgs) )
@@ -5466,7 +5469,7 @@ LTBOOL CAIHumanStateAttackFromCover::HandleCommand(char** pTokens, int nArgs)
 		return LTTRUE;
 	}
 
-	if ( !_stricmp(pTokens[0], "REEVALUATE") )
+	if ( !nolf::ascii_compare(pTokens[0], "REEVALUATE") )
 	{
 		// Regardless of the outcome, reset our elapsed time (a bit of a hack) to simulate having "re-entered" this state
 
@@ -5498,7 +5501,7 @@ void CAIHumanStateAttackFromCover::HandleNameValuePair(char *szName, char *szVal
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		if ( GetType() != eStateAttackFromCover )
 		{
@@ -5549,7 +5552,7 @@ void CAIHumanStateAttackFromCover::HandleNameValuePair(char *szName, char *szVal
 			m_eState = eStateGotoCover;
 		}
 	}
-	else if ( !_stricmp(szName, "RETRIES") )
+	else if ( !nolf::ascii_compare(szName, "RETRIES") )
 	{
 		// FOR INTERNAL USE ONLY
 
@@ -5575,7 +5578,7 @@ CAIHumanStrategy::AIHumanStrategyType CAIHumanStateAttackFromCover::GetRandomCov
 
 	if ( 0 == nAvailableCovers )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
         g_pLTServer->CPrint("GetRandomCoverStrategy - couldn't get random cover node for node %s", g_pLTServer->GetStringData(pNode->GetName()));
 		return CAIHumanStrategy::eStrategyCoverBlind;
 	}
@@ -5587,7 +5590,7 @@ CAIHumanStrategy::AIHumanStrategyType CAIHumanStateAttackFromCover::GetRandomCov
 	if ( dwCover == CAINode::kCoverFlag1WayCorner )	return CAIHumanStrategy::eStrategyCover1WayCorner;
 	if ( dwCover == CAINode::kCoverFlag2WayCorner )	return CAIHumanStrategy::eStrategyCover2WayCorner;
 
-	_ASSERT(LTFALSE);
+	GAME_ASSERT(LTFALSE);
     g_pLTServer->CPrint("GetRandomCoverStrategy - couldn't get random cover node for node %s", g_pLTServer->GetStringData(pNode->GetName()));
 	return CAIHumanStrategy::eStrategyCoverBlind;
 }
@@ -5596,7 +5599,7 @@ CAIHumanStrategy::AIHumanStrategyType CAIHumanStateAttackFromCover::GetRandomCov
 
 LTBOOL CAIHumanStateAttackFromCover::SetCoverStrategy(CAIHumanStrategy::AIHumanStrategyType eStrategy)
 {
-	_ASSERT(CAINode::kInvalidNodeID != m_dwCoverNode);
+	GAME_ASSERT(CAINode::kInvalidNodeID != m_dwCoverNode);
 	if ( CAINode::kInvalidNodeID == m_dwCoverNode ) return LTFALSE;
 
 	if ( m_pStrategyCover )
@@ -5629,12 +5632,12 @@ LTBOOL CAIHumanStateAttackFromCover::SetCoverStrategy(CAIHumanStrategy::AIHumanS
 		}
 		default:
 		{
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 			return(LTFALSE);
 		}
 	}
 
-	_ASSERT(m_pStrategyCover);
+	GAME_ASSERT(m_pStrategyCover);
 
 	if ( !m_pStrategyCover->Init(GetAI()) )
 	{
@@ -5980,7 +5983,7 @@ void CAIHumanStateAttackFromVantage::HandleDamage(const DamageStruct& damage)
 
 LTBOOL CAIHumanStateAttackFromVantage::HandleCommand(char** pTokens, int nArgs)
 {
-	_ASSERT(pTokens && (nArgs >= 1));
+	GAME_ASSERT(pTokens && (nArgs >= 1));
 	if (!pTokens || nArgs < 1) return LTFALSE;
 
 	if ( super::HandleCommand(pTokens, nArgs) )
@@ -5988,7 +5991,7 @@ LTBOOL CAIHumanStateAttackFromVantage::HandleCommand(char** pTokens, int nArgs)
 		return LTTRUE;
 	}
 
-	if ( !_stricmp(pTokens[0], "REEVALUATE") )
+	if ( !nolf::ascii_compare(pTokens[0], "REEVALUATE") )
 	{
 		// Force a new vantage node selection next update
 		m_fAttackTimer = -1.0f;
@@ -6240,7 +6243,7 @@ void CAIHumanStateAttackFromView::HandleNameValuePair(char *szName, char *szValu
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		CAINode *pViewNode = g_pAINodeMgr->GetNode(szValue);
 
@@ -6688,7 +6691,7 @@ const CAnimationProp& CAIHumanStatePanic::GetRandomPanic(CAINode* pNode) const
 
 	if ( 0 == nAvailablePanics )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
         g_pLTServer->CPrint("GetRandomPanic - couldn't get random Panic action for node %s", g_pLTServer->GetStringData(pNode->GetName()));
 		return aniAlert1;
 	}
@@ -6698,7 +6701,7 @@ const CAnimationProp& CAIHumanStatePanic::GetRandomPanic(CAINode* pNode) const
 	if ( dwPanic == CAINode::kPanicFlagStand )			return aniStand;
 	if ( dwPanic == CAINode::kPanicFlagCrouch )			return aniCrouch;
 
-	_ASSERT(LTFALSE);
+	GAME_ASSERT(LTFALSE);
     g_pLTServer->CPrint("GetRandomPanic - couldn't get Panic action for node %s", g_pLTServer->GetStringData(pNode->GetName()));
 	return aniCrouch;
 }
@@ -6709,7 +6712,7 @@ void CAIHumanStatePanic::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		CAINode *pPanicNode = g_pAINodeMgr->GetNode(szValue);
 
@@ -6750,7 +6753,7 @@ void CAIHumanStatePanic::HandleNameValuePair(char *szName, char *szValue)
 			m_aniPanic = GetRandomPanic(pPanicNode);
 		}
 	}
-	else if ( !_stricmp(szName, "CANACTIVATE") )
+	else if ( !nolf::ascii_compare(szName, "CANACTIVATE") )
 	{
 		m_bCanActivate = IsTrueChar(*szValue);
 	}
@@ -6908,7 +6911,7 @@ void CAIHumanStateDistress::UpdateAnimation()
 			break;
 
 		default:
-			_ASSERT(LTFALSE);
+			GAME_ASSERT(LTFALSE);
 			break;
 	}
 
@@ -6921,7 +6924,7 @@ void CAIHumanStateDistress::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "CANACTIVATE") )
+	if ( !nolf::ascii_compare(szName, "CANACTIVATE") )
 	{
 		m_bCanActivate = IsTrueChar(*szValue);
 	}
@@ -7062,7 +7065,7 @@ void CAIHumanStateGetBackup::HandleNameValuePair(char *szName, char *szValue)
         g_pLTServer->CPrint("GetBackup -- NEXT= specified, this could have dangerous effects!!!!");
 	}
 
-	if ( !_stricmp(szName, "DEST") )
+	if ( !nolf::ascii_compare(szName, "DEST") )
 	{
 		CAINode* pAINode = g_pAINodeMgr->GetNode(szValue);
 		if ( !pAINode )
@@ -7093,15 +7096,15 @@ void CAIHumanStateGetBackup::HandleNameValuePair(char *szName, char *szValue)
             g_pLTServer->CPrint("GETBACKUP OBJECT=%s -- unable to find path!", szValue);
 		}
 	}
-	else if ( !_stricmp(szName, "MOVE") )
+	else if ( !nolf::ascii_compare(szName, "MOVE") )
 	{
 		char* szMove = strtok(szValue, ",");
 
-		if ( !_stricmp(szMove, "WALK") )
+		if ( !nolf::ascii_compare(szMove, "WALK") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniWalk);
 		}
-		else if ( !_stricmp(szMove, "RUN") )
+		else if ( !nolf::ascii_compare(szMove, "RUN") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniRun);
 		}
@@ -7279,32 +7282,32 @@ LTBOOL CAIHumanStateTalk::HandleCommand(char** pTokens, int nArgs)
 		return LTTRUE;
 	}
 
-	if ( !_stricmp(pTokens[0], "HAPPY") )
+	if ( !nolf::ascii_compare(pTokens[0], "HAPPY") )
 	{
 		m_eMood = eMoodHappy;
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "ANGRY") )
+	else if ( !nolf::ascii_compare(pTokens[0], "ANGRY") )
 	{
 		m_eMood = eMoodAngry;
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "SAD") )
+	else if ( !nolf::ascii_compare(pTokens[0], "SAD") )
 	{
 		m_eMood = eMoodSad;
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "TENSE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "TENSE") )
 	{
 		m_eMood = eMoodTense;
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "AGREE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "AGREE") )
 	{
 		m_eMood = eMoodAgree;
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "DISAGREE") )
+	else if ( !nolf::ascii_compare(pTokens[0], "DISAGREE") )
 	{
 		m_eMood = eMoodDisagree;
 		return LTTRUE;
@@ -7319,34 +7322,34 @@ void CAIHumanStateTalk::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "MOOD") )
+	if ( !nolf::ascii_compare(szName, "MOOD") )
 	{
-		if ( !_stricmp(szValue, "HAPPY") )
+		if ( !nolf::ascii_compare(szValue, "HAPPY") )
 		{
 			m_eMood = eMoodHappy;
 		}
-		else if ( !_stricmp(szValue, "ANGRY") )
+		else if ( !nolf::ascii_compare(szValue, "ANGRY") )
 		{
 			m_eMood = eMoodAngry;
 		}
-		else if ( !_stricmp(szValue, "SAD") )
+		else if ( !nolf::ascii_compare(szValue, "SAD") )
 		{
 			m_eMood = eMoodSad;
 		}
-		else if ( !_stricmp(szValue, "TENSE") )
+		else if ( !nolf::ascii_compare(szValue, "TENSE") )
 		{
 			m_eMood = eMoodTense;
 		}
-		else if ( !_stricmp(szValue, "AGREE") )
+		else if ( !nolf::ascii_compare(szValue, "AGREE") )
 		{
 			m_eMood = eMoodAgree;
 		}
-		else if ( !_stricmp(szValue, "DISAGREE") )
+		else if ( !nolf::ascii_compare(szValue, "DISAGREE") )
 		{
 			m_eMood = eMoodDisagree;
 		}
 	}
-	else if ( !_stricmp(szName, "FACE") )
+	else if ( !nolf::ascii_compare(szName, "FACE") )
 	{
 		GetAI()->Unlink(m_hFace);
 		m_hFace = LTNULL;
@@ -7356,7 +7359,7 @@ void CAIHumanStateTalk::HandleNameValuePair(char *szName, char *szValue)
 			GetAI()->Link(m_hFace);
 		}
 	}
-	else if ( !_stricmp(szName, "FACETIME") )
+	else if ( !nolf::ascii_compare(szName, "FACETIME") )
 	{
 		m_fFaceTime = (LTFLOAT)atof(szValue);
 		m_fFaceTimer = g_pLTServer->GetTime() + m_fFaceTime;
@@ -7528,17 +7531,17 @@ void CAIHumanStateCharge::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "ATTACKDIST") )
+	if ( !nolf::ascii_compare(szName, "ATTACKDIST") )
 	{
 		m_fAttackDistanceSqr = (LTFLOAT)atof(szValue);
 		m_fAttackDistanceSqr *= m_fAttackDistanceSqr;
 	}
-	else if ( !_stricmp(szName, "YELLDIST") )
+	else if ( !nolf::ascii_compare(szName, "YELLDIST") )
 	{
 		m_fYellDistanceSqr = (LTFLOAT)atof(szValue);
 		m_fYellDistanceSqr *= m_fYellDistanceSqr;
 	}
-	else if ( !_stricmp(szName, "STOPDIST") )
+	else if ( !nolf::ascii_compare(szName, "STOPDIST") )
 	{
 		m_fStopDistanceSqr = (LTFLOAT)atof(szValue);
 		m_fStopDistanceSqr *= m_fStopDistanceSqr;
@@ -7663,21 +7666,21 @@ void CAIHumanStateAnimate::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "ANIM") )
+	if ( !nolf::ascii_compare(szName, "ANIM") )
 	{
 		FREE_HSTRING(m_hstrAnim);
 		m_hstrAnim = g_pLTServer->CreateString(szValue);
 
 		GetAI()->GetAnimationContext()->SetSpecial(szValue);
 	}
-	else if ( !_stricmp(szName, "LOOP") )
+	else if ( !nolf::ascii_compare(szName, "LOOP") )
 	{
 		m_bLoop = IsTrueChar(szValue[0]);
 	}
 
 	// Can't loop and have a NEXT=
 
-	_ASSERT(!(m_bLoop && m_cNexts>0));
+	GAME_ASSERT(!(m_bLoop && m_cNexts>0));
 }
 
 // ----------------------------------------------------------------------- //
@@ -7788,7 +7791,7 @@ void CAIHumanStateCome::Update()
 
 		if ( !m_pStrategyFollowPath->Set(vPlayerPosition) )
 		{
-			_ASSERT(!"Could not set path to player");
+			GAME_ASSERT(!"Could not set path to player");
 			GetAI()->ChangeState("IDLE");
 			return;
 		}
@@ -7918,7 +7921,7 @@ void CAIHumanStateFollow::Update()
 	{
 		if ( !m_pStrategyFollowPath->Set(vTargetPosition) )
 		{
-			_ASSERT(!"Could not set path to target");
+			GAME_ASSERT(!"Could not set path to target");
 			GetAI()->FaceTarget();
 			return;
 		}
@@ -8010,31 +8013,31 @@ void CAIHumanStateFollow::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "MOVE") )
+	if ( !nolf::ascii_compare(szName, "MOVE") )
 	{
 		char* szMove = strtok(szValue, ",");
 
-		if ( !_stricmp(szMove, "WALK") )
+		if ( !nolf::ascii_compare(szMove, "WALK") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniWalk);
 			m_pStrategyFollowPath->SetMedium(CAIHumanStrategyFollowPath::eMediumGround);
 		}
-		else if ( !_stricmp(szMove, "RUN") )
+		else if ( !nolf::ascii_compare(szMove, "RUN") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniRun);
 			m_pStrategyFollowPath->SetMedium(CAIHumanStrategyFollowPath::eMediumGround);
 		}
-		else if ( !_stricmp(szMove, "SWIM") )
+		else if ( !nolf::ascii_compare(szMove, "SWIM") )
 		{
 			m_pStrategyFollowPath->SetMovement(aniSwim);
 			m_pStrategyFollowPath->SetMedium(CAIHumanStrategyFollowPath::eMediumUnderwater);
 		}
 	}
-	else if ( !_stricmp(szName, "RANGETIME") )
+	else if ( !nolf::ascii_compare(szName, "RANGETIME") )
 	{
 		m_fRangeTimer = m_fRangeTime = (LTFLOAT)atof(szValue);
 	}
-	else if ( !_stricmp(szName, "RANGE") )
+	else if ( !nolf::ascii_compare(szName, "RANGE") )
 	{
 		m_fRangeSqr = (LTFLOAT)atof(szValue)*(LTFLOAT)atof(szValue);
 	}
@@ -8175,7 +8178,7 @@ void CAIHumanStateParaShoot::Update()
 
 	if ( !GetAI()->HasTarget() )
 	{
-		_ASSERT(LTFALSE);
+		GAME_ASSERT(LTFALSE);
 		return;
 	}
 
@@ -8563,7 +8566,7 @@ void CAIHumanStateHeliAttack::HandleBrokenLink(HOBJECT hObject)
 
 LTBOOL CAIHumanStateHeliAttack::HandleCommand(char** pTokens, int nArgs)
 {
-	_ASSERT(pTokens && (nArgs >= 1));
+	GAME_ASSERT(pTokens && (nArgs >= 1));
 	if (!pTokens || nArgs < 1) return LTFALSE;
 
 	if ( super::HandleCommand(pTokens, nArgs) )
@@ -8571,14 +8574,14 @@ LTBOOL CAIHumanStateHeliAttack::HandleCommand(char** pTokens, int nArgs)
 		return LTTRUE;
 	}
 
-	if ( m_hHelicopter && !_stricmp(pTokens[0], "OPEN") )
+	if ( m_hHelicopter && !nolf::ascii_compare(pTokens[0], "OPEN") )
 	{
         AI_Helicopter* pHelicopter = (AI_Helicopter*)g_pLTServer->HandleToObject(m_hHelicopter);
 		pHelicopter->OpenRightDoor();
 
 		return LTTRUE;
 	}
-	else if ( m_hHelicopter && !_stricmp(pTokens[0], "CLOSE") )
+	else if ( m_hHelicopter && !nolf::ascii_compare(pTokens[0], "CLOSE") )
 	{
         AI_Helicopter* pHelicopter = (AI_Helicopter*)g_pLTServer->HandleToObject(m_hHelicopter);
 		pHelicopter->CloseRightDoor();
@@ -8595,7 +8598,7 @@ void CAIHumanStateHeliAttack::HandleNameValuePair(char *szName, char *szValue)
 {
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "HELI") )
+	if ( !nolf::ascii_compare(szName, "HELI") )
 	{
 		GetAI()->Unlink(m_hHelicopter);
 		m_hHelicopter = LTNULL;
@@ -8755,7 +8758,7 @@ void CAIHumanStateScotBox::HandleModelString(ArgList* pArgList)
 
 	if ( !pArgList || !pArgList->argv || pArgList->argc == 0 || !pArgList->argv[0] ) return;
 
-	if ( !_stricmp(pArgList->argv[0], "PUNCH") )
+	if ( !nolf::ascii_compare(pArgList->argv[0], "PUNCH") )
 	{
 		if ( !GetAI()->HasTarget() ) return;
 
@@ -8773,7 +8776,7 @@ void CAIHumanStateScotBox::HandleModelString(ArgList* pArgList)
 			GetAI()->GetWeapon(0)->UpdateWeapon(fireInfo, LTTRUE);
 		}
 	}
-	else if ( !_stricmp(pArgList->argv[0], "SLAM") )
+	else if ( !nolf::ascii_compare(pArgList->argv[0], "SLAM") )
 	{
 		if ( !GetAI()->HasTarget() ) return;
 
@@ -8798,7 +8801,8 @@ void CAIHumanStateScotBox::HandleModelString(ArgList* pArgList)
 			if (hClient)
 			{
 				HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(hClient, MID_SHAKE_SCREEN);
-				g_pLTServer->WriteToMessageVector(hMessage, &LTVector(5, 5, 5));
+				LTVector shake(5, 5, 5);
+				g_pLTServer->WriteToMessageVector(hMessage, &shake);
 				g_pLTServer->EndMessage(hMessage);
 			}
 		}
@@ -8827,12 +8831,12 @@ void CAIHumanStateScotBox::HandleBrokenLink(HOBJECT hObject)
 
 void CAIHumanStateScotBox::HandleNameValuePair(char *szName, char *szValue)
 {
-	_ASSERT(szName && szValue);
+	GAME_ASSERT(szName && szValue);
 	if ( !szName || !szValue ) return;
 
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "DEFEAT") )
+	if ( !nolf::ascii_compare(szName, "DEFEAT") )
 	{
 		FREE_HSTRING(m_hstrDefeat);
         m_hstrDefeat = g_pLTServer->CreateString(szValue);
@@ -9349,7 +9353,7 @@ LTBOOL CAIHumanStateIngeSing::Init(CAIHuman* pAIHuman)
 
 LTBOOL CAIHumanStateIngeSing::HandleCommand(char** pTokens, int nArgs)
 {
-	_ASSERT(pTokens && (nArgs >= 1));
+	GAME_ASSERT(pTokens && (nArgs >= 1));
 	if (!pTokens || nArgs < 1) return LTFALSE;
 
 	if ( super::HandleCommand(pTokens, nArgs) )
@@ -9357,12 +9361,12 @@ LTBOOL CAIHumanStateIngeSing::HandleCommand(char** pTokens, int nArgs)
 		return LTTRUE;
 	}
 
-	if ( !_stricmp(pTokens[0], "POWERON") )
+	if ( !nolf::ascii_compare(pTokens[0], "POWERON") )
 	{
 		m_bPowerOn = LTTRUE;
 		return LTTRUE;
 	}
-	else if ( !_stricmp(pTokens[0], "POWEROFF") )
+	else if ( !nolf::ascii_compare(pTokens[0], "POWEROFF") )
 	{
 		m_bPowerOn = LTFALSE;
 		return LTTRUE;
@@ -9375,12 +9379,12 @@ LTBOOL CAIHumanStateIngeSing::HandleCommand(char** pTokens, int nArgs)
 
 void CAIHumanStateIngeSing::HandleNameValuePair(char *szName, char *szValue)
 {
-	_ASSERT(szName && szValue);
+	GAME_ASSERT(szName && szValue);
 	if ( !szName || !szValue ) return;
 
 	super::HandleNameValuePair(szName, szValue);
 
-	if ( !_stricmp(szName, "HENCHMEN") )
+	if ( !nolf::ascii_compare(szName, "HENCHMEN") )
 	{
 		m_cHenchmen = 0;
 
@@ -9401,7 +9405,7 @@ void CAIHumanStateIngeSing::HandleNameValuePair(char *szName, char *szValue)
 			}
 		}
 	}
-	else if ( !_stricmp(szName, "TELEPORTERS") )
+	else if ( !nolf::ascii_compare(szName, "TELEPORTERS") )
 	{
 		m_cTeleporters = 0;
 
@@ -9422,7 +9426,7 @@ void CAIHumanStateIngeSing::HandleNameValuePair(char *szName, char *szValue)
 			}
 		}
 	}
-	else if ( !_stricmp(szName, "EXPLOSIONS") )
+	else if ( !nolf::ascii_compare(szName, "EXPLOSIONS") )
 	{
 		m_cExplosions = 0;
 
@@ -9497,7 +9501,7 @@ void CAIHumanStateIngeSing::HandleModelString(ArgList* pArgList)
 
 	if ( !pArgList || !pArgList->argv || pArgList->argc == 0 || !pArgList->argv[0] ) return;
 
-	if ( !_stricmp(pArgList->argv[0], "SWING") )
+	if ( !nolf::ascii_compare(pArgList->argv[0], "SWING") )
 	{
 		if ( !GetAI()->HasTarget() ) return;
 
@@ -9515,7 +9519,7 @@ void CAIHumanStateIngeSing::HandleModelString(ArgList* pArgList)
 			GetAI()->GetWeapon(0)->UpdateWeapon(fireInfo, LTTRUE);
 		}
 	}
-	if ( !_stricmp(pArgList->argv[0], "FOOTSTEP_KEY") )
+	if ( !nolf::ascii_compare(pArgList->argv[0], "FOOTSTEP_KEY") )
 	{
 		CPlayerObj* pPlayer = g_pCharacterMgr->FindPlayer();
 		if (pPlayer)
@@ -9524,7 +9528,8 @@ void CAIHumanStateIngeSing::HandleModelString(ArgList* pArgList)
 			if (hClient)
 			{
                 HMESSAGEWRITE hMessage = g_pLTServer->StartMessage(hClient, MID_SHAKE_SCREEN);
-                g_pLTServer->WriteToMessageVector(hMessage, &LTVector(1, 1, 1));
+                LTVector shake(1, 1, 1);
+                g_pLTServer->WriteToMessageVector(hMessage, &shake);
                 g_pLTServer->EndMessage(hMessage);
 			}
 		}
@@ -9749,7 +9754,7 @@ void CAIHumanStateIngeSing::UpdateClosing()
 		{
 			if ( !m_pStrategyFollowPath->Set(vTargetPosition) )
 			{
-				_ASSERT(!"Could not set path to target");
+				GAME_ASSERT(!"Could not set path to target");
 				m_eState = eStateSinging;
 				return;
 			}
@@ -9769,7 +9774,7 @@ void CAIHumanStateIngeSing::UpdateClosing()
 
 			if ( !m_pStrategyFollowPath->Set(vTargetPosition) )
 			{
-				_ASSERT(!"Could not set path to target");
+				GAME_ASSERT(!"Could not set path to target");
 				m_eState = eStateSinging;
 				return;
 			}

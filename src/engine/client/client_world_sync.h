@@ -1,0 +1,75 @@
+#pragma once
+#include "engine/client/client_scene.h"
+#include "engine/client/server_files.h"
+#include "engine/portable/resources.h"
+#include <functional>
+#include <map>
+
+namespace nolf {
+// Game callbacks for server-driven changes, in the order the engine applies
+// them. Hosts retain their game module with `code`.
+struct ClientSyncEvents {
+    std::shared_ptr<const void> code;
+    // A new object's or an instant effect's message (object null).
+    std::function<void(HOBJECT,ILTMessage&)> special_effect;
+    // Before a server move or rotation is applied; the game may adjust it.
+    std::function<void(HOBJECT,bool teleport,LTVector&)> move;
+    std::function<void(HOBJECT,bool teleport,LTRotation&)> rotate;
+    // Plays a server sound; a tracked one (PLAYSOUND_GETHANDLE) answers its
+    // handle, which the sync later moves and stops when the server removes it.
+    std::function<HLTSOUND(PlaySoundInfo&,const std::string& file,float offset)> sound;
+    std::function<void(HLTSOUND,const LTVector&)> move_sound;
+    std::function<void(HLTSOUND)> stop_sound;
+};
+// Applies the engine's object, sound and lighting update packets (8, 10,
+// 15, 18, 25, 26) to the client scene, exactly as the original client read
+// them. Server objects live for the current world only.
+class ClientWorldSync {
+public:
+    ClientWorldSync(std::shared_ptr<ClientScene>,std::shared_ptr<const Resources>,std::weak_ptr<const void> engine,ClientSyncEvents);
+    ~ClientWorldSync();
+    ClientWorldSync(const ClientWorldSync&)=delete;
+    ClientWorldSync& operator=(const ClientWorldSync&)=delete;
+    // Forgets server objects; the scene clears them with the world.
+    void reset();
+    void apply(std::uint8_t packet,std::span<const std::byte>,const ServerFiles&);
+    HOBJECT object(std::uint16_t server_id) const;
+    std::size_t size() const { return objects_.size(); }
+    float server_time() const { return server_time_; }
+    LTVector global_light_direction() const { return light_direction_; }
+    LTVector global_light_color() const { return light_color_; }
+    float ambient() const { return ambient_; }
+    // Server objects the scene removed itself (the game removed them).
+    void forget(HOBJECT);
+private:
+    struct Object { HOBJECT object=nullptr; std::uint8_t type=0; };
+    struct SoundState { std::uint16_t flags=0,range=0; std::uint8_t priority=0,inner=0; };
+    LMessageImpl& message(std::span<const std::byte>);
+    void update_packet(LMessageImpl&,const ServerFiles&);
+    void unguaranteed_packet(LMessageImpl&);
+    void object_record(LMessageImpl&,std::uint16_t flags,const ServerFiles&);
+    struct TrackerRecord { std::uint16_t word=0; std::uint8_t percent=0; std::uint32_t weight=0; };
+    std::vector<TrackerRecord> animation(LMessageImpl&,HOBJECT,bool always);
+    void apply(HOBJECT,const std::vector<TrackerRecord>&,bool always);
+    void position(HOBJECT,LTVector,bool teleport);
+    void rotation(HOBJECT,LTRotation,bool teleport);
+    void sound(LMessageImpl&,const ServerFiles&);
+    void tracked_sound(LMessageImpl&,std::uint16_t id,std::uint16_t flags,const ServerFiles&);
+    void removed(LMessageImpl&);
+    void light_animations(LMessageImpl&);
+    void filenames(LMessageImpl&,const ServerFiles&);
+    std::shared_ptr<ClientScene> scene_;
+    std::shared_ptr<const Resources> resources_;
+    std::weak_ptr<const void> engine_;
+    ClientSyncEvents events_;
+    std::map<std::uint16_t,Object> objects_;
+    std::map<std::uint16_t,SoundState> sounds_;
+    // Tracked server sounds by ID, until the server removes them.
+    std::map<std::uint16_t,HLTSOUND> tracked_;
+    void stop(std::uint16_t id);
+    ILTMessage* reader_=nullptr;
+    float server_time_=0;
+    LTVector light_direction_{0,-1,0},light_color_{1,1,1};
+    float ambient_=0;
+};
+}

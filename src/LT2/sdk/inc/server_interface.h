@@ -159,9 +159,9 @@ extern "C"
 #endif
 
 #ifdef __SERVERAPI_EXPORT__
-#define SERVERAPI	__declspec( dllexport )
+#define SERVERAPI NOLF_EXPORT
 #else
-#define SERVERAPI	__declspec( dllimport )
+#define SERVERAPI NOLF_IMPORT
 #endif
 
 	// The server DLL implements these functions to create and delete a 

@@ -1,7 +1,9 @@
+#include "platform/system.h"
 // p3_ui.cpp -- the modern build's menus and HUD at any resolution
 // (MODERN.md, package P3).  See p3_ui.h.
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "VarTrack.h"
 #include "InterfaceResMgr.h"
 #include "InterfaceMgr.h"
@@ -232,7 +234,7 @@ void P3_MenuArt(CScaleFX *pScaleFX)
 	LTBOOL bGoty = (g_vtP3UseGotyMenu.GetFloat(1.0f) != 0.0f);
 	for (int i = 0; i < sizeof(s_aMenuArt) / sizeof(s_aMenuArt[0]); i++)
 	{
-		if (stricmp(pScaleFX->szName, s_aMenuArt[i].szFX) == 0)
+		if (nolf::ascii_compare(pScaleFX->szName, s_aMenuArt[i].szFX) == 0)
 		{
 			const char *szFile = bGoty ? s_aMenuArt[i].szGoty : s_aMenuArt[i].szOriginal;
 			strncpy(pScaleFX->szFile, szFile, sizeof(pScaleFX->szFile) - 1);
@@ -250,15 +252,14 @@ int P3_MainFolder(int nFolderID)
 	if (nFolderID != FOLDER_ID_MAIN) return nFolderID;
 	if (g_vtP3NoFunMenus.GetFloat() != 0.0f) return FOLDER_ID_MAIN;
 
-	SYSTEMTIME st;
-	GetLocalTime(&st);
+	const auto st=nolf::platform::local_date();
 
 	// 15 to 31 December, both included
-	if (st.wMonth == 12 && st.wDay >= 15)
+	if (st.month == 12 && st.day >= 15)
 		return FOLDER_ID_MAIN_WINTER;
 
 	// Fridays
-	if (st.wDayOfWeek == 5)
+	if (st.weekday == 5)
 		return FOLDER_ID_MAIN_CASUAL;
 
 	return FOLDER_ID_MAIN;

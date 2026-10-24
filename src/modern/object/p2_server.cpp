@@ -11,7 +11,8 @@
 // difference by design: the Modernizer's server runs a console string from
 // any client, ours only from the local one (M-P2-08).
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "GameServerShell.h"
 #include "GameBase.h"
 #include "PlayerObj.h"
@@ -125,9 +126,9 @@ void P2Server_ScaleHeadAttachment(const char* pPositionName, HOBJECT hModel)
 
 	if (!pPositionName || !hModel) return;
 
-	if (stricmp(pPositionName, "Head") != 0 &&
-	    stricmp(pPositionName, "Eyes") != 0 &&
-	    stricmp(pPositionName, "Chin") != 0)
+	if (nolf::ascii_compare(pPositionName, "Head") != 0 &&
+	    nolf::ascii_compare(pPositionName, "Eyes") != 0 &&
+	    nolf::ascii_compare(pPositionName, "Chin") != 0)
 	{
 		return;
 	}

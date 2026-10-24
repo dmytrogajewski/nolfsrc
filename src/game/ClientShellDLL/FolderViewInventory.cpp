@@ -2,7 +2,7 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "stdafx.h"
+#include "Stdafx.h"
 #include "FolderViewInventory.h"
 #include "FolderCommands.h"
 #include "MissionMgr.h"

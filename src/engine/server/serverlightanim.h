@@ -9,46 +9,8 @@
 #define __SERVERLIGHTANIM_H__
 
 #include "iltlightanim.h"
+#include "light_anim_properties.h"
 #include "servermgr.h"
-
-// Light-animation record helpers (0x100129da, 0x10012ac3, 0x10012a1c).
-void   la_GetInfo(LightAnim* pAnim, LAInfo* pInfo);
-LTBOOL la_CompareInfo(LightAnim* pAnim, LAInfo* pInfo, uint32* pChangeFlags);
-void   la_SetInfo(LightAnim* pAnim, LAInfo* pInfo);
-
-// 0x10012a59 — do two vectors differ once each component is quantized by the
-// same scale? Component by component, `(int)(a->x * fScale)` against
-// `(int)(b->x * fScale)`, returning 1 at the first that differs and 0 if all
-// three agree. The scale is a *double* (`fmull 0x10(%ebp)`, and the caller
-// pushes eight bytes), which is what makes it one helper for the position at
-// ten units and the colour at 255. Name ours.
-int la_QuantizedVecDiffers(LTVector* pA, LTVector* pB, double fScale);
-
-// One queued light-animation change on a client: which animation, and what
-// about it changed. Four bytes, both halves sixteen bits — the stores are
-// `mov %cx,0xc(%esi,%eax,4)` and `mov %bx,0xe(...)`, so the stride is 4 and
-// the two fields sit at +0 and +2 (names ours).
-class CLAChange
-{
-public:
-	uint16 m_hLightAnim;                     // +0x00
-	uint16 m_ChangeFlags;                    // +0x02
-};
-
-// 0x40 of them: the array runs from Client+0x00c (just past m_Link) to the
-// count at Client+0x10c, which is 0x100 bytes — sixty-four records. Client
-// itself lives in servermgr.h, which this reconstruction does not own, and
-// maps the whole span as padding plus m_Unknown10C; reached here through a
-// cast (names ours).
-#define MAX_CLIENTLACHANGES 0x40
-
-class CLAClient
-{
-public:
-	uint8     m_pad_000[0x00c];
-	CLAChange m_Changes[MAX_CLIENTLACHANGES];  // 0x00c
-	uint32    m_nChanges;                      // 0x10c
-};
 
 // 0x1002896d — find a client's queued change for one animation, by animation
 // id, handing back its index. Returns 1 if it found one and 0 if it did not,

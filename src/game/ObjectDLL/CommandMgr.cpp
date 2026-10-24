@@ -10,7 +10,8 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "stdafx.h"
+#include "Stdafx.h"
+#include "engine/portable/string.h"
 #include "CommandMgr.h"
 #include "ServerUtilities.h"
 
@@ -259,7 +260,7 @@ LTBOOL CCommandMgr::ProcessCmd(const char* pCmd, int nCmdIndex)
 		{
 			for (int i=0; i < c_nNumValidCmds; i++)
 			{
-				if (_stricmp(parse.m_Args[0], s_ValidCmds[i].pCmdName) == 0)
+				if (nolf::ascii_compare(parse.m_Args[0], s_ValidCmds[i].pCmdName) == 0)
 				{
 					if (CheckArgs(parse, s_ValidCmds[i].nNumArgs))
 					{
@@ -512,7 +513,7 @@ LTBOOL CCommandMgr::ProcessAbort(ConParse & parse, int nCmdIndex)
 		if (m_PendingCmds[i].aCmd[0] != CMDMGR_NULL_CHAR &&
 			m_PendingCmds[i].aId[0] != CMDMGR_NULL_CHAR)
 		{
-			if (_stricmp(m_PendingCmds[i].aId, pId) == 0)
+			if (nolf::ascii_compare(m_PendingCmds[i].aId, pId) == 0)
 			{
 				m_PendingCmds[i].Clear();
                 return LTTRUE;
@@ -653,7 +654,7 @@ LTBOOL CCommandMgr::IsValidCmd(const char* pCmd)
 		{
 			for (int i=0; i < c_nNumValidCmds; i++)
 			{
-				if (_stricmp(parse.m_Args[0], s_ValidCmds[i].pCmdName) == 0)
+				if (nolf::ascii_compare(parse.m_Args[0], s_ValidCmds[i].pCmdName) == 0)
 				{
 					return CheckArgs(parse, s_ValidCmds[i].nNumArgs);
 				}

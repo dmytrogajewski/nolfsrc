@@ -2,7 +2,7 @@
 //
 // MODULE  : LoadingScreen.h
 //
-// PURPOSE : Background-thread loading screen encapsulation class
+// PURPOSE : Loading screen presentation on the client frame thread
 //
 // CREATED : 2000
 //
@@ -33,16 +33,16 @@ public:
 	LTBOOL Term();
 
 	// Show the loading screen
-	// Setting bRun to LTTRUE will start the update thread
+	// Setting bRun to LTTRUE enables updates from the client frame pump.
 	// Returns LTFALES if the state isn't STATE_NONE or STATE_INIT
 	LTBOOL Show(LTBOOL bRun = LTTRUE);
 	// Update the loading screen
 	// Returns LTFALSE if the state isn't STATE_SHOW
 	LTBOOL Update();
-	// Take the loading screen out of threaded mode
+	// Pause automatic frame updates.
 	// Returns LTFALSE if the state isn't STATE_ACTIVE
 	LTBOOL Pause();
-	// Resume threaded mode
+	// Resume automatic frame updates.
 	// Returns LTFALSE if the state isn't STATE_SHOW
 	LTBOOL Resume();
 	// Hide the loading screen
@@ -61,16 +61,7 @@ public:
 	void	SetWorldPhoto(char *pszPhoto);
 
 // Internal functions
-protected:
-	static DWORD WINAPI ThreadBootstrap(void *pData);
-	int RunThread();
 private:
-	// The thread handle
-	HANDLE m_hThreadHandle;
-	// Events...
-	HANDLE m_hEventEnd; // Stop rendering, damnit!
-	HANDLE m_hEventThreadRunning; // Ok, the thread is done initializing, continue on
-
 	LTBOOL	m_bOldFogEnable;
 	int		m_nOldFarZ;
 
@@ -79,7 +70,7 @@ private:
 		STATE_NONE, // Not active in any way
 		STATE_INIT, // It's been initialized, but that's it..
 		STATE_SHOW, // It's on screen
-		STATE_ACTIVE // It's in a thread and running
+		STATE_ACTIVE // Updated automatically by the client frame pump.
 	};
 	EScreenState m_eCurState;
 

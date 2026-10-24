@@ -9,9 +9,9 @@
 ;	COMMENT:		Copyright (c) 1998, Monolith Productions, Inc.
 ;
 ****************************************************************************/
-#include "StdAfx.h"
+#include "Stdafx.h"
 #include "LTDialogueWnd.h"
-#include "LTGuiMgr.h"
+#include "ltguimgr.h"
 #include "LTDecisionWnd.h"
 
 #include "InterfaceMgr.h"
@@ -595,7 +595,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -605,7 +605,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -615,7 +615,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -625,7 +625,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -635,7 +635,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -645,7 +645,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -655,7 +655,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}
@@ -665,7 +665,7 @@ BOOL CLTDialogueWnd::InitFrame(const char *szFrame)
         //hSurf = g_pLTClient->CreateSurfaceFromBitmap((char *)(LPCSTR)csFrame);
 		if(!hSurf)
 		{
-			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",csFrame);
+			TRACE("CLTDialogueWnd::Init - ERROR - Could not create the surface: ""%s""\n",static_cast<const char*>(csFrame));
 			Term();
 			return FALSE;
 		}

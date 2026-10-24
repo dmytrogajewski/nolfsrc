@@ -90,6 +90,21 @@ void checks() {
     info=request(PLAYSOUND_3D|PLAYSOUND_ATTACHED|PLAYSOUND_GETHANDLE); info.m_hObject=object; info.m_fOuterRadius=100; info.m_fInnerRadius=5;
     require(sounds->PlaySound(&info,sound)==LT_OK && sound,"attached sound play failed"); LTVector position(0,0,0); require(sounds->GetSoundPosition(sound,&position)==LT_OK && position.x==10,"attached sound did not follow object");
     exists=false; sounds->update(.016f); require(sounds->KillSound(sound)==LT_INVALIDPARAMS,"removed attachment left a live sound");
+    // The listener follows the host's client pose; a client-local sound heard
+    // from the client plays unpositioned, however far its position.
+    {
+        auto scope=sounds->activate(); nolf::SoundPose client; client.position={500,0,0}; sounds->update(.016f,client);
+        LTBOOL in_client=LTFALSE; LTVector heard(0,0,0); LTRotation turn; api.GetListener(&in_client,&heard,&turn);
+        require(in_client && heard.x==500,"listener did not follow the client pose");
+        const auto peak=[&](uint32 flags) {
+            auto far=request(flags); far.m_fOuterRadius=100; far.m_fInnerRadius=10; HLTSOUND played=nullptr;
+            require(sounds->PlaySound(&far,played)==LT_OK && played,"distance fixture play failed");
+            output->clear(); sounds->pump(); float loudest=0; for (const auto sample : output->samples) loudest=std::max(loudest,std::abs(sample));
+            sounds->KillSound(played); return loudest;
+        };
+        require(peak(PLAYSOUND_GETHANDLE|PLAYSOUND_3D)==0,"sound beyond its radius from the listener was heard");
+        require(peak(PLAYSOUND_GETHANDLE|PLAYSOUND_3D|PLAYSOUND_CLIENTLOCAL)>0,"client-local sound was positioned away from the client");
+    }
     // A nested foreign scope rejects another service's handles.
     info=request(); require(sounds->PlaySound(&info,sound)==LT_OK,"sound fixture play failed"); nolf::ClientSounds foreign(clips,factory);
     { auto scope=foreign.activate(); float duration=0; require(api.GetSoundDuration(sound,&duration)==LT_INVALIDPARAMS,"foreign sound scope accepted an external handle"); }

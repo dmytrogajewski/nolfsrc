@@ -30,6 +30,12 @@ public:
     ~Segment() override { DmSegment_release(handle); }
     double length() const override { return DmSegment_getLength(handle); }
 };
+class Motif final : public MusicMotif {
+public:
+    DmMotif* handle;
+    explicit Motif(DmMotif* motif) : handle(motif) {}
+    ~Motif() override { DmMotif_release(handle); }
+};
 class DmusicPerformance final : public MusicPerformance {
     const std::thread::id owner_=std::this_thread::get_id();
     // The loader calls back into this resolver from load() only.
@@ -74,6 +80,17 @@ public:
         thread(); DmSegment* handle=nullptr;
         if (segment) { const auto* native=dynamic_cast<const Segment*>(segment.get()); if (!native) throw std::invalid_argument("foreign music segment"); handle=native->handle; }
         check(DmPerformance_playSegment(performance_,handle,timing(when)),"play music segment");
+    }
+    std::shared_ptr<const MusicMotif> load_motif(std::string_view style,std::string_view name) override {
+        thread(); const std::string file(style),motif(name); DmMotif* handle=nullptr;
+        const auto result=DmLoader_getMotif(loader_,file.c_str(),motif.c_str(),&handle);
+        if (result==DmResult_MEMORY_EXHAUSTED || result==DmResult_MUTEX_ERROR) check(result,"load music motif");
+        if (result!=DmResult_SUCCESS || !handle) return nullptr;
+        return std::make_shared<Motif>(handle);
+    }
+    void play_motif(const std::shared_ptr<const MusicMotif>& motif,MusicTiming when) override {
+        thread(); const auto* native=dynamic_cast<const Motif*>(motif.get()); if (!native) throw std::invalid_argument("foreign music motif");
+        check(DmPerformance_playMotif(performance_,native->handle,timing(when)),"play music motif");
     }
     void volume(float gain) override { thread(); if (!(gain>=0 && gain<=1)) throw std::invalid_argument("invalid music volume"); DmPerformance_setVolume(performance_,gain); }
     MusicPlayback playback() const override {

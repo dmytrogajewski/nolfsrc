@@ -16,6 +16,11 @@ public:
     virtual ~MusicSegment()=default;
     virtual double length() const=0;
 };
+// A style's short phrase, layered over whatever segment is playing.
+class MusicMotif {
+public:
+    virtual ~MusicMotif()=default;
+};
 struct MusicPlayback {
     // Changes whenever a segment starts, repeats or playback stops.
     std::uint32_t serial=0;
@@ -36,6 +41,11 @@ public:
     virtual std::shared_ptr<const MusicSegment> load(std::string_view name)=0;
     // A null segment stops playback at the given boundary.
     virtual void play(const std::shared_ptr<const MusicSegment>&,MusicTiming)=0;
+    // Null when the resolver cannot supply the style or it has no such motif.
+    virtual std::shared_ptr<const MusicMotif> load_motif(std::string_view style,std::string_view name)=0;
+    // Starts at the boundary over the playing segment, which it neither
+    // replaces nor delays; stopping playback cuts it off.
+    virtual void play_motif(const std::shared_ptr<const MusicMotif>&,MusicTiming)=0;
     virtual void volume(float gain)=0;
     virtual MusicPlayback playback() const=0;
     // Interleaved stereo floats at the creation rate.

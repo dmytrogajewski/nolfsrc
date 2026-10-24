@@ -1257,6 +1257,12 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 			{
 				Off();
 			}
+#ifdef NOLFSRC_MODERN
+			else if (nolf::ascii_compare(parse.m_Args[0], "SKIP") == 0)
+			{
+				SkipRemaining();
+			}
+#endif
 			else if (nolf::ascii_compare(parse.m_Args[0], "PAUSE") == 0)
 			{
 				if (m_bFirstUpdate)
@@ -2433,6 +2439,46 @@ void KeyFramer::Off()
 {
 	GoInActive();
 }
+
+#ifdef NOLFSRC_MODERN
+// --------------------------------------------------------------------------- //
+//
+//	ROUTINE:	KeyFramer::SkipRemaining()
+//
+//	PURPOSE:	A skipped cinematic still turns off what its remaining keys
+//				would have: t01s02's phone, rung by a delayed command, is
+//				only turned off at a later camera key. Each "msg <object>
+//				off" of a key not yet reached is sent now, and any delayed
+//				"msg <object> on" still pending is dropped.
+//
+// --------------------------------------------------------------------------- //
+
+void KeyFramer::SkipRemaining()
+{
+	if (!m_bActive || m_eDirection != KFD_FORWARD) return;
+
+	for (KEYNODE* pKey = m_pCurKey; pKey; pKey = pKey->pNext)
+	{
+		if (!(pKey->keyData.m_nKeyType & MESSAGE_KEY) || !pKey->keyData.m_hstrMessageName) continue;
+
+		const char* pMessages = g_pLTServer->GetStringData(pKey->keyData.m_hstrMessageName);
+		if (!pMessages) continue;
+
+		ConParse parse;
+		parse.Init((char*)pMessages);
+		while (g_pLTServer->Common()->Parse(&parse) == LT_OK)
+		{
+			if (parse.m_nArgs != 3 || nolf::ascii_compare(parse.m_Args[0], "msg") != 0 ||
+				nolf::ascii_compare(parse.m_Args[2], "off") != 0) continue;
+
+			char szCommand[256];
+			snprintf(szCommand, sizeof(szCommand), "msg %s off", parse.m_Args[1]);
+			g_pCmdMgr->CancelPendingOn(parse.m_Args[1]);
+			if (g_pCmdMgr->IsValidCmd(szCommand)) g_pCmdMgr->Process(szCommand);
+		}
+	}
+}
+#endif
 
 
 // --------------------------------------------------------------------------- //

@@ -9841,6 +9841,11 @@ HOBJECT CAIHumanStateIngeSing::FindTeleporter()
 	memset(abValidTeleporters, LTTRUE, sizeof(LTBOOL)*kMaxTeleporters);
 
 	uint32 cAttempts = 64;
+#ifdef NOLFSRC_MODERN
+	// With none, GetRandom(0, -1) answers -1: an index a 64-bit address
+	// cannot wrap back into the array as the 32-bit original's did.
+	if ( !m_cTeleporters ) return LTNULL;
+#endif
 	while ( cAttempts-- )
 	{
 		uint32 iTeleporter = GetRandom(0, m_cTeleporters-1);

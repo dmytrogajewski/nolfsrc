@@ -1692,7 +1692,7 @@ void CMoveMgr::UpdatePushers()
 void CMoveMgr::UpdatePlayerAnimation()
 {
 	HOBJECT hClientObj;
-    uint32 modelAnim, curModelAnim, curFlags;
+    uint32 modelAnim = 0, curModelAnim, curFlags;
     LTVector oldDims, offset;
 
 	if (!(hClientObj = g_pLTClient->GetClientObject())) return;

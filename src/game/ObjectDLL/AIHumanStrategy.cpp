@@ -421,7 +421,7 @@ LTBOOL CAIHumanStrategyFollowPath::UpdateOpenDoors(CAIPathWaypoint* pWaypoint)
 		HOBJECT hDoor = hDoors[iDoor];
 		if ( !hDoor ) continue;
 
-		RotatingDoor* pDoor = (RotatingDoor*)g_pLTServer->HandleToObject(hDoor);
+		Door* pDoor = (Door*)g_pLTServer->HandleToObject(hDoor);
 
 		if ( (pDoor->GetState() == DOORSTATE_CLOSED) || (pDoor->GetState() == DOORSTATE_CLOSING) )
 		{
@@ -447,7 +447,8 @@ LTBOOL CAIHumanStrategyFollowPath::UpdateOpenDoors(CAIPathWaypoint* pWaypoint)
 
 		bDoorsOpening |= (pDoor->GetState() == DOORSTATE_OPENING);
 		bDoorsLocked |= pDoor->IsLocked();
-		bDoorsStuck |= pDoor->IsStuck();
+		// Only a rotating door can be stuck; a sliding one has no such field.
+		bDoorsStuck |= IsKindOf(hDoor, "RotatingDoor") && ((RotatingDoor*)pDoor)->IsStuck();
 
 		if ( bDoorsStuck || bDoorsLocked )
 		{
@@ -584,7 +585,7 @@ LTBOOL CAIHumanStrategyFollowPath::UpdateFaceDoor(CAIPathWaypoint* pWaypoint)
 		HOBJECT hDoor = hDoors[iDoor];
 		if ( !hDoor ) continue;
 
-		RotatingDoor* pDoor = (RotatingDoor*)g_pLTServer->HandleToObject(hDoor);
+		Door* pDoor = (Door*)g_pLTServer->HandleToObject(hDoor);
 
 		if ( pDoor->GetState() != DOORSTATE_OPEN )
 		{

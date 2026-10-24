@@ -312,7 +312,7 @@ void CLTWnd::DeleteTransparentColor()
 // ----------------------------------------------------------------------- //
 BOOL CLTWnd::EnableWindow(BOOL bEnable)
 {
-	BOOL bRet;
+	BOOL bRet = FALSE;
 	if (!m_bEnabled)
 	{
 		bRet = TRUE;

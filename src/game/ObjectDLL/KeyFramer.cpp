@@ -42,7 +42,7 @@ LTFLOAT GetKFWaveValue(LTFLOAT fSpeed, LTFLOAT fPercent, KFWaveType eWaveType)
 {
 	if (eWaveType == KFWAVE_LINEAR) return fSpeed;
 
-	LTFLOAT fNewSpeed;
+	LTFLOAT fNewSpeed = fSpeed;
 	LTFLOAT f10Percent = fSpeed * 0.1f;
 
 	switch (eWaveType)

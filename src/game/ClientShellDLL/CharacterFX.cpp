@@ -30,10 +30,8 @@
 #include "MsgIDs.h"
 #include "PlayerShared.h"
 #include "VolumeBrushFX.h"
-#ifdef NOLFSRC_MODERN
 // M-P5-06: invalid model style
 #include "cshell/p5_gameplay.h"
-#endif
 
 extern CGameClientShell* g_pGameClientShell;
 extern CClientButeMgr* g_pClientButeMgr;
@@ -2971,10 +2969,8 @@ void CCharacterFX::InitLocalPlayer()
 	{
 		// check for needed overlays
 		ModelStyle ms = GetModelStyle();
-#ifdef NOLFSRC_MODERN
 		// M-P5-06: an invalid style would index past the style table
 		ms = P5_ValidModelStyle(ms);
-#endif
 		if (nolf::ascii_compare(g_pModelButeMgr->GetStyleName(ms),"Undercover2") == 0)
 		{
 			g_pInterfaceMgr->BeginSpacesuit();

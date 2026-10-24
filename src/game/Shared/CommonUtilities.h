@@ -122,12 +122,10 @@ void ConsoleToButeString( CButeMgr &bute, const char *pszButeTag, const char *ps
 void ReadNetHostSettings( );
 void WriteNetHostSettings( );
 
-#ifdef NOLFSRC_MODERN
 // M-P6-01: remove printf format characters ('%') from text that came from
 // another player or the network, in place, before it can reach a function
 // that formats.
 void FilterFormatChars( char *pszText );
-#endif
 
 #define DANGER(interface, engineer) \
 interface->CPrint("----------------------------"); \

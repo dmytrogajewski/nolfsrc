@@ -766,14 +766,12 @@ void CinematicTrigger::TriggerMsg(HOBJECT hSender, const char *pMsg)
 			{
 				if (m_bCanSkip)
 				{
-#ifdef NOLFSRC_MODERN
 					// Before the keyframer stops, let it turn off what its
 					// remaining keys would have.
 					if (m_bOn && m_hKeyFramer)
 					{
 						SendTriggerMsgToObject(this, m_hKeyFramer, LTFALSE, "SKIP");
 					}
-#endif
 					HandleOff();
 				}
 			}
@@ -1447,7 +1445,6 @@ HOBJECT CinematicTrigger::FindWhoPlaysDecision(uint8 byDecision)
 		char* pMsg = g_pLTServer->GetStringData(m_hstrWhoPlaysDecisions[m_nCurMessage]);
 		if (pMsg)
 		{
-	 		ConParse parse;
 			parse.Init(pMsg);
 
 			// Since the names will be seperated by semi-colons we need

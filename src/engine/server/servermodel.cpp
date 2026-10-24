@@ -4,9 +4,7 @@
 #include "servermodel.h"
 #include "servermgr.h"
 #include "de_error.h"
-#ifdef NOLFSRC_MODERN
 #include "modern/engine/p1_frametime.h"   // M-P1-23
-#endif
 
 // sm_SetObjectChangeFlag now lives in servermodel.h.  It is not just this
 // TU's helper: the shipped /O2 build expands it into CLTServer::
@@ -287,12 +285,8 @@ void sm_ModelStringKeyCallback(LTAnimTracker* pTracker, AnimKeyFrame* pFrame);
 // nothing outside servermodel.cpp can move either way.
 inline void sm_UpdateObjectTrackers(CServerMgr* manager, LTObject* object) {
     if (object->m_ObjectType != OT_MODEL) return;
-#ifdef NOLFSRC_MODERN
     static P1TickMs tick;
     const auto elapsed = static_cast<uint32>(P1_TickMs(&tick, manager->m_FrameTime, manager->m_Time));
-#else
-    const auto elapsed = static_cast<uint32>(manager->m_FrameTime * 1000.0f);
-#endif
     model_UpdateTrackers(*static_cast<ModelInstance*>(object), elapsed, sm_ModelStringKeyCallback);
 }
 

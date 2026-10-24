@@ -101,9 +101,7 @@ class KeyFramer : public BaseClass
 
 		void		On();
 		void		Off();
-#ifdef NOLFSRC_MODERN
 		void SkipRemaining();
-#endif
 		void		Pause();
 		void		Resume();
 		void		Forward();

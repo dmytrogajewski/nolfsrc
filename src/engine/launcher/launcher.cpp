@@ -235,7 +235,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	g_csUpdateCmdLine = g_pRegMgr->Get("Update Command Line", sBuf, dwSize, NULL);
 	dwSize = 256;
 	g_csContentCmdLine = g_pRegMgr->Get("Content Command Line", sBuf, dwSize, NULL);
-#ifdef NOLFSRC_MODERN
 	// M-P1-16: the 1.003 update and the GOTY content, which the retail
 	// installers named in the registry (and linux-run.sh does under
 	// Wine), from the game directory when nothing names them: a copied or
@@ -244,7 +243,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		g_csUpdateCmdLine = "-rez nolfu003.rez";
 	if (g_csContentCmdLine.IsEmpty() && GetFileAttributes("nolfgoty.rez") != (DWORD)-1)
 		g_csContentCmdLine = "-rez nolfgoty.rez";
-#endif
 
 	LoadSoundSettings(g_pRegMgr);
 
@@ -445,7 +443,6 @@ Done:
 //
 // *********************************************************************** //
 
-#ifdef NOLFSRC_MODERN
 // Does the config name a whole display mode (a "bitdepth" line, which the
 // game writes into autoexec.cfg on exit and the shipped defaults lack)?
 static BOOL ModernConfigHasMode(const char* sFile)
@@ -464,7 +461,6 @@ static BOOL ModernConfigHasMode(const char* sFile)
 	return(bFound);
 }
 
-#endif
 BOOL LaunchGame(char* sCmdLine, BOOL bMultiplayer)
 {
 	// Make sure the performance settings have been chosen...
@@ -531,11 +527,9 @@ BOOL LaunchGame(char* sCmdLine, BOOL bMultiplayer)
 		csCmd += " ";
 		csCmd += g_csContentCmdLine;
 	}
-#ifdef NOLFSRC_MODERN
 	// custom/ -- the game code built from source -- last, over whatever the
 	// update and content archives carry (the engine searches last-first).
 	csCmd += " -rez custom";
-#endif
 
 	if (bMultiplayer)
 	{
@@ -553,7 +547,6 @@ BOOL LaunchGame(char* sCmdLine, BOOL bMultiplayer)
 		csCmd += csAdv;
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-17: a fresh install -- autoexec.cfg is still the shipped
 	// defaults.cfg, which names no colour depth; the game writes one on its
 	// first exit -- starts at the launcher's default mode (the largest 4:3
@@ -591,7 +584,6 @@ BOOL LaunchGame(char* sCmdLine, BOOL bMultiplayer)
 			g_bDisplaySet = TRUE;
 		}
 	}
-#endif
 	if (g_bDisplaySet && g_pDisplayModes)
 	{
 		CString csDisplay = g_pDisplayModes->GetCommands();
@@ -664,7 +656,6 @@ BOOL LaunchGame(char* sCmdLine, BOOL bMultiplayer)
 #endif
 
 	PROCESS_INFORMATION pi;
-#ifdef NOLFSRC_MODERN
 	// fixed: on some Windows 10/11 machines the retail call fails although
 	// lithtech.exe starts fine by hand. It hands on the launcher's own
 	// STARTUPINFO (which carries whatever Explorer, a shortcut or Steam
@@ -706,14 +697,6 @@ BOOL LaunchGame(char* sCmdLine, BOOL bMultiplayer)
 			GetExitCodeProcess(pi.hProcess, &s_nGameExitCode);
 	}
 	CloseHandle(pi.hProcess);
-#else
-	if (!CreateProcess(NULL, "lithtech.exe -cmdfile nolfcmds.txt", NULL, NULL, FALSE,
-			CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP, NULL, NULL, &si, &pi))
-	{
-		ErrorMsg(NULL, 6, g_csCaption, MB_ICONEXCLAMATION);
-		return(FALSE);
-	}
-#endif
 
 	return(TRUE);
 }

@@ -1257,12 +1257,10 @@ void KeyFramer::TriggerMsg(HOBJECT hSender, const char* szMsg)
 			{
 				Off();
 			}
-#ifdef NOLFSRC_MODERN
 			else if (nolf::ascii_compare(parse.m_Args[0], "SKIP") == 0)
 			{
 				SkipRemaining();
 			}
-#endif
 			else if (nolf::ascii_compare(parse.m_Args[0], "PAUSE") == 0)
 			{
 				if (m_bFirstUpdate)
@@ -2440,7 +2438,6 @@ void KeyFramer::Off()
 	GoInActive();
 }
 
-#ifdef NOLFSRC_MODERN
 // --------------------------------------------------------------------------- //
 //
 //	ROUTINE:	KeyFramer::SkipRemaining()
@@ -2478,7 +2475,6 @@ void KeyFramer::SkipRemaining()
 		}
 	}
 }
-#endif
 
 
 // --------------------------------------------------------------------------- //

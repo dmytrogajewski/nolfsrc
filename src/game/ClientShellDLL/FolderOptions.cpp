@@ -6,17 +6,13 @@
 #include "FolderMgr.h"
 #include "FolderCommands.h"
 #include "ClientRes.h"
-#ifdef NOLFSRC_MODERN
 // M-P3-13: the Interface options folder
 #include "cres/p3.h"
-#endif
 
 #include "GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 // M-P4-02: jukebox
 #include "cres/p4.h"
-#endif
 
 
 //////////////////////////////////////////////////////////////////////
@@ -43,14 +39,10 @@ LTBOOL CFolderOptions::Build()
 	AddTextItem(IDS_CONTROLS,		FOLDER_CMD_CONTROLS,	IDS_HELP_CONTROLS);
 	AddTextItem(IDS_GAME_OPTIONS,	FOLDER_CMD_GAME,		IDS_HELP_GAME_OPTIONS);
 	AddTextItem(IDS_PERFORMANCE,	FOLDER_CMD_PERFORMANCE,	IDS_HELP_PERFORMANCE);
-#ifdef NOLFSRC_MODERN
 	// M-P3-13 (P3), then P4's: the modern build's options folders
 	AddTextItem(IDS_P3_INTERFACE,	FOLDER_CMD_INTERFACE,	IDS_P3_HELP_INTERFACE);
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P4-02: jukebox
 	AddTextItem(IDS_P4_JUKEBOX,		FOLDER_CMD_JUKEBOX,		IDS_P4_HELP_JUKEBOX);
-#endif
 
 	// Make sure to call the base class
 	if (! CBaseFolder::Build()) return LTFALSE;
@@ -88,22 +80,18 @@ uint32 CFolderOptions::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwPar
 			m_pFolderMgr->SetCurrentFolder(FOLDER_ID_CONTROLS);
 			break;
 		}
-#ifdef NOLFSRC_MODERN
 	// M-P3-13 (P3), then P4's: the modern build's options folders
 	case FOLDER_CMD_INTERFACE:
 		{
 			m_pFolderMgr->SetCurrentFolder(FOLDER_ID_INTERFACE);
 			break;
 		}
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P4-02: jukebox
 	case FOLDER_CMD_JUKEBOX:
 		{
 			m_pFolderMgr->SetCurrentFolder(FOLDER_ID_JUKEBOX);
 			break;
 		}
-#endif
 	default:
 		return CBaseFolder::OnCommand(dwCommand,dwParam1,dwParam2);
 	}

@@ -626,37 +626,23 @@ LTRESULT ci_GetModelNodeName(HOBJECT hObject, HMODELNODE hNode, char* pName, uin
 {
 	Model* pModel;
 
-#ifdef NOLFSRC_MODERN
 	// fixed: ci_GetModelNodeName refuses node 0 and does not terminate
 	// (RETAIL_BUGS.md). Node 0 is a valid node; only the bound below can
 	// refuse a node handle.
 	if (!maxLen || !hObject || hObject->m_ObjectType != OT_MODEL)
-#else
-	if (!hNode || !maxLen || !hObject || hObject->m_ObjectType != OT_MODEL)
-#endif
 	{
-#ifdef NOLFSRC_MODERN
 		RETURN_ERROR(1, "GetModelNodeName", LT_INVALIDPARAMS);
-#else
-		RETURN_ERROR(1, "GetNextModelNode", LT_INVALIDPARAMS);
-#endif
 	}
 
 	pModel = ((ModelInstance*)hObject)->m_AnimTracker.m_TimeRef.m_pModel;
 
 	if (hNode >= pModel->m_NodeTransforms.m_nElements)
 	{
-#ifdef NOLFSRC_MODERN
 		RETURN_ERROR(1, "GetModelNodeName", LT_INVALIDPARAMS);
-#else
-		RETURN_ERROR(1, "GetNextModelNode", LT_INVALIDPARAMS);
-#endif
 	}
 
 	strncpy(pName, pModel->m_Nodes.m_pArray[hNode]->m_pName, maxLen - 1);
-#ifdef NOLFSRC_MODERN
 	pName[maxLen - 1] = '\0';
-#endif
 	return LT_OK;
 }
 
@@ -2569,13 +2555,9 @@ LTRESULT Model::LoadChildModels(CModelLoadRequest* pRequest)
 	// SUCCESS return, so a model whose table at 0x8c cannot be allocated loads
 	// as though nothing were wrong, with none of its four chunks read.
 	if (!m_Unknown08c.SetSize2(nOOBB, (LAlloc*)m_pDataBlock))
-#ifdef NOLFSRC_MODERN
 		// fixed: Model::LoadChildModels reports success when it cannot size
 		// one table (RETAIL_BUGS.md).
 		goto fail;
-#else
-		goto done;
-#endif
 
 	for (j = 0; j < nOOBB; j++)
 		pStream->Read(&m_Unknown08c.m_pArray[j], 4);

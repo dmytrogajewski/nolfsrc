@@ -329,11 +329,9 @@ protected:
 	HSURFACE	m_hTargetNameSurface;
 	int			m_nTargetNameWidth;
 	int			m_nTargetNameHeight;
-#ifdef NOLFSRC_MODERN
 	// M-P3-12: the HUD scaled with the screen
 	void		P3DrawHUD(HSURFACE hScreen, LTBOOL bShowStats);
 	void		P3DrawBoundWeapons(HSURFACE hScreen, float fScale);
-#endif
 };
 
 #endif

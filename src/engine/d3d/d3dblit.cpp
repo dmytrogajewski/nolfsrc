@@ -633,7 +633,6 @@ void d3d_UnlockScreen()
 	d3d_AddDirtyRect(&g_ScreenLockRect);
 }
 
-#ifdef NOLFSRC_MODERN
 // ---------------------------------------------------------------------- //
 //  M-P0-03: fast FillRect onto the screen
 // ---------------------------------------------------------------------- //
@@ -695,7 +694,6 @@ extern "C" LTBOOL __cdecl d3d_FillScreenRect(LTRect* pRect, uint32 nPixel)
 	d3d_AddDirtyRect((LTRect*)&rcDest);
 	return LTTRUE;
 }
-#endif
 // ---------------------------------------------------------------------- //
 //  SLOTS +0xe0 / +0xdc -- UnoptimizeSurface (0x10034510) and
 //  OptimizeSurface (0x10034580) are in w81_10034510_os.cpp: this file is

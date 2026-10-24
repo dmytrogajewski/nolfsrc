@@ -271,7 +271,6 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 //  g_pLTClient->DrawSurfaceToSurface(hDestSurf, hBack, LTNULL, xo, yo);
 
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-01/M-P3-02: the shade and bar bands scaled with the page, the
 	// side margins between them black (M-P3-22)
 	{
@@ -298,42 +297,6 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 			g_pLTClient->FillRect(hDestSurf, &band, SETRGB(0,0,0));
 		}
 	}
-#else
-    LTRect rect(0,0,g_pInterfaceResMgr->GetScreenWidth(),yo+m_nTopShadeHt);
-    g_pLTClient->FillRect(hDestSurf,&rect,m_hShadeColor);
-
-	rect.top = yo+m_nTopShadeHt;
-	rect.bottom = rect.top + m_nBarHt;
-    g_pLTClient->FillRect(hDestSurf,&rect,m_hBarColor);
-
-	rect.bottom = g_pInterfaceResMgr->GetScreenWidth();
-	rect.top = rect.bottom - m_nBottomShadeHt;
-    g_pLTClient->FillRect(hDestSurf,&rect,m_hShadeColor);
-
-	rect.bottom = g_pInterfaceResMgr->GetScreenHeight();
-	rect.top = (rect.bottom - yo) - m_nBottomShadeHt;
-    g_pLTClient->FillRect(hDestSurf,&rect,m_hShadeColor);
-
-	rect.bottom = rect.top;
-	rect.top = rect.bottom - m_nBarHt;
-    g_pLTClient->FillRect(hDestSurf,&rect,m_hBarColor);
-
-	if (xo > 0)
-	{
-		rect.left = 0;
-		rect.right = xo;
-		rect.top = yo+m_nTopShadeHt;
-		rect.bottom = (g_pInterfaceResMgr->GetScreenHeight() - yo) - m_nBottomShadeHt;
-	    g_pLTClient->FillRect(hDestSurf,&rect,m_hShadeColor);
-
-		rect.right = g_pInterfaceResMgr->GetScreenWidth();
-		rect.left = g_pInterfaceResMgr->GetScreenWidth() - xo;
-		rect.top = yo+m_nTopShadeHt;
-		rect.bottom = (g_pInterfaceResMgr->GetScreenHeight() - yo) - m_nBottomShadeHt;
-	    g_pLTClient->FillRect(hDestSurf,&rect,m_hShadeColor);
-	
-	}
-#endif
 
 
 	// Render the title
@@ -341,14 +304,9 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 
 	if (pTitleFont && m_hTitleString)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: at its place in the 4:3 area
 		int xPos=P3_MenuX(m_titlePos.x);
 		int yPos=P3_MenuY(m_titlePos.y);
-#else
-		int xPos=m_titlePos.x + xo;
-		int yPos=m_titlePos.y + yo;
-#endif
 
 		// Align the text as needed
 		switch (m_nTitleAlign)
@@ -369,7 +327,6 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 	}
 
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-04: the highlighted back/continue arrows, scaled with the page
 	// like the 3D arrows they are drawn over
 	if (m_pBack && m_pBack->IsSelected())
@@ -380,28 +337,14 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 	{
 		P3_DrawScaled(hDestSurf, g_pInterfaceResMgr->GetSharedSurface(m_sArrowNext), P3_MenuX(m_ArrowNextPos.x), P3_MenuY(m_ArrowNextPos.y), P3_MenuScale(), m_hTransparentColor);
 	}
-#else
-	if (m_pBack && m_pBack->IsSelected())
-	{
-		g_pLTClient->DrawSurfaceToSurfaceTransparent(hDestSurf,g_pInterfaceResMgr->GetSharedSurface(m_sArrowBack), LTNULL, m_ArrowBackPos.x + xo, m_ArrowBackPos.y + yo, m_hTransparentColor);
-	}
-	if (m_pContinue && m_pContinue->IsSelected())
-	{
-		g_pLTClient->DrawSurfaceToSurfaceTransparent(hDestSurf,g_pInterfaceResMgr->GetSharedSurface(m_sArrowNext), LTNULL, m_ArrowNextPos.x + xo, m_ArrowNextPos.y + yo, m_hTransparentColor);
-	}
-#endif
 
 //render list of ctrls
 	unsigned int i;
 	for ( i = 0; i < m_fixedControlArray.GetSize(); i++ )
 	{
         LTIntPt oldPos = m_fixedControlArray[i]->GetPos();
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: drawn at its place in the 4:3 area, kept at its layout position
 		m_fixedControlArray[i]->SetPos(P3_MenuPos(oldPos));
-#else
-		m_fixedControlArray[i]->SetPos(oldPos.x + xo, oldPos.y + yo);
-#endif
 		m_fixedControlArray[i]->Render ( hDestSurf );
 		m_fixedControlArray[i]->SetPos(oldPos);
 	}
@@ -423,12 +366,8 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 		{
 
 			// Set the position for the control
-#ifdef NOLFSRC_MODERN
 			// M-P3-01: drawn at its place in the 4:3 area
 			m_controlArray[i]->SetPos(P3_MenuX(x), P3_MenuY(y));
-#else
-			m_controlArray[i]->SetPos(x+ xo, y+ yo);
-#endif
 			m_controlArray[i]->Render ( hDestSurf );
 			m_controlArray[i]->SetPos(x, y);
 			y+=size.y+m_nItemSpacing;
@@ -445,12 +384,8 @@ LTBOOL CBaseFolder::Render(HSURFACE hDestSurf)
 	if (m_hHelpSurf && m_dwCurrHelpID)
 	{
 		g_pLTClient->SetOptimized2DBlend(LTSURFACEBLEND_MASK);
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: at its place in the 4:3 area
         g_pLTClient->DrawSurfaceToSurface(hDestSurf, m_hHelpSurf, LTNULL, P3_MenuX(m_HelpRect.left), P3_MenuY(m_HelpRect.top));
-#else
-        g_pLTClient->DrawSurfaceToSurface(hDestSurf, m_hHelpSurf, LTNULL, m_HelpRect.left+xo,m_HelpRect.top+yo);
-#endif
 		g_pLTClient->SetOptimized2DBlend(LTSURFACEBLEND_ALPHA);
 	}
 
@@ -649,10 +584,8 @@ LTBOOL CBaseFolder::OnLeft()
 	CLTGUICtrl* pCtrl = GetSelectedControl();
 	if (pCtrl)
 		handled = pCtrl->OnLeft();
-#ifdef NOLFSRC_MODERN
 	if (!handled && StepFixedRow(-1))
 		return LTTRUE;
-#endif
 	if (handled)
 		g_pInterfaceMgr->RequestInterfaceSound(IS_SELECT);
 	return handled;
@@ -667,16 +600,13 @@ LTBOOL CBaseFolder::OnRight()
 	CLTGUICtrl* pCtrl = GetSelectedControl();
 	if (pCtrl)
 		handled = pCtrl->OnRight();
-#ifdef NOLFSRC_MODERN
 	if (!handled && StepFixedRow(1))
 		return LTTRUE;
-#endif
 	if (handled)
 		g_pInterfaceMgr->RequestInterfaceSound(IS_SELECT);
 	return handled;
 }
 
-#ifdef NOLFSRC_MODERN
 // M-P7-05: a page's fixed controls -- Back, Continue, a folder's own Start
 // mission or Skip outfitting -- sit side by side along its bottom, but only
 // Up and Down moved between them, through the whole page. Left (nDir -1)
@@ -724,7 +654,6 @@ LTBOOL CBaseFolder::StepFixedRow(int nDir)
 	SetSelection(GetIndex(pBest));
 	return LTTRUE;
 }
-#endif
 
 /******************************************************************/
 
@@ -955,10 +884,8 @@ LTBOOL CBaseFolder::OnLButtonDown(int x, int y)
 		// Record this control as the one being selected from the mouse click.
 		// If the mouse is still over it on the UP message, then the "enter" message will be sent.
 		m_nLMouseDownItemSel=nControlIndex;
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: the screen point in the control's own frame
 		P3_PointToCtrl(pCtrl, x, y);
-#endif
 		return pCtrl->OnLButtonDown(x,y);
 
 	}
@@ -985,10 +912,8 @@ LTBOOL CBaseFolder::OnLButtonUp(int x, int y)
 			if (pCtrl->IsEnabled() )
 			{
 				SetSelection(nControlIndex);
-#ifdef NOLFSRC_MODERN
 				// M-P3-01: the screen point in the control's own frame
 				P3_PointToCtrl(pCtrl, x, y);
-#endif
 				LTBOOL bHandled = pCtrl->OnLButtonUp(x,y);
 				if (bHandled)
 				{
@@ -1027,10 +952,8 @@ LTBOOL CBaseFolder::OnRButtonDown(int x, int y)
 		// If the mouse is still over it on the UP message, then the "enter" message will be sent.
 		m_nRMouseDownItemSel=nControlIndex;
 
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: the screen point in the control's own frame
 		P3_PointToCtrl(pCtrl, x, y);
-#endif
 		return pCtrl->OnRButtonDown(x,y);
 	}
 	else
@@ -1057,10 +980,8 @@ LTBOOL CBaseFolder::OnRButtonUp(int x, int y)
 			if (pCtrl->IsEnabled())
 			{
 				SetSelection(nControlIndex);
-#ifdef NOLFSRC_MODERN
 				// M-P3-01: the screen point in the control's own frame
 				P3_PointToCtrl(pCtrl, x, y);
-#endif
 				LTBOOL bHandled = pCtrl->OnRButtonUp(x,y);
 				if (pCtrl == m_pContinue || pCtrl == m_pBack || pCtrl == m_pMain)
 					g_pInterfaceMgr->RequestInterfaceSound(IS_PAGE);
@@ -1084,10 +1005,8 @@ LTBOOL CBaseFolder::OnLButtonDblClick(int x, int y)
 	if (m_pCaptureCtrl && pCtrl != m_pCaptureCtrl)
         return LTFALSE;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the screen point in the control's own frame
 	P3_PointToCtrl(pCtrl, x, y);
-#endif
 	if (pCtrl)
 		return pCtrl->OnLButtonDblClick(x, y);
 	else
@@ -1101,10 +1020,8 @@ LTBOOL CBaseFolder::OnRButtonDblClick(int x, int y)
 	if (m_pCaptureCtrl && pCtrl != m_pCaptureCtrl)
         return LTFALSE;
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: the screen point in the control's own frame
 	P3_PointToCtrl(pCtrl, x, y);
-#endif
 	if (pCtrl)
 		return pCtrl->OnRButtonDblClick(x, y);
 	else
@@ -1127,16 +1044,12 @@ LTBOOL CBaseFolder::OnMouseMove(int x, int y)
 		if (m_pCaptureCtrl && m_pCaptureCtrl != pCtrl)
             return LTFALSE;
 
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: the screen point in the control's own frame
 		{
 			int cx = x, cy = y;
 			P3_PointToCtrl(pCtrl, cx, cy);
 			pCtrl->OnMouseMove(cx,cy);
 		}
-#else
-		pCtrl->OnMouseMove(x,y);
-#endif
 	}
 	else if (m_pCaptureCtrl)
         return LTFALSE;
@@ -1320,51 +1233,21 @@ LTBOOL CBaseFolder::GetControlUnderPoint(int xPos, int yPos, int *pnIndex)
 	int i;
 	for (i=m_nFirstDrawn; i <= m_nLastDrawn; i++)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: the point is on the screen, the control where it is drawn
 		if (P3_PointOnCtrl(m_controlArray[i], xPos, yPos, LTTRUE))
 		{
 			*pnIndex=i;
             return LTTRUE;
 		}
-#else
-		int nLeft=m_controlArray[i]->GetPos().x;
-		int nTop=m_controlArray[i]->GetPos().y;
-		int nRight=nLeft+m_controlArray[i]->GetWidth();
-		int nBottom=nTop+m_controlArray[i]->GetHeight();
-
-		// Check to see if the click is in the bounding box for the control
-		if (xPos >= nLeft && xPos <= nRight && yPos >= nTop && yPos <= nBottom)
-		{
-			*pnIndex=i;
-
-            return LTTRUE;
-		}
-#endif
 	}
 	for (i=0; i < (int)m_fixedControlArray.GetSize(); i++)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: the point is on the screen, the control where it is drawn
 		if (P3_PointOnCtrl(m_fixedControlArray[i], xPos, yPos))
 		{
 			*pnIndex=-1-i;
             return LTTRUE;
 		}
-#else
-		int nLeft=m_fixedControlArray[i]->GetPos().x;
-		int nTop=m_fixedControlArray[i]->GetPos().y;
-		int nRight=nLeft+m_fixedControlArray[i]->GetWidth();
-		int nBottom=nTop+m_fixedControlArray[i]->GetHeight();
-
-		// Check to see if the click is in the bounding box for the control
-		if (xPos >= nLeft && xPos <= nRight && yPos >= nTop && yPos <= nBottom)
-		{
-			*pnIndex=-1-i;
-
-            return LTTRUE;
-		}
-#endif
 	}
 
     return LTFALSE;
@@ -2404,29 +2287,15 @@ void CBaseFolder::CreateScaleFX(char *szFXName)
 	CScaleFX* pScaleFX = g_pFXButeMgr->GetScaleFX(szFXName);
 	if (pScaleFX)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P3-10: original or Game of the Year main menu art
 		P3_MenuArt(pScaleFX);
-#endif
 		CBaseScaleFX *pSFX = debug_new(CBaseScaleFX);
 		g_pFXButeMgr->CreateScaleFX(pScaleFX,g_vPos, g_vF, LTNULL, &g_rRot, pSFX);
 		m_SFXArray.Add(pSFX);
 		g_pInterfaceMgr->AddInterfaceSFX(pSFX, IFX_NORMAL);				
 
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: the 3D parts of the menu keep their depth: they fill the
 		// screen's height, as the scaled page does
-#else
-		//adjust the object's position based on screen res
-		HOBJECT hSFX = pSFX->GetObject();
-		if (hSFX)
-		{
-			LTVector vNewPos;
-			g_pLTClient->GetObjectPos(hSFX, &vNewPos);
-			vNewPos.z *= g_pInterfaceResMgr->GetXRatio();
-			g_pLTClient->SetObjectPos(hSFX, &vNewPos);
-		}
-#endif
 
 	}
 }
@@ -2463,11 +2332,7 @@ void CBaseFolder::CreateCharFX(INT_CHAR *pChar)
 	    g_pLTClient->RotateAroundAxis(&rRot, &g_vU, fRot);
 
 		VEC_MULSCALAR(vTemp, g_vF, vModPos.z);
-#ifdef NOLFSRC_MODERN
 		// M-P3-01: keeps its depth, see CreateScaleFX
-#else
-		VEC_MULSCALAR(vTemp, vTemp, g_pInterfaceResMgr->GetXRatio());
-#endif
 		VEC_ADD(vPos, vPos, vTemp);
 
 		VEC_MULSCALAR(vTemp, g_vR, vModPos.x);

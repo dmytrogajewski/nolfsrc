@@ -398,11 +398,7 @@ void CFolderViewInventory::CreateModelSFX()
 	VEC_ADD(vModPos,vModPos,m_vOffset);
 
 	VEC_MULSCALAR(vTemp, vF, vModPos.z);
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: keeps its depth, as the scaled menu page fills the screen's height
-#else
-	VEC_MULSCALAR(vTemp, vTemp, g_pInterfaceResMgr->GetXRatio());
-#endif
 	VEC_ADD(vPos, vPos, vTemp);
 
 	VEC_MULSCALAR(vTemp, vR, vModPos.x);

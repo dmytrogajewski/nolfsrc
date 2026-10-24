@@ -253,7 +253,6 @@ enum HitLocation
 #define GAME_DISCON_BADHANDSHAKE	1 // Disconnect due to a bad handshake response
 #define GAME_DISCON_BADWEAPONS		2 // Disconnect due to a weapons.txt mismatch
 #define GAME_DISCON_BADCSHELL		3 // Disconnect due to a cshell.dll mismatch
-#ifdef NOLFSRC_MODERN
 // M-P6-10: the server checks the join password. A modern client appends it
 // to MID_HANDSHAKE_LETMEIN after the three values every client sends (a
 // retail server reads only those): this tag, a length byte, and the bytes,
@@ -267,7 +266,6 @@ inline void P6_MaskPassword(char* pBuf, int nLen, uint32 nMask)
 	for (int i = 0; i < nLen; i++)
 		pBuf[i] ^= (char)(nMask >> ((i & 3) * 8));
 }
-#endif
 
 #define INFINITE_MASS				100000.0f
 

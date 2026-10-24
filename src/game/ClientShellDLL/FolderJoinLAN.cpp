@@ -10,9 +10,7 @@
 
 #include "GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 #include "cshell/p6_multiplayer.h"
-#endif
 
 extern VarTrack g_vtPlayerName;
 
@@ -26,14 +24,10 @@ namespace
 	{
 		CMD_EDIT_PORT = FOLDER_CMD_CUSTOM+1,
 		CMD_SEARCH,
-#ifdef NOLFSRC_MODERN
 		CMD_P6_EDIT_PASS,
-#endif
 	};
 	char	szOldPort[8];
-#ifdef NOLFSRC_MODERN
 	char	szP6OldPassword[MAX_PASSWORD];
-#endif
 	int nFind = -1;
 
 	LTBOOL bIsInitting = LTFALSE;
@@ -63,10 +57,8 @@ LTBOOL CFolderJoinLAN::Build()
 	{
 		kColumnWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_JOIN_LAN,"ColumnWidth");
 	}
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kColumnWidth = P3_MenuLen(kColumnWidth);
-#endif
 
 	LTIntPt pos = g_pLayoutMgr->GetFolderCustomPoint(FOLDER_ID_JOIN_LAN,"SearchPos");
 	CLTGUITextItemCtrl *pCtrl = CreateTextItem(IDS_FIND_SERVERS,CMD_SEARCH,IDS_HELP_FIND_SERVERS,LTFALSE,GetMediumFont());
@@ -87,7 +79,6 @@ LTBOOL CFolderJoinLAN::Build()
 
 	pos = g_pLayoutMgr->GetFolderCustomPoint(FOLDER_ID_JOIN_LAN,"PortPos");
 	AddFixedControl(m_pPortGroup,pos);
-#ifdef NOLFSRC_MODERN
 
 	// M-P6-10: the password, on the line under the port
 	m_szP6Password[0] = '\0';
@@ -104,7 +95,6 @@ LTBOOL CFolderJoinLAN::Build()
 	AddFixedControl(m_pP6PassGroup,pos);
 	// and the server list a line lower, to clear it
 	m_PageRect.top += m_pPortLabel->GetHeight() + 4;
-#endif
 
 	SAFE_STRCPY(m_szPort,"27888");
 
@@ -149,7 +139,6 @@ uint32 CFolderJoinLAN::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwPar
 			}
 		} break;
 
-#ifdef NOLFSRC_MODERN
 	case CMD_P6_EDIT_PASS:
 		{
 			if (GetCapture())
@@ -170,7 +159,6 @@ uint32 CFolderJoinLAN::OnCommand(uint32 dwCommand, uint32 dwParam1, uint32 dwPar
 				m_pP6PassLabel->Select(LTFALSE);
 			}
 		} break;
-#endif
 	case FOLDER_CMD_JOIN:
 		{
 			if (dwParam1 >= m_lstSessions.GetSize()) return 0;
@@ -423,10 +411,8 @@ void CFolderJoinLAN::JoinCurGame()
 		return;
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P6-10: for a locked server
 	P6_SetJoinPassword(m_szP6Password);
-#endif
 	if (!DoJoinGame(m_lstSessions[nIndex]))
 	{
 		g_pInterfaceMgr->LoadFailed();
@@ -572,7 +558,6 @@ void CFolderJoinLAN::Escape()
         m_pPortLabel->Select(LTTRUE);
 		ForceMouseUpdate();
 	}
-#ifdef NOLFSRC_MODERN
 	else if (GetCapture() == m_pP6PassEdit)
 	{
 		SetCapture(LTNULL);
@@ -583,7 +568,6 @@ void CFolderJoinLAN::Escape()
 		m_pP6PassLabel->Select(LTTRUE);
 		ForceMouseUpdate();
 	}
-#endif
 	else
 		CBaseFolder::Escape();
 

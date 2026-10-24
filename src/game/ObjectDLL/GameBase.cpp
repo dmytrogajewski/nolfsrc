@@ -18,10 +18,8 @@
 #include "ObjectMsgs.h"
 #include "CommandMgr.h"
 #include "VersionMgr.h"
-#ifdef NOLFSRC_MODERN
 // M-P2-11: DisplayTriggers
 #include "object/p2_server.h"
-#endif
 
 extern CVarTrack g_ShowDimsTrack;
 
@@ -242,14 +240,10 @@ void GameBase::CreateBoundingBox()
 
     LTVector vColor = GetBoundingBoxColor();
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-11: a trigger shown by DisplayTriggers is yellow, nearly opaque
 	LTFLOAT fAlpha = g_vtDimsAlpha.GetFloat();
 	P2Server_TriggerBoxColor(this, &vColor, &fAlpha);
 	g_pLTServer->SetObjectColor(m_hDimsBox, vColor.x, vColor.y, vColor.z, fAlpha);
-#else
-    g_pLTServer->SetObjectColor(m_hDimsBox, vColor.x, vColor.y, vColor.z, g_vtDimsAlpha.GetFloat());
-#endif
 }
 
 
@@ -489,10 +483,8 @@ void GameBase::UpdateBoundingBox()
 {
 	int nVal = (int)g_ShowDimsTrack.GetFloat();
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-11: DisplayTriggers shows a trigger's box whatever ShowDims says
 	if (P2Server_ShowTriggerBox(this)) nVal = 4;
-#endif
 	if (nVal < 4)
 	{
 		switch (GetType())

@@ -189,14 +189,9 @@ LTBOOL   CFolderMain::Render(HSURFACE hDestSurf)
 	{
 		CLTGUIFont* pFont = g_pInterfaceResMgr->GetHelpFont();
 
-#ifdef NOLFSRC_MODERN
 		// M-P3-20: in the screen's corner, by the screen's ratios
 		pFont->Draw(m_BuildVersion, hDestSurf, (int)((float)m_BuildPos.x * g_pInterfaceResMgr->GetXRatio()),
 			(int)((float)m_BuildPos.y * g_pInterfaceResMgr->GetYRatio()), LTF_JUSTIFY_RIGHT, kBlack);
-#else
-		pFont->Draw(m_BuildVersion, hDestSurf, m_BuildPos.x+g_pInterfaceResMgr->GetXOffset(), 
-			m_BuildPos.y+g_pInterfaceResMgr->GetYOffset(), LTF_JUSTIFY_RIGHT, kBlack);
-#endif
 
 /* font test 
 		pFont = g_pInterfaceResMgr->GetTitleFont();

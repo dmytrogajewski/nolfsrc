@@ -39,7 +39,6 @@ CWizardDlg::CWizardDlg() : CPropertySheet(IDS_WIZARD_TITLE)
 	if (_chdir("Custom") == 0)
 	{
 		struct _finddata_t fileinfo;
-#ifdef NOLFSRC_MODERN
 		// the search is closed again (retail leaves its handle open)
 		long hFind = _findfirst("*.rez", &fileinfo);
 		if (hFind != -1)
@@ -47,12 +46,6 @@ CWizardDlg::CWizardDlg() : CPropertySheet(IDS_WIZARD_TITLE)
 			g_bCustomRez = true;
 			_findclose(hFind);
 		}
-#else
-		if (_findfirst("*.rez", &fileinfo) != -1)
-		{
-			g_bCustomRez = true;
-		}
-#endif
 
 		_chdir("..");
 	}

@@ -68,15 +68,11 @@
 #define COMMAND_ID_TEAM_MESSAGE		77
 #define COMMAND_ID_INVENTORY		78
 #define COMMAND_ID_LEFT_SHORT		79
-#ifdef NOLFSRC_MODERN
 // M-P5-13: toggle zoom (the Modernizer's id)
 #define COMMAND_ID_TOGGLE_ZOOM		81
-#endif
 
-#ifdef NOLFSRC_MODERN
 // M-P2-03: the developer console's key (the Modernizer's number, MODERN.md)
 #define COMMAND_ID_TOGGLE_CONSOLE	80
-#endif
 // Special command ids...
 
 #define COMMAND_ID_UNASSIGNED		99	// always leave this unassigned - used in input code

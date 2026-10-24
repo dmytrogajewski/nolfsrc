@@ -78,9 +78,7 @@
 #include "de_error.h"
 #include "packet.h"
 
-#ifdef NOLFSRC_MODERN
 #include "..\..\modern\engine\p7_gamepad.h"   // M-P7-01: ##gamepad
-#endif
 
 #include <math.h>
 
@@ -970,12 +968,10 @@ BOOL PASCAL di_CreateDeviceCallback(LPCDIDEVICEINSTANCEA lpddi, LPVOID pvRef)
 {
 	InputDevice* pDevice;
 
-#ifdef NOLFSRC_MODERN
 	// M-P7-01: the joystick is ##gamepad, read through XInput; DirectInput's
 	// joysticks are left out (one of them may be the same pad).
 	if (GET_DIDEVICE_TYPE(lpddi->dwDevType) == DIDEVTYPE_JOYSTICK && !P7Pad_IsPad(lpddi->guidInstance))
 		return DIENUM_CONTINUE;
-#endif
 
 	pDevice = new InputDevice;
 
@@ -1016,7 +1012,6 @@ LTBOOL input_Init(InputMgr* pMgr, void* pClient)
 		}
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P7-01: ##gamepad, the only joystick (DirectInput's are left out).
 	if (P7Pad_Available())
 	{
@@ -1051,10 +1046,6 @@ LTBOOL input_Init(InputMgr* pMgr, void* pClient)
 			pDev->Release();
 		}
 	}
-#else
-	g_pDirectInput->EnumDevices(0, di_CreateDeviceCallback, LTNULL,
-	                            DIEDFL_ATTACHEDONLY);
-#endif
 
 	return LTTRUE;
 }
@@ -1591,14 +1582,9 @@ LTBOOL input_EnableDevice(InputMgr* pMgr, char* strDeviceName)
 					guid = GUID_SysKeyboard;
 				}
 
-#ifdef NOLFSRC_MODERN
 				// M-P7-01: ##gamepad is ours, not DirectInput's.
 				if (P7Pad_CreateDevice(g_pDirectInput, guid, &pCreated) != DI_OK)
 					return LTFALSE;
-#else
-				if (g_pDirectInput->CreateDevice(guid, &pCreated, LTNULL) != DI_OK)
-					return LTFALSE;
-#endif
 
 				if (pCreated->QueryInterface(IID_IDirectInputDevice2A,
 				                             (void**)&pDevice->m_pDevice) != S_OK)
@@ -1833,18 +1819,12 @@ void input_ReadActions(InputMgr* pMgr, uint8* pActions, float* pAxisOffsets)
 	{
 		while (pDevice->m_pDevice)
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P7-01: JoystickDisable (the launcher's "Disable joystick")
 			// was about DirectInput's joysticks, which are left out; not
 			// ##gamepad.
 			if (GET_DIDEVICE_TYPE(pDevice->m_dwDevType) == DIDEVTYPE_JOYSTICK &&
 			    g_CV_JoystickDisable && !P7Pad_IsPad(pDevice->m_Guid))
 				break;
-#else
-			if (GET_DIDEVICE_TYPE(pDevice->m_dwDevType) == DIDEVTYPE_JOYSTICK &&
-			    g_CV_JoystickDisable)
-				break;
-#endif
 
 			dwElapsed = dwNow - pDevice->m_dwCreateTime;
 

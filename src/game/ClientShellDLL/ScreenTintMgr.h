@@ -42,21 +42,17 @@ public:
 
 	void ClearAll();
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: with EnableScreenTinting 0 the tint is drawn over the screen
 	void P1DrawOverlay();		// after the scene, before the interface
 	void P1Invalidate();		// the renderer was (re)initialised
-#endif
 private:
     LTVector m_avTints[NUM_TINT_EFFECTS];
     LTBOOL   m_bChanged;
-#ifdef NOLFSRC_MODERN
 	// M-P1-10: the overlay tint
 	LTBOOL   m_bP1Overlay;		// drawing the tint as an overlay
 	LTVector m_vP1Tint;			// the tint, 0..1 per channel
 	HSURFACE m_hP1Surface;		// a small surface of that colour
 	LTBOOL   m_bP1SurfaceOld;	// it needs refilling
-#endif
 };
 
 

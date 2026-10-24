@@ -14,12 +14,10 @@
 #include "FolderCommands.h"
 #include "ClientRes.h"
 #include "KeyFixes.h"
-#ifdef NOLFSRC_MODERN
 // M-P2-03: no console while keys are being bound
 #include "cshell/p2_console.h"
 // M-P7-05: the controller's menu keys wait while a control is captured
 #include "cshell/p7_pad.h"
-#endif
 
 extern CommandID g_CommandArray[];
 
@@ -530,9 +528,7 @@ uint32 CFolderCustomControls::OnCommand(uint32 dwCommand, uint32 dwParam1, uint3
 			else
 			{
                 m_bWaitingForKey = LTTRUE;
-#ifdef NOLFSRC_MODERN
 				P7Pad_SetCapture(true);
-#endif
 			}
 
 
@@ -574,9 +570,7 @@ LTBOOL CFolderCustomControls::Render(HSURFACE hDestSurf)
                         m_bWaitingForKey = LTFALSE;
                         g_pLTClient->EndDeviceTrack();
 						m_fInputPauseTimeLeft = 0.2f;
-#ifdef NOLFSRC_MODERN
 						P7Pad_SetCapture(false);
-#endif
 					}
 				}
 			}
@@ -838,10 +832,8 @@ LTBOOL CFolderCustomControls::OnMouseMove(int x, int y)
 
 void CFolderCustomControls::OnFocus(LTBOOL bFocus)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P2-03: the console key is just another key to bind here
 	P2Console_SetLock(P2CONSOLE_LOCK_CONTROLS, bFocus);
-#endif
 	if (bFocus)
 	{
 		// Add the controls to the folder

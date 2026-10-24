@@ -4,10 +4,8 @@
 #include "AssertMgr.h"
 #include <cassert>
 #include "AIMovement.h"
-#ifdef NOLFSRC_MODERN
 // M-P5-01: the movement-table fix
 #include "object/p5_fixes.h"
-#endif
 #include "AIHuman.h"
 #include "AIDog.h"
 #include "AIPoodle.h"
@@ -1112,16 +1110,9 @@ static const uint32 s_cPistolCornerLeft = sizeof(s_afPistolCornerLeft)/sizeof(fl
 
 LTFLOAT GetMovementData(const float* afData, const uint32 cData, float fTimePrev, float fTime)
 {
-#ifdef NOLFSRC_MODERN
 	// M-P5-01: never read past the table (at fTime 1.0 the retail code reads
 	// the word after it, which for s_afPistolCornerLeft is a NaN)
 	return P5_GetMovementData(afData, cData, fTimePrev, fTime);
-#else
-	LTFLOAT fRemainder1 = fTime*cData - int32(fTime*cData);
-	LTFLOAT fRemainder2 = fTimePrev*cData - int32(fTimePrev*cData);
-	return (LTFLOAT)fabs(afData[int(fTime*cData)]+fRemainder1*(afData[int(fTime*cData+1)]-afData[int(fTime*cData)]) -
-						 (afData[int(fTimePrev*cData)]+fRemainder2*(afData[int(fTimePrev*cData+1)]-afData[int(fTimePrev*cData)])));
-#endif
 }
 
 const char* s_aszMovementData[] =

@@ -264,7 +264,6 @@ BOOL CCard::FillModeList(HWND hList)
 }
 
 
-#ifdef NOLFSRC_MODERN
 // *********************************************************************** //
 //
 //	The modern launcher's modes (MODERN.md, M-P1-07 and M-L-01): every mode
@@ -351,7 +350,6 @@ static CDisplayMode* ModernDefaultMode(CCard* pCard)
 	return(pBest ? pBest : pAny);
 }
 
-#endif
 // *********************************************************************** //
 //
 //	ROUTINE:	CRenderer::Init   [0x402220]
@@ -403,13 +401,8 @@ BOOL CRenderer::Init(const char* sDll)
 	RMode* pMode = pModes;
 	do
 	{
-#ifdef NOLFSRC_MODERN
 		if (pMode->m_Width >= 640 && pMode->m_Height >= 480 &&
 			(pMode->m_BitDepth >= 32 || !ModernHasDeeperMode(pModes, pMode)))
-#else
-		if (pMode->m_Width >= 640 && pMode->m_Height >= 480 &&
-			(pMode->m_Height * 4) / 3 == pMode->m_Width)
-#endif
 		{
 			CCard* pCard = FindCard(pMode);
 			if (!pCard)
@@ -794,10 +787,8 @@ CRenderer* CDisplayModes::AddRenderer(const char* sDll)
 CRenderer* CDisplayModes::FindRenderer(const char* sDll)
 {
 	if (!sDll) return(NULL);
-#ifdef NOLFSRC_MODERN
 	// as the engine: d3d.ren is d3d9.ren in the modern build
 	if (_stricmp(sDll, "d3d.ren") == 0) sDll = "d3d9.ren";
-#endif
 
 	POSITION pos = m_renderers.GetHeadPosition();
 	while (pos)
@@ -1145,10 +1136,8 @@ void CDisplayModes::SetDefaultModes()
 				}
 				else
 				{
-#ifdef NOLFSRC_MODERN
 					pMode = ModernDefaultMode(pCard);
 					if (!pMode)
-#endif
 					pMode = pCard->FindMode(640, 480, 16);
 					if (!pMode) pMode = pCard->FindMode(512, 384, 16);
 					if (!pMode) pMode = pCard->FindMode(800, 600, 16);

@@ -39,10 +39,8 @@ enum eFolderCmds
 	FOLDER_CMD_CONTROLS,
 	FOLDER_CMD_GAME,
 	FOLDER_CMD_PERFORMANCE,
-#ifdef NOLFSRC_MODERN
 	// M-P3-13 (P3), then P4's: the modern build's options folders
 	FOLDER_CMD_INTERFACE,
-#endif
 
 // Display
 	FOLDER_CMD_RENDERER,
@@ -70,14 +68,10 @@ enum eFolderCmds
 	FOLDER_CMD_MAIN,
 	FOLDER_CMD_BREAK,
 	FOLDER_CMD_UPDATE,
-#ifdef NOLFSRC_MODERN
 	// M-P4-02: jukebox
 	FOLDER_CMD_JUKEBOX,
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P7-06: the Controller options folder
 	FOLDER_CMD_CONTROLLER,
-#endif
 	FOLDER_CMD_CUSTOM, //this needs to be the last cmd, so that custom commands may be defined after it
 };
 

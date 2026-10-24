@@ -17,9 +17,7 @@
 
 #include "GameClientShell.h"
 extern CGameClientShell* g_pGameClientShell;
-#ifdef NOLFSRC_MODERN
 #include "cshell/p6_multiplayer.h"
-#endif
 
 extern VarTrack g_vtPlayerName;
 
@@ -156,12 +154,8 @@ CFolderJoin::CFolderJoin()
     m_pResort = LTNULL;
     m_pJoin = LTNULL;
 
-#ifdef NOLFSRC_MODERN
 	// M-P6-03: show only servers of our own version unless asked otherwise
     g_vtNetVersionFilter.Init(g_pLTClient,"NetVersionFilter",LTNULL,1.0f);
-#else
-    g_vtNetVersionFilter.Init(g_pLTClient,"NetVersionFilter",LTNULL,0.0f);
-#endif
     g_vtNetGameFilter.Init(g_pLTClient,"NetGameFilter",LTNULL,(float)m_nGameFilter);
     g_vtNetPopFilter.Init(g_pLTClient,"NetPopFilter",LTNULL,(float)m_nPopFilter);
     g_vtNetServerSortKey.Init(g_pLTClient,"NetServerSortKey",LTNULL,(float)m_nServerSort);
@@ -268,20 +262,12 @@ LTBOOL CFolderJoin::Build()
 	//Add Server List
 	pos.x = rcServerRect.left + nIndent;
 	pos.y = rcServerRect.top + nBarHeight;
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	int nListHeight = P3_MenuLen((rcServerRect.bottom - rcServerRect.top) - nBarHeight);
-#else
-	int nListHeight = (rcServerRect.bottom - rcServerRect.top) - nBarHeight;
-#endif
 	nListHeight += 19;	// [blg] tweak
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nServerGroupWidth = P3_MenuLen((rcServerRect.right - rcServerRect.left) - nArrowWidth);
-#else
-	nServerGroupWidth = (rcServerRect.right - rcServerRect.left) - nArrowWidth;
-#endif
 	m_pServerList = debug_new(CListCtrl);
     m_pServerList->Create(nListHeight, LTTRUE, nServerGroupWidth);
 	m_pServerList->SetItemSpacing(0);
@@ -309,19 +295,11 @@ LTBOOL CFolderJoin::Build()
 	//Add PlayerList Here
 	pos.x = rcPlayerRect.left + nIndent;
 	pos.y = rcPlayerRect.top + nBarHeight;
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nListHeight = P3_MenuLen((rcPlayerRect.bottom - rcPlayerRect.top) - nBarHeight);
-#else
-	nListHeight = (rcPlayerRect.bottom - rcPlayerRect.top) - nBarHeight;
-#endif
 	nListHeight += 24;	// [blg] tweak
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nPlayerGroupWidth = P3_MenuLen((rcPlayerRect.right - rcPlayerRect.left) - nArrowWidth);
-#else
-	nPlayerGroupWidth = (rcPlayerRect.right - rcPlayerRect.left) - nArrowWidth;
-#endif
 	m_pPlayerList = debug_new(CListCtrl);
     m_pPlayerList->Create(nListHeight, LTTRUE, nPlayerGroupWidth);
 	m_pPlayerList->SetItemSpacing(0);
@@ -382,18 +360,10 @@ LTBOOL CFolderJoin::Build()
 	//Add OptionList Here
 	pos.x = rcOptionRect.left + nIndent;
 	pos.y = rcOptionRect.top + nBarHeight;
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nListHeight = P3_MenuLen((rcOptionRect.bottom - rcOptionRect.top) - nBarHeight);
-#else
-	nListHeight = (rcOptionRect.bottom - rcOptionRect.top) - nBarHeight;
-#endif
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the lists scale with the menu page
 	nOptionGroupWidth = P3_MenuLen((rcOptionRect.right - rcOptionRect.left) - nArrowWidth);
-#else
-	nOptionGroupWidth = (rcOptionRect.right - rcOptionRect.left) - nArrowWidth;
-#endif
 	m_pOptionList = debug_new(CListCtrl);
     m_pOptionList->Create(nListHeight, LTTRUE, nOptionGroupWidth);
 	m_pOptionList->SetItemSpacing(0);
@@ -403,7 +373,6 @@ LTBOOL CFolderJoin::Build()
 	rcStatusRect.top = rcStatusRect.bottom - nBarHeight;
 
     bFrameDelay = LTTRUE;
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: from here on the column widths are used inside the lists'
 	// rows, in pixels: they scale with the menu page
 	nGap = P3_MenuLen(nGap);
@@ -415,7 +384,6 @@ LTBOOL CFolderJoin::Build()
 	nNameWidth = P3_MenuLen(nNameWidth);
 	nScoreWidth = P3_MenuLen(nScoreWidth);
 	nOptionWidth = P3_MenuLen(nOptionWidth);
-#endif
 
 	// Make sure to call the base class
 	return CBaseFolder::Build();
@@ -454,12 +422,8 @@ LTBOOL CFolderJoin::Render(HSURFACE hDestSurf)
 			nOldIndex = m_pServerList->GetLastDisplayedIndex();
 		}
 		
-#ifdef NOLFSRC_MODERN
 		// M-P3-06: at its place in the 4:3 area
 		GetSmallFont()->Draw(m_hServersShown, hDestSurf, P3_MenuX(rcServerRect.right-nIndent), P3_MenuY(rcServerRect.top+nIndent), LTF_JUSTIFY_RIGHT, m_hNonSelectedColor);
-#else
-		GetSmallFont()->Draw(m_hServersShown, hDestSurf, xo+rcServerRect.right-nIndent, yo+rcServerRect.top+nIndent, LTF_JUSTIFY_RIGHT, m_hNonSelectedColor);
-#endif
 	}
 
     CLTGUICtrl *pSortCtrl = LTNULL;
@@ -484,13 +448,8 @@ LTBOOL CFolderJoin::Render(HSURFACE hDestSurf)
 	if (pSortCtrl)
 	{
         LTIntPt pos = pSortCtrl->GetPos();
-#ifdef NOLFSRC_MODERN
 		// M-P3-06: under the sort column's header, where it is drawn
 		pos = P3_MenuPos(pos);
-#else
-		pos.x += xo;
-		pos.y += yo;
-#endif
         LTRect rect(pos.x, (pos.y + pSortCtrl->GetHeight()) - 5, pos.x + pSortCtrl->GetWidth(), (pos.y + pSortCtrl->GetHeight()) - 3);
         g_pLTClient->FillRect(hDestSurf,&rect,m_hSelectedColor);
 
@@ -515,13 +474,8 @@ LTBOOL CFolderJoin::Render(HSURFACE hDestSurf)
 	if (pSortCtrl)
 	{
         LTIntPt pos = pSortCtrl->GetPos();
-#ifdef NOLFSRC_MODERN
 		// M-P3-06: under the sort column's header, where it is drawn
 		pos = P3_MenuPos(pos);
-#else
-		pos.x += xo;
-		pos.y += yo;
-#endif
         LTRect rect(pos.x, (pos.y + pSortCtrl->GetHeight()) - 5, pos.x + pSortCtrl->GetWidth(), (pos.y + pSortCtrl->GetHeight()) - 3);
         g_pLTClient->FillRect(hDestSurf,&rect,m_hSelectedColor);
 
@@ -536,16 +490,9 @@ LTBOOL CFolderJoin::Render(HSURFACE hDestSurf)
 	if (m_hStatus)
 	{
 
-#ifdef NOLFSRC_MODERN
 		// M-P3-06: at its place in the 4:3 area
 		GetSmallFont()->Draw(m_hStatus, hDestSurf, P3_MenuX(nIndent), P3_MenuY(rcStatusRect.top+nIndent), LTF_JUSTIFY_LEFT,
 			(m_nState == FSS_IDLE) ? m_hNonSelectedColor : m_hSelectedColor);
-#else
-		if (m_nState == FSS_IDLE)
-			GetSmallFont()->Draw(m_hStatus, hDestSurf, xo+nIndent, yo+rcStatusRect.top+nIndent, LTF_JUSTIFY_LEFT, m_hNonSelectedColor);
-		else
-			GetSmallFont()->Draw(m_hStatus, hDestSurf, xo+nIndent, yo+rcStatusRect.top+nIndent, LTF_JUSTIFY_LEFT, m_hSelectedColor);
-#endif
 	}
 
     LTBOOL bOK = CBaseFolder::Render(hDestSurf);
@@ -564,10 +511,8 @@ LTBOOL CFolderJoin::Render(HSURFACE hDestSurf)
 		else
 		{
 			// Init the GameSpy client manager...
-#ifdef NOLFSRC_MODERN
 			// M-P6-02: the master server to ask for the list
 			P6_SetBrowserMaster();
-#endif
 			BOOL bRet = GetGameSpyClientMgr()->Init(GAMESPY_GAME_NAME, GAMESPY_SECRET_KEY);
 			if (!bRet)
 			{
@@ -965,7 +910,6 @@ void CFolderJoin::JoinCurGame(LTBOOL bPasswordSet)
 
 	// Check for password protection...
 
-#ifdef NOLFSRC_MODERN
 	// M-P6-10: a modern server says only that it wants a password, and
 	// checks it in the handshake; a retail one gives it away, and is
 	// checked here as before (and sent too, for neither minds)
@@ -980,7 +924,6 @@ void CFolderJoin::JoinCurGame(LTBOOL bPasswordSet)
 		}
 		P6_SetJoinPassword(m_szPassword);
 	}
-#endif
 	char* sPassword = pGame->GetStringValue("Password");
 	if (sPassword && sPassword[0] != '\0')
 	{
@@ -993,9 +936,7 @@ void CFolderJoin::JoinCurGame(LTBOOL bPasswordSet)
 				g_pLTClient->FreeString(hString);
 				return;
 			}
-#ifdef NOLFSRC_MODERN
 			P6_SetJoinPassword(m_szPassword);
-#endif
 		}
 		else
 		{
@@ -1090,15 +1031,11 @@ LTBOOL CFolderJoin::DoJoinGame(CGameSpyServer* pGame)
 	int nRetries = GetConsoleInt("NetJoinRetry", 0);
 	while (nRetries >= 0)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P6-06: log each join attempt
 		P6_LogJoinAttempt(sIp, GetConsoleInt("NetJoinRetry", 0) - nRetries + 1, GetConsoleInt("NetJoinRetry", 0) + 1);
-#endif
 		// If successful, then we're done.
 		nConnectError = g_pLTClient->StartGame( &req );
-#ifdef NOLFSRC_MODERN
 		P6_LogJoinResult(sIp, nConnectError == LT_OK);
-#endif
         if(nConnectError == LT_OK )
 		{
             return LTTRUE;
@@ -1389,14 +1326,10 @@ int CFolderJoin::AddServerCtrl(CGameSpyServer* pGame)
     pGroup->SetUserData(pGame->GetHandle());
 
 	char sTemp[128] = "";
-#ifdef NOLFSRC_MODERN
 	// M-P6-01: a server's name comes from the network: bound it and drop
 	// format characters
 	SAFE_STRCPY(sTemp,pGame->GetName());
 	FilterFormatChars(sTemp);
-#else
-	sprintf(sTemp,"%s",pGame->GetName());
-#endif
     CStaticTextCtrl *pCtrl = CreateStaticTextItem(sTemp,CMD_SELECT_SERVER,LTNULL,nGameWidth,pFont->GetHeight(),LTFALSE,pFont);
     pGroup->AddControl(pCtrl,pos,LTTRUE);
 	pos.x += nGameWidth+nGap;
@@ -1433,13 +1366,9 @@ int CFolderJoin::AddPlayerCtrl(CGameSpyPlayer* pPlr)
     pGroup->SetUserData(pPlr);
 
 	char sTemp[128] = "";
-#ifdef NOLFSRC_MODERN
 	// M-P6-01: (as for server names) player names in the browser
 	SAFE_STRCPY(sTemp, pPlr->GetName());
 	FilterFormatChars(sTemp);
-#else
-	strcpy(sTemp, pPlr->GetName());
-#endif
     CStaticTextCtrl *pCtrl = CreateStaticTextItem(sTemp,LTNULL,LTNULL,nNameWidth,pFont->GetHeight(),LTTRUE,pFont);
     pGroup->AddControl(pCtrl,pos,LTTRUE);
 	pos.x += nNameWidth+nGap;
@@ -1517,12 +1446,8 @@ void CFolderJoin::DrawBar(HSURFACE hDestSurf,LTRect *rect)
 	int yo = g_pInterfaceResMgr->GetYOffset();
 
 	//Draw server bar
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: at its place in the 4:3 area, scaled with the page
     LTRect barRect(P3_MenuX(rect->left), P3_MenuY(rect->top), P3_MenuX(rect->right), P3_MenuY(rect->top)+P3_MenuLen(nBarHeight));
-#else
-    LTRect barRect(xo+rect->left, yo+rect->top, xo+rect->right, yo+rect->top+nBarHeight);
-#endif
     g_pLTClient->FillRect(hDestSurf,&barRect,m_hBarColor);
 
 	barRect.left += 2;
@@ -1907,13 +1832,9 @@ void CFolderJoin::UpdateOptions(LTBOOL bForce)
 	// Check for password protection...
 
 	char* sPassword = pGame->GetStringValue("Password");
-#ifdef NOLFSRC_MODERN
 	// M-P6-10: a modern server's lock
 	char* sRequired = pGame->GetStringValue("PasswordRequired");
 	if ((sPassword && sPassword[0] != '\0') || (sRequired && atoi(sRequired) != 0))
-#else
-	if (sPassword && sPassword[0] != '\0')
-#endif
 	{
 		AddOptionCtrl(IDS_USE_PASSWORD,IDS_YES);
 	}
@@ -1935,11 +1856,9 @@ void CFolderJoin::UpdateOptions(LTBOOL bForce)
 		case SO_TOGGLE:
 		case SO_CYCLE:
 			nVal = pGame->GetIntValue(pOpt->szVariable);
-#ifdef NOLFSRC_MODERN
 			// M-P6-02: the value comes from the network; keep the index
 			// inside the table
 			if (nVal < 0 || nVal >= SO_MAX_STRINGS) nVal = 0;
-#endif
 			nStringID = pOpt->nStringId[nVal];
 			AddOptionCtrl(pOpt->nNameId,nStringID);
 			break;
@@ -2105,7 +2024,6 @@ void CFolderJoin::AskForPassword()
 
 	LTIntPt pos(0,0);
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-07: centred on the screen (the page's centre), the dialog's own
 	// pixel offsets kept
 	pos.x = P3_MenuCentreX(320, m_pPassBack->GetWidth());
@@ -2119,19 +2037,6 @@ void CFolderJoin::AskForPassword()
 	pos.x = P3_MenuCentreX(320, m_pPassLabel->GetWidth());
 	pos.y = 240 - P3_LayoutLen(4 + m_pPassLabel->GetHeight());
 	AddFixedControl(m_pPassLabel,pos,LTFALSE);
-#else
-	pos.x = 320 - m_pPassBack->GetWidth() / 2;
-	pos.y = 240 - m_pPassBack->GetHeight() / 2;
-	AddFixedControl(m_pPassBack,pos,LTFALSE);
-
-	pos.x += 16;
-	pos.y = 244 + m_pPassEdit->GetHeight();
-	AddFixedControl(m_pPassEdit,pos,LTTRUE);
-
-	pos.x = 320 - m_pPassLabel->GetWidth() / 2;
-	pos.y = 236 - m_pPassLabel->GetHeight();
-	AddFixedControl(m_pPassLabel,pos,LTFALSE);
-#endif
 
 
 
@@ -2188,14 +2093,10 @@ LTBOOL CFolderJoin::OnLButtonDblClick(int x, int y)
 {
 	bDblClick = LTTRUE;
 	CLTGUICtrl* pCtrl = GetSelectedControl();
-#ifdef NOLFSRC_MODERN
 	// M-P3-06: the point in the server list's own frame
 	int lx = x, ly = y;
 	P3_PointToCtrl(m_pServerList, lx, ly);
 	if (pCtrl==m_pServerList && !m_pServerList->OnLButtonDblClick( lx, ly))
-#else
-	if (pCtrl==m_pServerList && !m_pServerList->OnLButtonDblClick( x, y))
-#endif
 		return OnEnter();
     
 	return CBaseFolder::OnLButtonDblClick( x, y);

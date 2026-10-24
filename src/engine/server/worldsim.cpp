@@ -850,7 +850,6 @@ void ws_AddClippedContact(LTPlane* pPlane, void* pObject, float fDist)
 
 	fNew = fDist - fDot;
 
-#ifdef NOLFSRC_MODERN
 	// fixed: ws_AddClippedContact divides by a dot product that can be zero
 	// (RETAIL_BUGS.md). The divisor, fDist - fNew, is fDot: a move parallel
 	// to the plane never reaches it, so the move is left as it is.
@@ -866,17 +865,6 @@ void ws_AddClippedContact(LTPlane* pPlane, void* pObject, float fDist)
 		g_vMoveEnd.y += g_vMoveStart.y;
 		g_vMoveEnd.z += g_vMoveStart.z;
 	}
-#else
-	fRatio = -(fNew / (fDist - fNew));
-
-	vScaled = vDelta * fRatio;
-
-	g_vMoveEnd = vScaled;
-
-	g_vMoveEnd.x += g_vMoveStart.x;
-	g_vMoveEnd.y += g_vMoveStart.y;
-	g_vMoveEnd.z += g_vMoveStart.z;
-#endif
 
 	if (g_nContacts >= WS_MAX_CONTACTS)
 		return;
@@ -2574,7 +2562,6 @@ int ws_MoveCylinder(uint16 nBlock, CBounceState* pState, int bRetry)
 // %ax (allocation), and shipped's g_vMoveStart copy completes before the
 // g_vMoveEnd loads (one store-scheduling block; operator/component spellings
 // of both sums and statement order did not move it).
-#ifdef NOLFSRC_MODERN
 // M-P5-20: the highest point of a polygon over the rectangle x0..x1, z0..z1,
 // or 0 when none of it is over it. The polygon is clipped to the rectangle
 // seen from above (its height carried along each edge) and the highest of
@@ -2589,7 +2576,6 @@ static int ws_PolyTopOver(WorldPolyOwner* polygon, float x0, float x1, float z0,
     for (const auto point : clipped) *top = std::max(*top,point.y);
     return 1;
 }
-#endif
 
 int ws_StairStep(uint16 nBlock, CBounceState* pState)
 {
@@ -2753,7 +2739,6 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 					g_pMoveState->m_pInfo->m_hPoly =
 					    g_pMoveState->m_pWorldBsp->MakeHPoly((WorldPoly*)pRec);
 
-#ifdef NOLFSRC_MODERN
 					// M-P5-20: a floor or a slope one can walk on lifts the
 					// feet onto the highest point of it that is under them.
 					// The lift was measured from the swept box's corners to
@@ -2782,14 +2767,11 @@ int ws_StairStep(uint16 nBlock, CBounceState* pState)
 							vPush.y = -fBest;
 						}
 					}
-#endif
 					if (fBest < 0.0f)
 					{
 						vFlat = pInfo->m_Plane.m_Normal;
 
-#ifdef NOLFSRC_MODERN
 						if (vPush.y == 0.0f)
-#endif
 						vPush = vFlat * -fBest;
 
                         // A step may consume the lowered foot volume, never

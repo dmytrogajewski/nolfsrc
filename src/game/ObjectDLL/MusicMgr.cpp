@@ -232,14 +232,10 @@ void CMusicMgr::Update()
 				g_pLTServer->CPrint("Choosing Mood \"%s\"", s_aszMoods[iMood]);
 #endif
 				char szMusic[128];
-#ifdef NOLFSRC_MODERN
 				// A theme without this mood (urbanspy has no Music.txt
 				// section): GetRandom(0, -1) answers -1, which the 32-bit
 				// original read harmlessly as the element before; level 0.
 				uint32 iLevel = m_acMoods[iMood] ? GetRandom(0, m_acMoods[iMood]-1) : 0;
-#else
-				uint32 iLevel = GetRandom(0, m_acMoods[iMood]-1);
-#endif
 				sprintf(szMusic, "MUSIC I %d measure", m_aanMoods[iMood][iLevel]);
 //				g_pLTServer->CPrint(szMusic);
 

@@ -70,11 +70,9 @@ LTBOOL CFolderWeaponControls::Build()
 		kWidth = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_WPN_CONTROLS,"ColumnWidth");
 	if (g_pLayoutMgr->HasCustomValue(FOLDER_ID_WPN_CONTROLS,"SliderWidth"))
 		kSlider = g_pLayoutMgr->GetFolderCustomInt(FOLDER_ID_WPN_CONTROLS,"SliderWidth");
-#ifdef NOLFSRC_MODERN
 	// M-P3-03: the columns scale with the menu page
 	kWidth = P3_MenuLen(kWidth);
 	kSlider = P3_MenuLen(kSlider);
-#endif
 
 	kFirstCommand = g_pWeaponMgr->GetFirstWeaponCommandId();
 	kLastCommand = g_pWeaponMgr->GetLastWeaponCommandId();
@@ -440,11 +438,7 @@ void CFolderWeaponControls::CreateModelSFX()
 	VEC_ADD(vModPos,vModPos,m_vOffset);
 
 	VEC_MULSCALAR(vTemp, vF, vModPos.z);
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: keeps its depth, as the scaled menu page fills the screen's height
-#else
-	VEC_MULSCALAR(vTemp, vTemp, g_pInterfaceResMgr->GetXRatio());
-#endif
 	VEC_ADD(vPos, vPos, vTemp);
 
 	VEC_MULSCALAR(vTemp, vR, vModPos.x);

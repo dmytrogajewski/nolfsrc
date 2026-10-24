@@ -142,7 +142,6 @@ extern char g_ShutdownMessage[];
 // and those report the code by name and pass the message buffer as the
 // description rather than the lone space. Which form a wrapper uses follows
 // from its return type alone, across all forty-four of them.
-#ifdef NOLFSRC_MODERN
 // fixed: the value-returning readers quote the shutdown message
 // (RETAIL_BUGS.md). They pass the description every other check passes.
 #define RETURN_ERROR_MSG_VOID(level, fnName, code) \
@@ -160,23 +159,6 @@ extern char g_ShutdownMessage[];
 			dsi_ServerError(g_pErrorFormat, fnName, #code, LT_ERRDESC); \
 		return val; \
 	}
-#else
-#define RETURN_ERROR_MSG_VOID(level, fnName, code) \
-	{ \
-		dsi_OnReturnError(code); \
-		if (g_DebugLevel >= level) \
-			dsi_ServerError(g_pErrorFormat, fnName, #code, g_ShutdownMessage); \
-		return; \
-	}
-
-#define RETURN_ERROR_MSG_VALUE(level, fnName, code, val) \
-	{ \
-		dsi_OnReturnError(code); \
-		if (g_DebugLevel >= level) \
-			dsi_ServerError(g_pErrorFormat, fnName, #code, g_ShutdownMessage); \
-		return val; \
-	}
-#endif
 
 // A third form takes the description as an argument instead of leaving it a
 // blank, and reports the code symbolically like the pointer-name form does.

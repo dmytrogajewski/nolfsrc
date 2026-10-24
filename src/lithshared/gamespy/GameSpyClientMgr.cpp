@@ -636,7 +636,6 @@ int   CGameSpyServer::GetNumPlayers() { return(GetIntValue("numplayers")); }
 int   CGameSpyServer::GetMaxPlayers() { return(GetIntValue("maxplayers")); }
 char* CGameSpyServer::GetAddress()    { return(GetStringValue("hostaddr")); }
 
-#ifdef NOLFSRC_MODERN
 // M-P6-02: the server's answer to \status\ (and "hostaddr", "ping")
 char* CGameSpyServer::GetStringValue(char* sKey, char* sDefault)
 {
@@ -655,22 +654,6 @@ float CGameSpyServer::GetFloatValue(char* sKey, float fDefault)
 	char* sValue = GSL_GetValue(m_pGServer, sKey);
 	return(sValue ? (float)atof(sValue) : fDefault);
 }
-#else
-char* CGameSpyServer::GetStringValue(char* sKey, char* sDefault)
-{
-	return(sDefault);
-}
-
-int CGameSpyServer::GetIntValue(char* sKey, int nDefault)
-{
-	return(nDefault);
-}
-
-float CGameSpyServer::GetFloatValue(char* sKey, float fDefault)
-{
-	return(fDefault);
-}
-#endif
 
 int CGameSpyServer::UpdatePlayers()
 {
@@ -767,7 +750,6 @@ char* CGameSpyPlayer::GetName()  { return(GetStringValue("player")); }
 int   CGameSpyPlayer::GetFrags() { return(GetIntValue("frags")); }
 int   CGameSpyPlayer::GetPing()  { return(GetIntValue("ping")); }
 
-#ifdef NOLFSRC_MODERN
 // M-P6-02: a player's keys are the server's "<key>_<index>"
 static char* GSL_GetPlayerValue(GServer pServer, char* sKey, int nIndex)
 {
@@ -794,19 +776,3 @@ float CGameSpyPlayer::GetFloatValue(char* sKey, float fDefault)
 	char* sValue = GSL_GetPlayerValue(m_pGServer, sKey, m_nIndex);
 	return(sValue ? (float)atof(sValue) : fDefault);
 }
-#else
-char* CGameSpyPlayer::GetStringValue(char* sKey, char* sDefault)
-{
-	return(sDefault);
-}
-
-int CGameSpyPlayer::GetIntValue(char* sKey, int nDefault)
-{
-	return(nDefault);
-}
-
-float CGameSpyPlayer::GetFloatValue(char* sKey, float fDefault)
-{
-	return(fDefault);
-}
-#endif

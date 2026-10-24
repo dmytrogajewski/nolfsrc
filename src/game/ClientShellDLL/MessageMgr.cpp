@@ -399,13 +399,9 @@ void CMessageMgr::Draw( void )
 
 		if (pMsg->hSurface)
 		{
-#ifdef NOLFSRC_MODERN
 			// M-P3-16: drawn without the colour key, which costs a lot of frame rate
 			// and changes nothing that shows
             g_pLTClient->DrawSurfaceToSurface(hScreen,pMsg->hSurface,LTNULL,x,y);
-#else
-            g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen,pMsg->hSurface,LTNULL,x,y,hTransColor);
-#endif
 		}
 		y += pMsg->nHeight;
 
@@ -973,7 +969,6 @@ void CCheatMgr::Process( CheatCode nCheatCode )
 		g_pGameClientShell->ProcessCheat(nCheatCode);
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P2-09: six cheats the retail final build compiles out (_FINAL, below)
 	// work in the modern build: no-clip -- also the way out of a spot the
 	// player is stuck in -- teleport to the start, the mission's starting
@@ -1013,7 +1008,6 @@ void CCheatMgr::Process( CheatCode nCheatCode )
 		default:
 			break;
 	}
-#endif
 	// process cheat codes
 	switch ( nCheatCode )
 	{

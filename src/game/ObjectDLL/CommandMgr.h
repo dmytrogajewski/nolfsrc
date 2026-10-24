@@ -109,10 +109,8 @@ class CCommandMgr
 		void	ListCommands();
         LTBOOL  IsValidCmd(const char* pCmd);
         LTBOOL  Process(const char* pCmd) { return ProcessCmd(pCmd); }
-#ifdef NOLFSRC_MODERN
 		// Drops pending delayed "msg <target> on" commands.
 		void	CancelPendingOn(const char* pTarget);
-#endif
         LTBOOL  Update();
 
 		void	Clear();

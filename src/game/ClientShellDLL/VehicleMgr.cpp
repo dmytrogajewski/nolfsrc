@@ -18,10 +18,8 @@
 #include "VarTrack.h"
 #include "MsgIDs.h"
 #include "CharacterFX.h"
-#ifdef NOLFSRC_MODERN
 // M-P7-04: the controller's left stick on a vehicle
 #include "cshell/p7_pad.h"
-#endif
 
 #define MOTORCYCLE_SLIDE_TO_STOP_TIME	3.0f
 #define SNOWMOBILE_SLIDE_TO_STOP_TIME	5.0f
@@ -515,10 +513,8 @@ void CVehicleMgr::UpdateMotorcycleControlFlags()
 		m_dwControlFlags |= BC_CFLG_ALT_FIRING;
 	}
 
-#ifdef NOLFSRC_MODERN
 	// M-P7-04: the controller's left stick: throttle, brake and steering
 	P7Pad_VehicleFlags(&m_dwControlFlags);
-#endif
 
 	// Check for strafe left and strafe right.
 	if ((m_dwControlFlags & BC_CFLG_RIGHT) && (m_dwControlFlags & BC_CFLG_STRAFE))

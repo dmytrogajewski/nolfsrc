@@ -852,11 +852,9 @@ void CAttachments::AddRequirements(ModelId eModelId, ModelStyle eModelStyle)
 	}
 }
 
-#ifdef NOLFSRC_MODERN
 // M-P2-10: big head mode. (Included here, not at the top: CreateAttachment
 // prints __LINE__, and the release build must compile to the same bytes.)
 #include "object/p2_server.h"
-#endif
 // ----------------------------------------------------------------------- //
 //
 //	ROUTINE:	CAttachments::Update
@@ -867,7 +865,6 @@ void CAttachments::AddRequirements(ModelId eModelId, ModelStyle eModelStyle)
 
 void CAttachments::Update()
 {
-#ifdef NOLFSRC_MODERN
 	// M-P2-10: hats, glasses and the like grow with big heads
 	for ( int iP2Position = 0 ; iP2Position < m_cAttachmentPositions ; iP2Position++ )
 	{
@@ -879,7 +876,6 @@ void CAttachments::Update()
 			                             pP2Position->GetAttachment()->GetModel());
 		}
 	}
-#endif
 	/*	// Put all attachments in their place
 
 	{for ( int iAttachmentPosition = 0 ; iAttachmentPosition < m_cAttachmentPositions ; iAttachmentPosition++ )

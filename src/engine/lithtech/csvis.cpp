@@ -118,9 +118,7 @@
 
 #include "ltbasedefs.h"
 #include "ltlink.h"
-#ifdef NOLFSRC_MODERN
 #include "..\..\modern\engine\p1_frametime.h"   // M-P1-23
-#endif
 
 
 // ======================================================================= //
@@ -968,13 +966,9 @@ void cs_UpdateSpritesQ414(CClientMgrQ414* pMgr)
 
 	if (pMgr->m_pConnection)
 	{
-#ifdef NOLFSRC_MODERN
 		// M-P1-23: the fraction of a millisecond carried to the next frame
 		static float s_fP1Carry;
 		msDelta = (uint32)P1_FrameMs(pMgr->m_pConnection->m_fFrameTime, &s_fP1Carry);
-#else
-		msDelta = (uint32)(pMgr->m_pConnection->m_fFrameTime * 1000.0f);
-#endif
 
 		if (msDelta > 0)
 		{
@@ -1045,13 +1039,9 @@ void cs_UpdateParticleSystemsQ414(CClientMgrQ414* pMgr)
 	LTBOOL            bMoved;
 	int               msDelta;
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-23: the fraction of a millisecond carried to the next frame
 	static float s_fP1Carry;
 	msDelta = (int)P1_FrameMs(pMgr->m_fFrameTime, &s_fP1Carry);
-#else
-	msDelta = (int)(pMgr->m_fFrameTime * 1000.0f);
-#endif
 
 	if (msDelta > 0)
 	{
@@ -1115,13 +1105,9 @@ void cs_UpdateSpriteObjectsQ414(CClientMgrQ414* pMgr)
 	uint32             nFlags;
 	uint32             msDelta;
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-23: the fraction of a millisecond carried to the next frame
 	static float s_fP1Carry;
 	msDelta = (uint32)P1_FrameMs(pMgr->m_fFrameTime, &s_fP1Carry);
-#else
-	msDelta = (uint32)(pMgr->m_fFrameTime * 1000.0f);
-#endif
 
 	if (msDelta)
 	{
@@ -1225,13 +1211,9 @@ void cs_UpdateModelSkinsQ414(CClientMgrQ414* pMgr)
 	uint32             i;
 	uint32             msDelta;
 
-#ifdef NOLFSRC_MODERN
 	// M-P1-23: the fraction of a millisecond carried to the next frame
 	static float s_fP1Carry;
 	msDelta = (uint32)P1_FrameMs(pMgr->m_fFrameTime, &s_fP1Carry);
-#else
-	msDelta = (uint32)(pMgr->m_fFrameTime * 1000.0f);
-#endif
 
 	if (msDelta)
 	{

@@ -90,7 +90,6 @@ LTRESULT CLTDirectMusicMgr::SetVolume(const long nVolume)
 //   test. The unguarded tail is `test %eax,%eax`, reached straight from the
 //   segment-state `je`. So a node with no segment state would spin forever;
 //   that is the same list invariant the by-name loop relies on.
-#ifdef NOLFSRC_MODERN
 // fixed: StopSecondary and StopMotif test the wrong object when given a name
 // (RETAIL_BUGS.md). One walk for both cases: each node is visited once, the
 // next link read before the node can go back to the bank, and only a node
@@ -121,7 +120,6 @@ static void dm_StopPlayingNodes(CLTDirectMusicMgr* pMgr, CDMPlayingList& List,
 		pNode = pNext;
 	}
 }
-#endif
 LTRESULT CLTDirectMusicMgr::StopSecondary(const char* sSecondarySegment,
                                           const LTDMEnactTypes nStart)
 {
@@ -145,45 +143,7 @@ LTRESULT CLTDirectMusicMgr::StopSecondary(const char* sSecondarySegment,
 
 	EnterCriticalSection(&m_CriticalSection);
 
-#ifdef NOLFSRC_MODERN
 	dm_StopPlayingNodes(this, m_SecondaryList, sSecondarySegment, nStart);
-#else
-	if (!sSecondarySegment)
-	{
-		pNode = m_SecondaryList.m_pHead;
-
-		while (pNode)
-		{
-			CDMPlayingNode* pNext = pNode->m_pNext;
-
-			if (pNode->m_pSegState)
-			{
-				if (nStart == LTDMEnactDefault)
-					nEnact = pNode->m_pSegment->m_nStopEnact;
-
-				if (nEnact != LTDMEnactNextSegment)
-					m_SecondaryList.StopNode(this, pNode, nEnact, 0);
-
-				pNode = pNext;
-			}
-		}
-	}
-	else
-	{
-		while ((pNode = m_SecondaryList.FindByName(sSecondarySegment)) != LTNULL)
-		{
-			void*          pDMSegment;
-
-			if (nStart == LTDMEnactDefault)
-				nEnact = pNode->m_pSegment->m_nStopEnact;
-
-			pDMSegment = pNode->m_pSegment->m_pDMSegment;
-
-			if (pDMSegment && nEnact != LTDMEnactNextSegment)
-				m_SecondaryList.StopNode(this, pNode, nEnact, 0);
-		}
-	}
-#endif
 
 	LeaveCriticalSection(&m_CriticalSection);
 	return LT_OK;
@@ -213,45 +173,7 @@ LTRESULT CLTDirectMusicMgr::StopMotif(const char* sMotifName, const LTDMEnactTyp
 
 	EnterCriticalSection(&m_CriticalSection);
 
-#ifdef NOLFSRC_MODERN
 	dm_StopPlayingNodes(this, m_MotifList, sMotifName, nStart);
-#else
-	if (!sMotifName)
-	{
-		pNode = m_MotifList.m_pHead;
-
-		while (pNode)
-		{
-			CDMPlayingNode* pNext = pNode->m_pNext;
-
-			if (pNode->m_pSegState)
-			{
-				if (nStart == LTDMEnactDefault)
-					nEnact = pNode->m_pSegment->m_nStopEnact;
-
-				if (nEnact != LTDMEnactNextSegment)
-					m_MotifList.StopNode(this, pNode, nEnact, 0);
-
-				pNode = pNext;
-			}
-		}
-	}
-	else
-	{
-		while ((pNode = m_MotifList.FindByName(sMotifName)) != LTNULL)
-		{
-			void*          pDMSegment;
-
-			if (nStart == LTDMEnactDefault)
-				nEnact = pNode->m_pSegment->m_nStopEnact;
-
-			pDMSegment = pNode->m_pSegment->m_pDMSegment;
-
-			if (pDMSegment && nEnact != LTDMEnactNextSegment)
-				m_MotifList.StopNode(this, pNode, nEnact, 0);
-		}
-	}
-#endif
 
 	LeaveCriticalSection(&m_CriticalSection);
 	return LT_OK;
@@ -670,14 +592,9 @@ LTRESULT CLTDirectMusicMgr::InitLevel(const char* sWorkingDirectory, const char*
 	static char sReadError[] = "ERROR! Unable to read control file. (CLTDirectMusicMgr::InitLevel)\n";
 	static char sSeparator[] = "\\";
 
-#ifdef NOLFSRC_MODERN
 	// fixed: "sDefine3", not "sDeine3" (RETAIL_BUGS.md)
 	dm_Printf(3, "CLTDirectMusicMgr::InitLevel sWorkingDirectory=%s sControlFileName=%s sDefine1=%s sDefine2=%s sDefine3=%s\n",
 	          sWorkingDirectory, sControlFileName, sDefine1, sDefine2, sDefine3);
-#else
-	dm_Printf(3, "CLTDirectMusicMgr::InitLevel sWorkingDirectory=%s sControlFileName=%s sDefine1=%s sDefine2=%s sDeine3=%s\n",
-	          sWorkingDirectory, sControlFileName, sDefine1, sDefine2, sDefine3);
-#endif
 
 	CDMControlFileMgr controlFile;
 
@@ -742,9 +659,7 @@ LTRESULT CLTDirectMusicMgr::InitLevel(const char* sWorkingDirectory, const char*
 		if (!controlFile.Init(sFullName))
 		{
 			dm_Error(sReadError);
-#ifdef NOLFSRC_MODERN
 			delete [] sFullName;	// fixed: not leaked (RETAIL_BUGS.md)
-#endif
 			return LT_ERROR;
 		}
 

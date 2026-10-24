@@ -39,10 +39,8 @@
 #include "CharacterHitBox.h"
 
 #include <stdio.h>
-#ifdef NOLFSRC_MODERN
 // M-P5-04: facing an object
 #include "object/p5_fixes.h"
-#endif
 
 extern CGameServerShell* g_pGameServerShell;
 extern CServerButeMgr* g_pServerButeMgr;
@@ -3392,10 +3390,8 @@ void CPlayerObj::SetNetName(const char* sNetName)
 
 	strncpy(m_sNetName, sNetName, NET_NAME_LENGTH);
 	m_sNetName[NET_NAME_LENGTH-1] = '\0';
-#ifdef NOLFSRC_MODERN
 	// M-P6-01: no format characters in player names
 	FilterFormatChars(m_sNetName);
-#endif
 
 
 	// If our hclient is valid, we need to update the client data, since
@@ -4001,7 +3997,6 @@ LTBOOL CPlayerObj::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 					vTargetPos.y = vPos.y; // Don't look up/down.
 
 					VEC_SUB(vDir, vTargetPos, vPos);
-#ifdef NOLFSRC_MODERN
 					// M-P5-04: an object straight above or below the player
 					// gives no direction to face; VEC_NORM would make the
 					// player's rotation NaN
@@ -4011,13 +4006,6 @@ LTBOOL CPlayerObj::ProcessCommand(char** pTokens, int nArgs, char* pNextCommand)
 	                    g_pLTServer->AlignRotation(&rRot, &vDir, NULL);
 	                    g_pLTServer->SetObjectRotation(m_hObject, &rRot);
 					}
-#else
-					VEC_NORM(vDir);
-
-                    LTRotation rRot;
-                    g_pLTServer->AlignRotation(&rRot, &vDir, NULL);
-                    g_pLTServer->SetObjectRotation(m_hObject, &rRot);
-#endif
 				}
 			}
 		}

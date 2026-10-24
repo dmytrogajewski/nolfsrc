@@ -20,9 +20,7 @@
 #ifdef NOLFSRC_DEBUG
 #include "nolfsrc_crash.h"     // debug build only: crash backtraces (src/nolfsrc/)
 #endif
-#ifdef NOLFSRC_MODERN
 #include "nolfserv/p6_server.h"	// M-P6-11 (src/modern/nolfserv/)
-#endif
 
 // Globals...
 
@@ -71,10 +69,8 @@ BOOL CServerApp::InitInstance()
 	// server.dll, the game's server DLL
 	NOLFSRC_INSTALL_CRASH_HANDLER();
 #endif
-#ifdef NOLFSRC_MODERN
 	// M-P6-11: the server logs to modern-server.log
 	P6_InitServerLog();
-#endif
 	AfxEnableControlContainer();
 
 	// Standard initialization

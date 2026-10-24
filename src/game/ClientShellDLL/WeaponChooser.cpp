@@ -9,10 +9,8 @@
 #include "WinUtil.h"
 #include "SoundMgr.h"
 #include "LayoutMgr.h"
-#ifdef NOLFSRC_MODERN
 // M-P5-12: quick switch
 #include "cshell/p5_gameplay.h"
-#endif
 
 extern CGameClientShell* g_pGameClientShell;
 
@@ -137,10 +135,8 @@ void CWeaponChooser::NextWeapon()
 		m_hWeaponSurf[i] = m_hWeaponSurf[i+1];
 	}
 	m_nWeapons[kLastWeapon] = g_pGameClientShell->GetWeaponModel()->NextWeapon(m_nWeapons[kLastWeapon-1]);
-#ifdef NOLFSRC_MODERN
 	// M-P5-12: quick switch changes to the new selection at once
 	P5_QuickSwitchSelect(m_nWeapons[1]);
-#endif
 
 	WEAPON* pWeapon = g_pWeaponMgr->GetWeapon(m_nWeapons[kLastWeapon]);
 	if (pWeapon)
@@ -185,10 +181,8 @@ void CWeaponChooser::PrevWeapon()
 		m_hWeaponSurf[i] = m_hWeaponSurf[i-1];
 	}
 	m_nWeapons[0] = g_pGameClientShell->GetWeaponModel()->PrevWeapon(m_nWeapons[1]);
-#ifdef NOLFSRC_MODERN
 	// M-P5-12: quick switch changes to the new selection at once
 	P5_QuickSwitchSelect(m_nWeapons[1]);
-#endif
 
 	WEAPON* pWeapon = g_pWeaponMgr->GetWeapon(m_nWeapons[0]);
 	if (pWeapon)
@@ -223,12 +217,8 @@ void CWeaponChooser::PrevWeapon()
 void CWeaponChooser::Draw()
 {
     float fTime = g_pLTClient->GetTime() - m_fStartTime;
-#ifdef NOLFSRC_MODERN
 	// M-P5-12: after a quick switch the chooser goes away a little sooner
 	if (m_fStartTime > 0.0f && fTime > P5_ChooserDelay(kfDelayTime))
-#else
-	if (m_fStartTime > 0.0f && fTime > kfDelayTime)
-#endif
 	{
         g_pClientSoundMgr->PlayInterfaceSound((char*)g_pInterfaceResMgr->GetSoundSelect());
 		Close();
@@ -251,16 +241,9 @@ void CWeaponChooser::Draw()
 	}
 
 	x -= (NUM_WEAPON_ICONS * (kIconWidth + kIconSpacing)) / 2;
-#ifdef NOLFSRC_MODERN
 	// M-P3-18: the previous weapon beside the current one
 	if (m_hWeaponSurf[0] && m_nWeapons[0] != m_nWeapons[kLastWeapon])
         g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hWeaponSurf[0], LTNULL, x, y,SETRGB_T(255,0,255));
-#else
-/*
-	if (m_hWeaponSurf[0] && m_nWeapons[0] != m_nWeapons[kLastWeapon])
-        g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hWeaponSurf[0], LTNULL, x, y,SETRGB_T(255,0,255));
-*/
-#endif
 	x += (kIconWidth + kIconSpacing);
 	if (m_hWeaponSurf[1])
 	{
@@ -279,16 +262,9 @@ void CWeaponChooser::Draw()
 */
 	x += (kIconWidth + kIconSpacing);
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-18: the next weapon beside the current one
 	if (m_hWeaponSurf[2] && m_nWeapons[2] != m_nWeapons[1])
         g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hWeaponSurf[2], LTNULL, x, y,SETRGB_T(255,0,255));
-#else
-/*
-	if (m_hWeaponSurf[2] && m_nWeapons[2] != m_nWeapons[1])
-        g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hWeaponSurf[2], LTNULL, x, y,SETRGB_T(255,0,255));
-*/
-#endif
 }
 
 void CWeaponChooser::SetCommandStr(int nWeaponId)
@@ -454,17 +430,12 @@ void CAmmoChooser::Draw()
 	CLTGUIFont *pFont = g_pInterfaceResMgr->GetChooserFont();
 	pFont->Draw(m_hAmmoStr,hScreen,x,y+(kIconWidth + kIconSpacing),LTF_JUSTIFY_CENTER,kWhite);
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-18: the current ammo and the next one, the row centred
 	LTBOOL bNextAmmo = (m_hAmmoSurf[kLastAmmo] && m_nAmmo[kLastAmmo] != m_nAmmo[kCurrAmmo]);
 	if (bNextAmmo)
 		x -= (NUM_AMMO_ICONS * (kIconWidth + kIconSpacing) - kIconSpacing) / 2;
 	else
 		x -= kIconWidth / 2;
-#else
-//	x -= (NUM_AMMO_ICONS * (kIconWidth + kIconSpacing)) / 2;
-	x -= kIconWidth / 2;
-#endif
 
 	if (m_hAmmoSurf[kCurrAmmo])
 	{
@@ -480,7 +451,6 @@ void CAmmoChooser::Draw()
 		}
 	}
 	x += (kIconWidth + kIconSpacing);
-#ifdef NOLFSRC_MODERN
 	// M-P3-18: the next ammo beside the current one
 	if (bNextAmmo)
 	{
@@ -493,19 +463,4 @@ void CAmmoChooser::Draw()
 			pFont->Draw(szStr,hScreen,(x+kIconWidth/2),y + kIconWidth - 16,LTF_JUSTIFY_CENTER);
 		}
 	}
-#else
-/*
-	if (m_hAmmoSurf[kLastAmmo])
-	{
-        g_pLTClient->DrawSurfaceToSurfaceTransparent(hScreen, m_hAmmoSurf[kLastAmmo], LTNULL, x, y,SETRGB_T(255,0,255));
-		int count = pStats->GetAmmoCount(m_nAmmo[kLastAmmo]);
-		if (count > 0 && count < 1000)
-		{
-			char szStr[5] = "";
-			sprintf(szStr,"%d",count);
-			pFont->Draw(szStr,hScreen,(x+kIconWidth/2),y + kIconWidth - 16,LTF_JUSTIFY_CENTER);
-		}
-	}
-*/
-#endif
 }

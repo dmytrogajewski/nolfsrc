@@ -197,14 +197,9 @@ LTBOOL CBaseSelectionFolder::Render(HSURFACE hDestSurf)
 
 
 
-#ifdef NOLFSRC_MODERN
 	// M-P3-01: scaled with the page, at its place in the 4:3 area
 	if (m_hPhotoSurf)
 		P3_DrawScaledSolid(hDestSurf,m_hPhotoSurf,P3_MenuX(m_PhotoPos.x),P3_MenuY(m_PhotoPos.y),P3_MenuScale());
-#else
-	if (m_hPhotoSurf)
-        g_pLTClient->DrawSurfaceToSurface(hDestSurf,m_hPhotoSurf,LTNULL,m_PhotoPos.x+xo,m_PhotoPos.y+yo);
-#endif
 
 /*	for (int slot = 0; slot < m_nNumSlots; slot++)
 	{

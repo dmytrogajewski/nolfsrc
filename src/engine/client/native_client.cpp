@@ -154,6 +154,7 @@ LTRESULT NativeClient::render(HOBJECT camera,std::optional<std::span<HOBJECT con
     options.models.shadow_resolution=int(enhanced ? variable("ShadowMapRes",512) : variable("ModelShadowProjRes",128));
     options.models.shadow_casters=int(enhanced ? variable("MaxShadowCasters",16) : 8);
     options.models.shadow_lights=int(enhanced ? variable("ShadowLightsPerCaster",2) : 1);
+    options.models.shadow_distance=variable("ShadowDistance",1536);
     options.models.chrome=variable("EnvMapEnable",0)!=0; options.models.chrome_all=variable("EnvMapAll",0)!=0;
     options.models.environment_scale=variable("EnvScale",1); options.models.environment_pan=variable("EnvPanSpeed",.0005f);
     { char name[]="EnvMap"; const auto handle=GetConsoleVar(name); const char* map=handle ? GetVarValueString(handle) : nullptr; options.models.environment_map=map ? map : ""; }

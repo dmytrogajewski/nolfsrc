@@ -43,6 +43,9 @@ std::size_t extent(const Texture& texture) {
     for (const auto& section : texture.sections) bytes+=sizeof(TextureSection)+section.type.size()+section.name.size()+section.data.size();
     return bytes;
 }
+bool keyed(const Texture& texture) {
+    return !texture.mips.empty() && std::ranges::any_of(texture.mips.front().pixels(),[](std::uint32_t texel) { return (texel>>24)==0; });
+}
 template<class F> LTRESULT result(F&& function) noexcept {
     try { return function(); }
     catch (const std::bad_alloc&) { return LT_OUTOFMEMORY; }
@@ -110,7 +113,7 @@ struct ClientTextures::State {
         std::vector<std::byte> bytes(static_cast<std::size_t>(source.size)); source.read_at(0,bytes);
         auto decoded=decode_dtx(bytes);
         auto charge=std::make_shared<Charge>(budget,extent(decoded));
-        auto pixels=std::make_shared<Pixels>(); pixels->charge=std::move(charge); pixels->texture=std::move(decoded);
+        auto pixels=std::make_shared<Pixels>(); pixels->charge=std::move(charge); pixels->texture=std::move(decoded); pixels->keyed=keyed(pixels->texture);
         auto resource=std::make_shared<TextureResource>(); resource->name_=name; resource->identity_=identity(); resource->service_=service;
         resource->original_=pixels; resource->pixels_=std::move(pixels);
         if (cache.size()>=65536) {
@@ -232,6 +235,7 @@ LTRESULT ClientTextures::UnlockTexture(HTEXTURE handle) {
         pixels->texture.header=original.header; pixels->texture.sections=original.sections; pixels->bumpmap=entry->bump;
         auto& levels=pixels->texture.mips; levels.reserve(original.mips.size()); levels.push_back(entry->edit);
         for (std::size_t i=1;i<original.mips.size();++i) levels.push_back(downsample(levels.back(),original.mips[i].width(),original.mips[i].height()));
+        pixels->keyed=keyed(pixels->texture);
         entry->resource->pixels_=std::move(pixels); ++entry->resource->revision_; entry->locked=false; return LT_OK;
     });
 }

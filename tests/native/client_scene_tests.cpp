@@ -20,6 +20,8 @@
 #include <limits>
 #include <stdexcept>
 #include <set>
+#include <span>
+#include <vector>
 
 namespace {
 void require(bool value,const char* why) { if (!value) throw std::runtime_error(why); }
@@ -261,7 +263,7 @@ void sdk_objects(Files& files) {
 }
 void original_assets(const char* path) {
     auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(path); nolf::ClientScene scene(assets);
-    auto* camera=create(scene,OT_CAMERA); unsigned worlds=0,models=0,starts=0,sweeps=0,contacts=0,visibility_rejections=0,light_animations=0,portals_set=0;
+    auto* camera=create(scene,OT_CAMERA); unsigned worlds=0,models=0,starts=0,sweeps=0,contacts=0,visibility_rejections=0,light_animations=0,portals_set=0,brushes_followed=0,lifts_ridden=0;
     for (const auto& name : assets->names()) {
         if (name.ends_with(".abc")) {
             auto* object=create(scene,OT_MODEL,name.c_str()); LTAnimTracker* tracker=nullptr;
@@ -345,6 +347,38 @@ void original_assets(const char* path) {
                 }
             }
             for (auto* probe : probes) require(scene.remove(probe)==LT_OK,"visibility probe release");
+            // A brush attached to a brush, as a car's panels to its body:
+            // non-solid, so its moves take the placement shortcut, and still
+            // drawn where its parent takes it.
+            // m02s01's lift carries the player standing in it: the game pushes
+            // the player with each move the server sends.
+            if (name=="worlds/m02s01.dat") {
+                char lift_name[]="elevator"; ObjectCreateStruct lift_input; lift_input.m_ObjectType=OT_WORLDMODEL; lift_input.m_Flags=FLAG_SOLID; std::strcpy(lift_input.m_Filename,lift_name);
+                HOBJECT lift=nullptr; require(scene.create(lift_input,lift,nolf::ClientObjectLifetime::World)==LT_OK,"m02s01 lift creation");
+                ObjectCreateStruct rider_input; rider_input.m_Pos={416,117,736}; rider_input.m_Flags=FLAG_SOLID; HOBJECT rider=nullptr;
+                require(scene.create(rider_input,rider,nolf::ClientObjectLifetime::World)==LT_OK,"lift rider creation");
+                LTVector rider_dims{16,53,16}; require(scene.physics().SetObjectDims(rider,&rider_dims,0)==LT_OK,"lift rider dimensions");
+                for (int step=1;step<=20;++step) {
+                    auto up=lift->m_Pos+LTVector(0,2,0); HOBJECT pushed[]{rider};
+                    require(scene.physics().MovePushObjects(lift,up,pushed,1)==LT_OK,"lift move");
+                }
+                require(std::fabs(rider->m_Pos.y-157)<1 && std::fabs(lift->m_Pos.y-160-40)<.01f,"the client's lift did not carry the player standing in it");
+                require(scene.remove(rider)==LT_OK && scene.remove(lift)==LT_OK,"lift release"); ++lifts_ridden;
+            }
+            if (!brushes_followed) {
+                std::vector<const char*> names;
+                for (auto* record : std::span(data->m_Worlds.GetArray(),data->m_Worlds.GetSize()))
+                    if (!(record->m_pWorldBsp->m_nUnknown48&(4|8|0x10|0x20)) && record->m_pWorldBsp->m_nParts && names.size()<2) names.push_back(record->m_pWorldBsp->m_Name);
+                if (names.size()==2) {
+                    auto* body=create(scene,OT_WORLDMODEL,names[0]); auto* panel=create(scene,OT_WORLDMODEL,names[1]);
+                    LTRotation identity; identity.Init(); HATTACHMENT link=nullptr;
+                    require(scene.attach(body,panel,-1,{0,10,0},identity,link)==LT_OK && link,"brush attachment setup");
+                    const auto& drawn=static_cast<CObjWorldModel*>(panel)->m_Transform1f0; const auto x=drawn.m[0][3];
+                    require(scene.position(body,body->m_Pos+LTVector(100,0,0),true)==LT_OK && near(panel->m_Pos,body->m_Pos+LTVector(0,10,0)),"attached brush did not follow its parent");
+                    require(std::fabs(drawn.m[0][3]-x-100)<.01f,"attached non-solid brush moved without its transform");
+                    require(scene.remove(panel)==LT_OK && scene.remove(body)==LT_OK,"brush attachment release"); ++brushes_followed;
+                }
+            }
             auto* network=create(scene); require(scene.server_id(network,1)==LT_OK,"world lifetime network identity setup");
             scene.client_flags(network,CF_NOTIFYREMOVE); nolf::ClientSceneEvents events;
             events.removed=[&](HOBJECT) { require(scene.server_id(camera,2)==LT_NOTINITIALIZED,"world unload callback converted persistent camera into a missed world object"); };
@@ -354,8 +388,8 @@ void original_assets(const char* path) {
             scene.events({});
         }
     }
-    require(models && worlds && sweeps && visibility_rejections && light_animations && portals_set && scene.size()==1,"original scene corpus was empty, unfiltered, unlit or leaked objects");
-    std::cout << "Original native client scene: " << models << " ABC models, " << worlds << " worlds, " << starts << " starts, " << sweeps << " sweeps, " << contacts << " supporting polygons, " << visibility_rejections << " PVS rejections, " << light_animations << " light animations, " << portals_set << " portal updates; persistent camera retained\n";
+    require(models && worlds && sweeps && visibility_rejections && light_animations && portals_set && brushes_followed && lifts_ridden && scene.size()==1,"original scene corpus was empty, unfiltered, unlit or leaked objects");
+    std::cout << "Original native client scene: " << models << " ABC models, " << worlds << " worlds, " << starts << " starts, " << sweeps << " sweeps, " << contacts << " supporting polygons, " << visibility_rejections << " PVS rejections, " << light_animations << " light animations, " << portals_set << " portal updates, " << brushes_followed << " attached brush, " << lifts_ridden << " lift ride; persistent camera retained\n";
 }
 }
 int main(int argc,char** argv) {

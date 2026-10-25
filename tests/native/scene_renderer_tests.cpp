@@ -204,7 +204,10 @@ void checks(nolf::platform::Desktop& desktop) {
     auto& triangle=instance->m_ModelOwner->m_Pieces[0]->m_Array10[0]; std::swap(triangle.indices[0],triangle.indices[1]);
     std::array<HOBJECT,1> list{object}; clear(); auto report=renderer->render_models(camera,list); near(pixel(),0x804020);
     require(report.models==1 && report.pieces==1 && report.triangles==1,"scene model pass did not dispatch canonical mesh");
+    const auto skin=textures->load("color.dtx")->identity();
     require(scene->position(object,{1000,0,0},true)==LT_OK,"move model outside view failed"); clear(); report=renderer->render_models(camera,list); near(pixel(),0x0000ff);
+    // Turning away and back must not read and upload the skin again.
+    require(textures->load("color.dtx")->identity()==skin,"a model's skin was dropped the frame it left the view");
     require(report.culled==1 && !report.models && scene->position(object,{-1,0,0},true)==LT_OK,"evaluated model bounds did not cull outside geometry");
     nolf::ModelRenderOptions options; options.light_scale.Init(.5f,.25f,1); clear(); renderer->render_models(camera,list,options); near(pixel(),0x401020);
     ObjectCreateStruct replacement; std::strcpy(replacement.m_Filename,"triangle.abc"); std::strcpy(replacement.m_SkinName,"animated.spr");
@@ -286,8 +289,9 @@ void shadow_scene() {
     light->m_LightRadius=100; light->m_ColorR=light->m_ColorG=light->m_ColorB=255;
     auto brightness=[](int x0,int x1) { double sum=0; for (int y=20;y<108;++y) for (int x=x0;x<x1;++x) { uint32 c=0; rd_ReadPixels(x,y,1,1,RD_PIX_BGRA,&c); sum+=(c&255)+((c>>8)&255)+((c>>16)&255); } return sum; };
     using Mode=nolf::ModelRenderOptions::ShadowMapMode;
-    const auto frame=[&](Mode mode,bool caster) {
+    const auto frame=[&](Mode mode,bool caster,double time=0,float distance=1536) {
         nolf::SceneRenderOptions options; options.models.shadow_maps=mode; options.models.shadows.max=0;
+        options.models.time=time; options.models.shadow_distance=distance;
         if (caster) instance->m_Flags|=FLAG_SHADOW; else instance->m_Flags&=~FLAG_SHADOW;
         clear(); return renderer.render(camera,options);
     };
@@ -295,9 +299,16 @@ void shadow_scene() {
     // Enhanced: every solid model casts, as deep as its light is bright.
     instance->m_Flags&=~FLAG_NOLIGHT;
     frame(Mode::Off,false); const double lit_left=brightness(0,56),lit_right=brightness(72,128);
-    frame(Mode::Enhanced,false);
+    // It grows in from the first frame its caster casts, and none falls
+    // beyond the shadow distance.
+    frame(Mode::Enhanced,false,10); require(std::abs(brightness(72,128)-lit_right)<lit_right*.002,"an enhanced shadow appeared all at once");
+    frame(Mode::Enhanced,false,10.2); const double growing=brightness(72,128);
+    frame(Mode::Enhanced,false,10.4);
     require(std::abs(brightness(0,56)-lit_left)<lit_left*.02,"a shadow darkened the side away from it");
     require(brightness(72,128)<lit_right*.99,"an enhanced shadow map did not darken the wall behind its caster");
+    require(growing<lit_right*.999 && growing>brightness(72,128)+lit_right*.002,"an enhanced shadow did not grow in");
+    frame(Mode::Enhanced,false,20,.5f); frame(Mode::Enhanced,false,21,.5f);
+    require(std::abs(brightness(72,128)-lit_right)<lit_right*.002,"a caster beyond the shadow distance cast");
     // The original's projected shadows: only a model asking for one casts it.
     instance->m_Flags|=FLAG_NOLIGHT;
     frame(Mode::Projected,false); require(std::abs(brightness(72,128)-right)<right*.01,"a model without a shadow request cast a projected shadow");

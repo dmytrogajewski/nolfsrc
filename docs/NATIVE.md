@@ -350,8 +350,23 @@ The scene renderer follows the original renderer (port reference:
   world's static lights that are not `FastLightObjects`, against bind-pose
   normals (and a `NormalRef` node's frame). `Saturate`/`ModelSaturation` scale
   them; `FLAG_NOLIGHT` is fullbright.
+- A brush the game moves (`OnObjectMove` on a solid one) pushes and carries
+  the player as it goes: the client knows no blocking priorities, so a brush
+  ranks above what it pushes, and the brushes attached to it (a car's doors,
+  windows and wheel arches) are redrawn where they follow it.
+- The world cuts out texels only in chromakey brushes and in textures
+  DTXUtil colour keyed (alpha 0, the static world's grates and fences). A
+  solid texture's alpha is a gloss or envmap mask: m02s01's curtained windows
+  stay whole instead of opening onto the void behind them.
+- A model's skin stays loaded for a while after the model leaves the view, so
+  turning back does not read, decode and upload it again.
 - Dynamic lights reach lightmaps (`WorldLightmaps::update`, `LightSaturate`,
-  solid and front-only lights), vertex-lit polygons and sprites.
+  solid and front-only lights), vertex-lit polygons and sprites. On an opaque
+  vertex-lit polygon a light that only brightens is drawn per pixel, as a
+  lightmap texel would take it, in a second added pass (with the cloud
+  shadow and fog): at the vertices alone, a fire whose radius flickers across
+  one corner of a large terrain triangle lit or unlit the whole fan of
+  triangles around that corner. Without shaders the vertices take it.
 - `Saturate` doubles the lightmap and vertex colours; the global light scale
   multiplies the finished view and the camera's light add (`LightAddPoly`)
   adds to it.
@@ -387,6 +402,17 @@ programmable extension (GLSL 1.20 programs and depth targets, `rdev.h`):
   that reach it, as deep as each light is bright where the shadow falls, for
   the `MaxShadowCasters` nearest models, `ShadowMapRes` texels across.
   Characters keep a fainter blob where they meet the ground.
+- The eight nearest brushes the size of furniture, doors and crates cast
+  from their strongest light too (the lightmaps hold no brush's shadow).
+- A shadow falls only on the world its light reaches: each shadow map has a
+  second, of the drawn world and the brushes as the light sees them (glass
+  aside, and the casting brush itself), and a surface takes the shadow where
+  it is the nearest of them. Things on a table shadow the table top, not the
+  floor beneath it; nothing shadows through a wall or a door. Static world
+  geometry (a table built into the level) casts only what its lightmaps hold.
+
+Shadows (both modes) fall on the world as drawn and meet it in tests of
+sight and the sky (`WORLDINFO_MAINWORLD`), not the visibility BSP.
 
 ## Import locally owned data
 

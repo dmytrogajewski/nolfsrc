@@ -295,8 +295,15 @@ struct ClientScene::State final : ClientPhysicsWorld, std::enable_shared_from_th
         }
         void Detach(LTObject* object) override { owner.container_links.erase(object); }
         void UpdateAttachments(WMMoveState* state) override { if (state && owner.owns(state->m_pObj)) owner.follow(state->m_pObj); }
+        // Blocking priorities stay on the server (a door's is set there), so
+        // a client copy of a brush ranks no higher than the player standing
+        // on it: a brush moves what is in its way, as the server's lift
+        // does the player, or the lift is held back and the player sinks
+        // through its floor. Nothing else pushes a brush or another brush.
         int ObjectBlocks(WMMoveState* state,LTObject*,LTObject* other) override {
-            return owner.owns(other) && state->m_nUnknown0C>other->m_BlockingPriority && other->_v30();
+            const auto brush=[](const LTObject* object) { return object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER; };
+            return owner.owns(other) && other->_v30() &&
+                (state->m_nUnknown0C>other->m_BlockingPriority || (brush(state->m_pObj) && !brush(other)));
         }
         uint32 Crush(LTObject*,void*) override { return 0; } // Crushing is decided by the authoritative server.
         void CheckMaxPos(WMMoveState*,LTVector* value) override { check(value && finite(*value),LT_INVALIDPARAMS,"invalid client movement position"); }
@@ -507,7 +514,15 @@ void ClientScene::State::follow(HOBJECT object) {
         child.m_Rotation=transform.m_Rot;
         WMMoveState move; move.Init(&self.index,&self.movement,&child,child.m_BlockingPriority);
         wm_MoveObject(&move,transform.m_Pos,0x0d);
-        return self.live() && context.parent.unchanged();
+        if (!self.live() || !context.parent.unchanged()) return false;
+        // A brush is drawn and hit through its transform, which the move
+        // rebuilds only on its collision path: a non-solid one (a car's
+        // windows and panels while it drives) or a turn alone leaves it where
+        // it was. As the original client places any world model.
+        if (child_guard.unchanged() && (child.m_ObjectType==OT_WORLDMODEL || child.m_ObjectType==OT_CONTAINER)) {
+            obj_RetransformWorldModel(&child); self.index.BumpObject(&child,0); self.records.at(&child).info.dirty|=1;
+        }
+        return true;
     },&context);
     }
 }

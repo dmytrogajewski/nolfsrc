@@ -1,0 +1,14 @@
+[
+  {
+    "class": "DestructableRotatingDoor",
+    "name": "DestructableRotatingDoor4",
+    "remove": true
+  },
+  {
+    "class": "CinematicTrigger",
+    "name": "conv4",
+    "property": "Dialogue13",
+    "old": "1142",
+    "new": ""
+  }
+]

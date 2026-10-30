@@ -5250,7 +5250,7 @@ void CAIHumanStateAttackFromCover::UpdateAnimation()
 
 void CAIHumanStateAttackFromCover::UpdateFindCover()
 {
-	CAINode *pCoverNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI()->GetPosition(), GetAI()->GetTarget()->GetObject());
+	CAINode *pCoverNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI(), GetAI()->GetTarget()->GetObject());
 	if ( !pCoverNode )
 	{
 		goto Error;
@@ -5479,7 +5479,7 @@ LTBOOL CAIHumanStateAttackFromCover::HandleCommand(char** pTokens, int nArgs)
 
 		if ( GetAI()->HasTarget() )
 		{
-			CAINode* pCoverNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI()->GetPosition(), GetAI()->GetTarget()->GetObject());
+			CAINode* pCoverNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI(), GetAI()->GetTarget()->GetObject());
 
 			if ( pCoverNode )
 			{
@@ -6395,7 +6395,7 @@ void CAIHumanStateCover::Update()
 
 	if ( m_pStrategyFollowPath->IsUnset() )
 	{
-		CAINode *pCoverNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI()->GetPosition(), GetAI()->GetTarget()->GetObject());
+		CAINode *pCoverNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI(), GetAI()->GetTarget()->GetObject());
 		if ( !pCoverNode )
 		{
 			// Couldnt' find an appropriate cover node

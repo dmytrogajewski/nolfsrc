@@ -95,7 +95,7 @@ protected:
     LTBOOL               InitFonts();
     LTBOOL               InitEngineFont(CLTGUIFont *pFont, int nNameID, int nWidthID, int nHeightID, LTBOOL bBold);
     LTBOOL               InitEngineFont(CLTGUIFont *pFont, char *lpszName, int nWidth, int nHeight, LTBOOL bBold);
-    LTBOOL               SetupFont(CLTGUIFont *pFont, LTBOOL bBlend = LTTRUE, uint32 dwFlags = LTF_INCLUDE_ALL);
+    LTBOOL               SetupFont(CLTGUIFont *pFont, LTBOOL bBlend = LTTRUE, uint32 dwFlags = LTF_INCLUDE_ALL, LTBOOL reportFailure = LTTRUE);
 
 protected:
     LTBOOL               m_bEnglish;             // True if the resource file has English as the specified language

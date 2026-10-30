@@ -40,7 +40,7 @@ char* g_pCachedSoundLocal[] =
 	"Interface\\Snd\\sleeploop1.wav",
 	"Interface\\Snd\\gasp1.wav",
 	"Interface\\Snd\\gasp1.wav",
-	"Interfce\\Snd\\electro1.wav",
+	"Chars\\Snd\\Player\\electrocute.wav",
 	LTNULL, // Make sure last element is null
 };
 

@@ -23,7 +23,6 @@ uint32 CDialogueWindow::EngineMessageFn(uint32 messageID, void *pData, LTFLOAT f
 	{
 		case MID_LINKBROKEN:
 		{
-			ASSERT(FALSE);
 			if (m_pCurSpeaker && (HOBJECT)pData == m_pCurSpeaker->m_hObject)
 			{
 				m_pCurSpeaker = NULL;
@@ -33,6 +32,7 @@ uint32 CDialogueWindow::EngineMessageFn(uint32 messageID, void *pData, LTFLOAT f
 			{
 				m_pCinematic = NULL;
 			}
+			if (!m_pCurSpeaker && !m_pCinematic) m_bPlaying = FALSE;
 			break;
 		}
 	}
@@ -59,6 +59,9 @@ void CDialogueWindow::Term()
 		return;
 
 	m_bInitialized = FALSE;
+	m_bPlaying = FALSE;
+	m_pCurSpeaker = NULL;
+	m_pCinematic = NULL;
 }
 
 void CDialogueWindow::Finished(uint8 byDecision, uint32 dwDecision)

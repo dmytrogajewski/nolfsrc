@@ -157,6 +157,7 @@ HLTSOUND CClientSoundMgr::PlaySoundLocal(char *pName, SoundPriority ePriority,
 
 HLTSOUND CClientSoundMgr::PlaySound(PlaySoundInfo & psi)
 {
+	if (!psi.m_szSoundName[0]) return LTNULL;
 	HLTSOUND hSnd = LTNULL;
 	if (!GetConsoleInt("SoundEnable",1)) return LTNULL;
 

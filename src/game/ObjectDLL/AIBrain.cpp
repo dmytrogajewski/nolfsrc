@@ -163,7 +163,7 @@ void CAIBrain::GetDodgeStatus(DodgeStatus* peDodgeStatus, Direction* peDirection
 						}
 						else
 						{
-							CAINode* pNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI()->GetPosition(), GetAI()->GetTarget()->GetObject());
+							CAINode* pNode = g_pAINodeMgr->FindNearestCoverFromThreat(GetAI(), GetAI()->GetTarget()->GetObject());
 
 							if ( pNode )
 							{

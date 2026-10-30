@@ -1157,6 +1157,9 @@ void CAI::HandleTrigger(HOBJECT hSender, const char* szMessage)
 
 void CAI::UpdateUserFlagCanActivate()
 {
+	// The initial state is also selected by the constructor, before the
+	// engine has assigned an object. InitialUpdate applies the flags later.
+	if (!m_hObject) return;
 	uint32 dwFlags = g_pLTServer->GetObjectUserFlags(m_hObject);
 
 	if ( m_hstrCmdActivateOff || m_hstrCmdActivateOn )
@@ -1618,6 +1621,9 @@ void CAI::HandleDetach()
 void CAI::HandleTeleport(const LTVector& vPos)
 {
 	g_pLTServer->TeleportObject(m_hObject, &(LTVector&)vPos);
+	// A script can issue a path command immediately after TELEPORT, before
+	// the next AI update refreshes the cached pathfinding position.
+	g_pLTServer->GetObjectPos(m_hObject, &m_vPos);
 }
 
 // ----------------------------------------------------------------------- //
@@ -1638,7 +1644,7 @@ void CAI::HandleTeleport(TeleportPoint* pTeleportPoint)
     LTRotation rRot;
     g_pLTServer->GetObjectRotation(pTeleportPoint->m_hObject, &rRot);
 
-    g_pLTServer->TeleportObject(m_hObject, &vPos);
+    HandleTeleport(vPos);
     g_pLTServer->SetObjectRotation(m_hObject, &rRot);
 }
 
@@ -2509,6 +2515,7 @@ void CAI::Load(HMESSAGEREAD hRead, uint32 dwLoadFlags)
 	LOAD_BOOL(m_bSeeThrough);
 	LOAD_BOOL(m_bShootThrough);
 
+	FREE_HSTRING(m_hstrAttributeTemplate);
 	LOAD_HSTRING(m_hstrAttributeTemplate);
 
 	LOAD_HSTRING(m_hstrCmdInitial);

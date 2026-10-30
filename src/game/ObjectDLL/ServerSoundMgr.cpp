@@ -133,6 +133,8 @@ HLTSOUND CServerSoundMgr::PlaySoundDirect(PlaySoundInfo & psi)
 
 HLTSOUND CServerSoundMgr::PlaySound(PlaySoundInfo & psi)
 {
+	// Empty optional sound properties mean there is no cue to play.
+	if (!psi.m_szSoundName[0]) return LTNULL;
 	HLTSOUND hSnd = LTNULL;
 
 	// Play the sound...

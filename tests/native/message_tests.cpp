@@ -9,9 +9,27 @@
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
+#include <future>
+#include <algorithm>
 
 namespace {
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+void stringDiagnostics() {
+    auto client=std::async(std::launch::async,[] {
+        char text[]="live client UI";
+        return sb_CreateString(text);
+    }).get();
+    char text[]="server allocation";
+    auto server=sb_CreateString(text);
+    std::vector<std::string> reported;
+    sb_EnumThreadStrings([](char* value,void* context) {
+        static_cast<std::vector<std::string>*>(context)->emplace_back(value);
+    },&reported);
+    sb_FreeString(server); sb_FreeString(client);
+    require(std::find(reported.begin(),reported.end(),"server allocation")!=reported.end() &&
+        std::find(reported.begin(),reported.end(),"live client UI")==reported.end(),
+        "server string diagnostics must not report live client strings as leaks");
+}
 struct Packet {
     CAbstractIO* owner = nullptr;
     Packet(uint32 size = 4096) {
@@ -205,7 +223,7 @@ void references() {
 int main() {
     try {
         static_assert(!std::is_abstract_v<LMessageImpl>);
-        encodings(); stringsAndMessages(); codecs(); objectContext(); rotationMatrix(); malformed(); malformedCodecs(); references();
+        stringDiagnostics(); encodings(); stringsAndMessages(); codecs(); objectContext(); rotationMatrix(); malformed(); malformedCodecs(); references();
         std::puts("Native SDK messages, Windows wire encodings, and malformed-input checks passed");
         return 0;
     } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }

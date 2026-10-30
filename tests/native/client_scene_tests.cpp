@@ -225,6 +225,15 @@ void sdk_objects(Files& files) {
         LTVector actual; api.GetObjectPos(object,&actual); require(near(actual,position),"SDK object transform did not reach the native instance");
         auto invalid=rotation; invalid.m_Quat[0]=std::numeric_limits<float>::quiet_NaN(); LTVector rejected{40,50,60}; api.SetObjectPosAndRotation(object,&rejected,&invalid);
         require(near(object->m_Pos,position),"SDK combined transform partially committed invalid rotation");
+        // m03s01's camera keyframer adds quaternion component offsets. The
+        // resulting non-unit rotation must survive both server and SDK moves.
+        LTRotation keyframed(.053f,-.731f,.058f,.680f);
+        require(scene.rotation(object,keyframed)==LT_OK && object->m_Rotation==keyframed,"keyframer rotation rejected or normalized before its offsets could be reused");
+        auto next=keyframed; next.m_Quat[3]+=.002f;
+        api.SetObjectPosAndRotation(object,&rejected,&next);
+        require(near(object->m_Pos,rejected) && object->m_Rotation==next,"SDK combined transform rejected a non-unit keyframer rotation");
+        invalid.Init(0,0,0,0);
+        require(scene.rotation(object,invalid)==LT_INVALIDPARAMS && object->m_Rotation==next,"zero quaternion replaced a valid rotation");
         api.SetObjectColor(object,-1,.5f,2,1); float green=0,alpha=0; api.GetObjectColor(object,nullptr,&green,nullptr,&alpha);
         require(std::fabs(green-127/255.f)<.0001f && alpha==1,"SDK color conversion/null optional outputs");
         require(api.SetObjectUserFlags(object,0xfedcba98)==LT_OK && scene.server_id(object,3)==LT_OK && api.SetObjectUserFlags(object,7)==LT_ERROR,"SDK allowed changing server-owned user flags");
@@ -260,6 +269,51 @@ void sdk_objects(Files& files) {
         require(*lifetime && !code.expired() && api.SetObjectScale(object,&scale)==LT_NOTINITIALIZED && !api.CreateObject(&input),"retired scene SDK scope released callback storage/code or accepted new work");
     }
     require(!*lifetime && code.expired(),"retired scene retained objects/code after its final SDK callback scope");
+}
+void chateau_window(const char* path) {
+    auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(path);
+    nolf::ClientScene scene(assets);
+    require(scene.load_world("worlds/m06s02.dat")==LT_OK,"chateau fixture world load");
+    struct Window { const char* frame; const char* pane; LTVector hinge; float opening; };
+    const Window windows[]{
+        {"RotatingDoor0","Door0",{-500,184,0},-1},
+        {"RotatingDoor1","Door1",{-780,312,640},1},
+        {"RotatingDoor4","Door10",{-3860,376,-64},1},
+        {"RotatingDoor5","Door11",{-3860,376,1088},1}
+    };
+    for (const auto& window : windows) {
+        ObjectCreateStruct input; input.m_ObjectType=OT_WORLDMODEL; input.m_Flags=FLAG_SOLID;
+        std::strcpy(input.m_Filename,window.frame); HOBJECT frame=nullptr,pane=nullptr;
+        require(scene.create(input,frame)==LT_OK,"chateau window frame creation");
+        input.m_Flags|=FLAG_BOXPHYSICS; std::strcpy(input.m_Filename,window.pane);
+        require(scene.create(input,pane)==LT_OK,"chateau window glass creation");
+        const auto closed=pane->m_Dims,closed_position=pane->m_Pos;
+        ObjectCreateStruct player_input; player_input.m_Flags=FLAG_SOLID;
+        player_input.m_Pos=closed_position+LTVector(window.opening*160,0,0); HOBJECT player=nullptr;
+        require(scene.create(player_input,player)==LT_OK,"chateau player collision fixture creation");
+        LTVector crouched{24,31,24};
+        require(scene.physics().SetObjectDims(player,&crouched,0)==LT_OK,"chateau crouched dimensions");
+        auto inside=closed_position-LTVector(window.opening*64,0,0);
+        HOBJECT glass[]{pane};
+        require(scene.physics().MovePushObjects(player,inside,glass,1)==LT_OK &&
+            (player->m_Pos.x-closed_position.x)*window.opening>0,"closed chateau glass did not block entry");
+        LTRotation identity; identity.Init(); HATTACHMENT link=nullptr;
+        require(scene.attach(frame,pane,-1,pane->m_Pos-frame->m_Pos,identity,link)==LT_OK,"chateau glass attachment");
+        const float quarter=std::sqrt(.5f);
+        require(scene.rotation(frame,{0,0,window.opening*quarter,quarter})==LT_OK,"chateau window opening rotation");
+        const auto offset=frame->m_Pos-window.hinge;
+        require(scene.position(frame,window.hinge+LTVector(-window.opening*offset.y,window.opening*offset.x,offset.z),true)==LT_OK,
+            "chateau window opening pivot");
+        require(std::fabs(pane->m_Dims.x-closed.y)<.01f && std::fabs(pane->m_Dims.y-closed.x)<.01f,
+            "opened chateau window retained its closed glass collision bounds");
+        require(scene.position(player,player_input.m_Pos,true)==LT_OK &&
+            scene.physics().MovePushObjects(player,inside,glass,1)==LT_OK && near(player->m_Pos,inside),
+            "open chateau glass blocked crouched entry below the raised pane");
+        require(scene.detach(link)==LT_OK && scene.rotation(pane,identity)==LT_OK && near(pane->m_Dims,closed),
+            "direct window rotation left stale collision extents");
+        require(scene.remove(player)==LT_OK && scene.remove(pane)==LT_OK && scene.remove(frame)==LT_OK,"chateau window fixture release");
+        std::cout<<"Chateau "<<window.frame<<": closed glass blocks, raised glass clears crouched entry; collision bounds follow attached and direct rotations\n";
+    }
 }
 void original_assets(const char* path) {
     auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(path); nolf::ClientScene scene(assets);
@@ -395,7 +449,7 @@ void original_assets(const char* path) {
 int main(int argc,char** argv) {
     nolf::platform::set_log_sink(diagnostic);
     struct ResetLog { ~ResetLog() { nolf::platform::set_log_sink(nullptr); } } reset;
-    try { Files files; objects_and_cameras(); callbacks(); attachments(); models(files); node_callbacks(files); sdk_objects(files); if (argc==2) original_assets(argv[1]);
+    try { if (argc==3 && std::string_view(argv[2])=="--chateau-window") { chateau_window(argv[1]); return 0; } Files files; objects_and_cameras(); callbacks(); attachments(); models(files); node_callbacks(files); sdk_objects(files); if (argc==2) original_assets(argv[1]);
         require(!solver_errors,"production client scene movement emitted solver errors");
         std::cout << "Native client scene objects, cameras, SDK model/common interfaces, callbacks and retirement passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

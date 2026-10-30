@@ -1,5 +1,338 @@
 --- a/ATTRIBUTES/WEAPONS.txt
 +++ b/ATTRIBUTES/WEAPONS.txt
+@@ -2503,7 +2503,7 @@
+ InterfaceModelScale = 2.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\S&W\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\S&W\fire.wav"
+ DryFireSnd          = "Guns\Snd\S&W\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\S&W\reload1.wav"
+@@ -2570,7 +2570,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\AK47\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\AK47\fire.wav"
+ DryFireSnd          = "Guns\Snd\AK47\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\AK47\reload1.wav"
+@@ -2635,7 +2635,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Sterling\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Sterling\fire.wav"
+ DryFireSnd          = "Guns\Snd\Sterling\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\Sterling\reload1.wav"
+@@ -2701,7 +2701,7 @@
+ InterfaceModelScale = 1.300000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Contender\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Contender\fire.wav"
+ DryFireSnd          = "Guns\Snd\Contender\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\Contender\reload1.wav"
+@@ -2765,7 +2765,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\M79\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\M79\fire.wav"
+ DryFireSnd          = "Guns\Snd\M79\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\M79\reload.wav"
+@@ -2825,9 +2825,9 @@
+ InterfaceModelScale = 0.900000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Crossbow\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Crossbow\fire.wav"
+-DryFireSnd          = "Guns\Snd\Crossbow\dryfire.wav"
++DryFireSnd          = ""
+ ReloadSnd1          = "Guns\Snd\Crossbow\reload1.wav"
+ ReloadSnd2          = "Guns\Snd\Crossbow\reload2.wav"
+ SelectSnd           = "Guns\Snd\Crossbow\select.wav"
+@@ -2890,7 +2890,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = "Guns\Snd\Dragunov\silenced.wav"
+-AltFireSnd          = "Guns\Snd\Dragunov\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Dragunov\fire.wav"
+ DryFireSnd          = "Guns\Snd\Dragunov\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\Dragunov\reload1.wav"
+@@ -2953,8 +2953,8 @@
+ InterfaceSkin       = "Guns\Skins_HH\delisle_hh.dtx"
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+-SilencedFireSnd     = "Guns\Snd\Delisle\silenced.wav"
+-AltFireSnd          = "Guns\Snd\Delisle\altfire.wav"
++SilencedFireSnd     = ""
++AltFireSnd          = ""
+ FireSnd				= "Guns\Snd\Delisle\fire.wav"
+ DryFireSnd          = "Guns\Snd\Delisle\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\Delisle\reload1.wav"
+@@ -3017,11 +3017,11 @@
+ InterfaceSkin       = "Guns\Skins_HH\sunglasses_hh.dtx"
+ InterfaceModelScale = 3.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+-SilencedFireSnd     = "Guns\Snd\Sunglasses\silenced.wav"
+-AltFireSnd          = "Guns\Snd\Sunglasses\altfire.wav"
++SilencedFireSnd     = ""
++AltFireSnd          = ""
+ FireSnd				= "Guns\Snd\Sunglasses\fire.wav"
+-DryFireSnd          = "Guns\Snd\Sunglasses\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Sunglasses\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Sunglasses\select.wav"
+ DeselectSnd         = "Guns\Snd\Sunglasses\deselect.wav"
+ FireSndRadius       = 128
+@@ -3081,7 +3081,7 @@
+ InterfaceModelScale = 1.800000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = "Guns\Snd\luger\silenced.wav"
+-AltFireSnd          = "Guns\Snd\luger\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\luger\fire.wav"
+ DryFireSnd          = "Guns\Snd\luger\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\luger\reload1.wav"
+@@ -3147,12 +3147,12 @@
+ InterfaceModelScale = 0.800000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Speargun\altfire.wav"
++AltFireSnd          = ""
+ FireSnd				= "Guns\Snd\Speargun\fire.wav"
+-DryFireSnd          = "Guns\Snd\Speargun\dryfire.wav"
++DryFireSnd          = ""
+ ReloadSnd1          = "Guns\Snd\Speargun\reload1.wav"
+ ReloadSnd2          = "Guns\Snd\Speargun\reload2.wav"
+-ReloadSnd3          = "Guns\Snd\Speargun\reload3.wav"
++ReloadSnd3          = ""
+ SelectSnd           = "Guns\Snd\Speargun\select.wav"
+ DeselectSnd         = "Guns\Snd\Speargun\deselect.wav"
+ FireSndRadius       = 256
+@@ -3209,7 +3209,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = "Guns\snd\walthersmg\silenced.wav"
+-AltFireSnd          = "Guns\Snd\walthersmg\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\walthersmg\fire.wav"
+ DryFireSnd          = "Guns\Snd\walthersmg\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\walthersmg\reload1.wav"
+@@ -3334,10 +3334,10 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\code_dec\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	        = ""
+-DryFireSnd          = "Guns\Snd\code_dec\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\code_dec\reload.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\code_dec\select.wav"
+ DeselectSnd         = "Guns\Snd\code_dec\deselect.wav"
+ FireSndRadius       = 128
+@@ -3396,9 +3396,9 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\briefcase\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\briefcase\Fire.wav"
+-DryFireSnd          = "Guns\Snd\briefcase\DryFire.wav"
++DryFireSnd          = ""
+ ReloadSnd1          = "Guns\Snd\briefcase\Reload.wav"
+ SelectSnd           = "Guns\Snd\briefcase\Select.wav"
+ DeselectSnd         = "Guns\Snd\briefcase\Deselect.wav"
+@@ -3456,10 +3456,10 @@
+ InterfaceModelScale = 0.800000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\poodle\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\poodle\Fire.wav"
+-DryFireSnd          = "Guns\Snd\poodle\DryFire.wav"
+-ReloadSnd1          = "Guns\Snd\poodle\Reload.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\poodle\Select.wav"
+ DeselectSnd         = "Guns\Snd\poodle\Deselect.wav"
+ FireSndRadius       = 128
+@@ -3519,7 +3519,7 @@
+ InterfaceModelScale = 1.400000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\lasergun\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\lasergun\fire.wav"
+ DryFireSnd          = "Guns\Snd\lasergun\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\lasergun\reload1.wav"
+@@ -3582,12 +3582,12 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Karatechop\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Karatechop\fire.wav"
+-DryFireSnd          = "Guns\Snd\Karatechop\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Karatechop\reload1.wav"
+-SelectSnd           = "Guns\Snd\Karatechop\select.wav"
+-DeselectSnd         = "Guns\Snd\Karatechop\deselect.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
++SelectSnd           = ""
++DeselectSnd         = ""
+ FireSndRadius       = 128
+ AIFireSndRadius		= 8
+ EnvironmentMap      = 0
+@@ -3644,7 +3644,7 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Zipcord\altfire.wav"
+ FireSnd				= "Guns\Snd\Zipcord\fire.wav"
+-DryFireSnd          = "Guns\Snd\Zipcord\dryfire.wav"
++DryFireSnd          = ""
+ ReloadSnd1          = "Guns\Snd\Zipcord\reload1.wav"
+ SelectSnd           = "Guns\Snd\Zipcord\select.wav"
+ DeselectSnd         = "Guns\Snd\Zipcord\deselect.wav"
+@@ -3764,7 +3764,7 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Barrette\altfire.wav"
+ FireSnd	            = "Guns\Snd\Barrette\fire.wav"
+-DryFireSnd          = "Guns\Snd\Barrette\dryfire.wav"
++DryFireSnd          = ""
+ ReloadSnd1          = "Guns\Snd\Barrette\reload1.wav"
+ ReloadSnd2          = "Guns\Snd\Barrette\reload2.wav"
+ ReloadSnd3          = "Guns\Snd\Barrette\reload3.wav"
+@@ -3827,8 +3827,8 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Lighter\altfire.wav"
+ FireSnd	            = "Guns\Snd\Lighter\fire.wav"
+-DryFireSnd          = "Guns\Snd\Lighter\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Lighter\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ ReloadSnd2          = "Guns\Snd\Lighter\reload2.wav"
+ ReloadSnd3          = "Guns\Snd\Lighter\reload3.wav"
+ SelectSnd           = "Guns\Snd\Lighter\select.wav"
+@@ -3893,8 +3893,8 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Lipstick\altfire.wav"
+ FireSnd	            = ""
+-DryFireSnd          = "Guns\Snd\Lipstick\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Lipstick\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Lipstick\select.wav"
+ DeselectSnd         = "Guns\Snd\Lipstick\deselect.wav"
+ FireSndRadius       = 128
+@@ -3956,8 +3956,8 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Lipstick\altfire.wav"
+ FireSnd	            = ""
+-DryFireSnd          = "Guns\Snd\Lipstick\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Lipstick\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Lipstick\select.wav"
+ DeselectSnd         = "Guns\Snd\Lipstick\deselect.wav"
+ FireSndRadius       = 128
+@@ -4019,8 +4019,8 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Lipstick\altfire.wav"
+ FireSnd	            = ""
+-DryFireSnd          = "Guns\Snd\Lipstick\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Lipstick\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Lipstick\select.wav"
+ DeselectSnd         = "Guns\Snd\Lipstick\deselect.wav"
+ FireSndRadius       = 128
+@@ -4080,10 +4080,10 @@
+ InterfaceModelScale = 1.800000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Perfume\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Perfume\fire.wav"
+-DryFireSnd          = "Guns\Snd\Perfume\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Perfume\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Perfume\select.wav"
+ DeselectSnd         = "Guns\Snd\Perfume\deselect.wav"
+ FireSndRadius       = 128
+@@ -4140,10 +4140,10 @@
+ InterfaceModelScale = 1.800000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Perfume\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Perfume\fire.wav"
+-DryFireSnd          = "Guns\Snd\Perfume\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Perfume\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Perfume\select.wav"
+ DeselectSnd         = "Guns\Snd\Perfume\deselect.wav"
+ FireSndRadius       = 128
+@@ -4200,10 +4200,10 @@
+ InterfaceModelScale = 1.800000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Perfume\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Perfume\fire.wav"
+-DryFireSnd          = "Guns\Snd\Perfume\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Perfume\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Perfume\select.wav"
+ DeselectSnd         = "Guns\Snd\Perfume\deselect.wav"
+ FireSndRadius       = 128
+@@ -4260,7 +4260,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\walthersmg\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\walthersmg\fire.wav"
+ DryFireSnd          = "Guns\Snd\walthersmg\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\walthersmg\reload1.wav"
+@@ -4322,9 +4322,9 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\briefcase\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\briefcase\Fire.wav"
+-DryFireSnd          = "Guns\Snd\briefcase\DryFire.wav"
++DryFireSnd          = ""
+ ReloadSnd1          = "Guns\Snd\briefcase\Reload.wav"
+ SelectSnd           = "Guns\Snd\briefcase\Select.wav"
+ DeselectSnd         = "Guns\Snd\briefcase\Deselect.wav"
+@@ -4383,10 +4383,10 @@
+ InterfaceModelScale = 2.100000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Decay\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Decay\fire.wav"
+-DryFireSnd          = "Guns\Snd\Decay\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Decay\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Decay\select.wav"
+ DeselectSnd         = "Guns\Snd\Decay\deselect.wav"
+ FireSndRadius       = 128
 @@ -4418,7 +4418,7 @@
  [Weapon32]
  
@@ -9,3 +342,115 @@
  DescriptionId		= 4062
  Gadget				= 0
  AniType				= 0
+@@ -4445,7 +4445,7 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\walthersmg\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\walthersmg\fire.wav"
+ DryFireSnd          = "Guns\Snd\walthersmg\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\walthersmg\reload1.wav"
+@@ -4507,7 +4507,7 @@
+ InterfaceModelScale = 1.400000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Lasergun\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Lasergun\fire.wav"
+ DryFireSnd          = "Guns\Snd\Lasergun\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\Lasergun\reload1.wav"
+@@ -4570,12 +4570,12 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Karatechop\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Karatechop\fire.wav"
+-DryFireSnd          = "Guns\Snd\Karatechop\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Karatechop\reload1.wav"
+-SelectSnd           = "Guns\Snd\Karatechop\select.wav"
+-DeselectSnd         = "Guns\Snd\Karatechop\deselect.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
++SelectSnd           = ""
++DeselectSnd         = ""
+ FireSndRadius       = 128
+ AIFireSndRadius		= 8
+ EnvironmentMap      = 0
+@@ -4630,12 +4630,12 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Karatechop\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Karatechop\fire.wav"
+-DryFireSnd          = "Guns\Snd\Karatechop\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Karatechop\reload1.wav"
+-SelectSnd           = "Guns\Snd\Karatechop\select.wav"
+-DeselectSnd         = "Guns\Snd\Karatechop\deselect.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
++SelectSnd           = ""
++DeselectSnd         = ""
+ FireSndRadius       = 128
+ AIFireSndRadius		= 8
+ EnvironmentMap      = 0
+@@ -4691,12 +4691,12 @@
+ InterfaceModelScale = 1.000000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\Karatechop\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\Karatechop\fire.wav"
+-DryFireSnd          = "Guns\Snd\Karatechop\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Karatechop\reload1.wav"
+-SelectSnd           = "Guns\Snd\Karatechop\select.wav"
+-DeselectSnd         = "Guns\Snd\Karatechop\deselect.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
++SelectSnd           = ""
++DeselectSnd         = ""
+ FireSndRadius       = 128
+ AIFireSndRadius		= 8
+ EnvironmentMap      = 0
+@@ -4872,7 +4872,7 @@
+ InterfaceModelScale = 1.400000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\superlaser\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\superlaser\fire.wav"
+ DryFireSnd          = "Guns\Snd\superlaser\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\superlaser\reload1.wav"
+@@ -4933,7 +4933,7 @@
+ InterfaceModelScale = 1.400000
+ InterfaceOffset		= <0.000000, 0.000000, 0.000000>
+ SilencedFireSnd     = ""
+-AltFireSnd          = "Guns\Snd\superlaser\altfire.wav"
++AltFireSnd          = ""
+ FireSnd	            = "Guns\Snd\superlaser\fire.wav"
+ DryFireSnd          = "Guns\Snd\superlaser\dryfire.wav"
+ ReloadSnd1          = "Guns\Snd\superlaser\reload1.wav"
+@@ -5056,8 +5056,8 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Lipstick\altfire.wav"
+ FireSnd	            = ""
+-DryFireSnd          = "Guns\Snd\Lipstick\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Lipstick\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Lipstick\select.wav"
+ DeselectSnd         = "Guns\Snd\Lipstick\deselect.wav"
+ FireSndRadius       = 128
+@@ -5119,8 +5119,8 @@
+ SilencedFireSnd     = ""
+ AltFireSnd          = "Guns\Snd\Lipstick\altfire.wav"
+ FireSnd	            = ""
+-DryFireSnd          = "Guns\Snd\Lipstick\dryfire.wav"
+-ReloadSnd1          = "Guns\Snd\Lipstick\reload1.wav"
++DryFireSnd          = ""
++ReloadSnd1          = ""
+ SelectSnd           = "Guns\Snd\Lipstick\select.wav"
+ DeselectSnd         = "Guns\Snd\Lipstick\deselect.wav"
+ FireSndRadius       = 128

@@ -37,7 +37,7 @@ class CAINodeMgr
         CAINode* FindNearestNode(const LTVector& vPos);
         CAINode* FindNearestPoodleNode(const LTVector& vPos);
         CAINode* FindNearestCover(const LTVector& vPos);
-        CAINode* FindNearestCoverFromThreat(const LTVector& vPos, HOBJECT hThreat);
+        CAINode* FindNearestCoverFromThreat(class CAI* pAI, HOBJECT hThreat);
         CAINode* FindNearestPanic(const LTVector& vPos);
         CAINode* FindNearestPanicFromThreat(const LTVector& vPos, HOBJECT hThreat);
         CAINode* FindNearestVantage(const LTVector& vPos);

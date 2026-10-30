@@ -51,7 +51,10 @@ bool finite(LTVector v) {
 bool valid_rotation(const LTRotation& value) {
     double norm=0;
     for (float part : value.m_Quat) { if (!std::isfinite(part)) return false; norm+=double(part)*part; }
-    return std::abs(norm-1)<.001;
+    // Keyframers add component offsets to their keys, so valid authored
+    // rotations need not have unit length. Quaternion consumers normalize
+    // when building a matrix; preserve the raw values for later offsets.
+    return norm>0;
 }
 template<std::size_t N> std::string text(const char (&value)[N]) {
     const auto end=std::find(std::begin(value),std::end(value),'\0');
@@ -425,7 +428,7 @@ LTRESULT ClientScene::State::create(const ObjectCreateStruct& input,HOBJECT& out
             check(record.geometry->AttachWorldModel(object,create.m_Filename)!=0,LT_MISSINGWORLDMODEL,"missing native brush model");
             auto* bsp=object->m_pWorldBsp;
             if (!bsp->IsBusy()) { object->SetPos(static_cast<CWorldBsp*>(bsp)->m_ve8); object->SetDims((bsp->m_vBoxMax-bsp->m_vBoxMin)*.5f); }
-            obj_RetransformWorldModel(object);
+            obj_RetransformWorldModelDims(object);
         }
         record.camera.rectangle={0,0,int(viewport_width),int(viewport_height)};
         records.emplace(object,std::move(record));
@@ -520,7 +523,7 @@ void ClientScene::State::follow(HOBJECT object) {
         // windows and panels while it drives) or a turn alone leaves it where
         // it was. As the original client places any world model.
         if (child_guard.unchanged() && (child.m_ObjectType==OT_WORLDMODEL || child.m_ObjectType==OT_CONTAINER)) {
-            obj_RetransformWorldModel(&child); self.index.BumpObject(&child,0); self.records.at(&child).info.dirty|=1;
+            obj_RetransformWorldModelDims(&child); self.index.BumpObject(&child,0); self.records.at(&child).info.dirty|=1;
         }
         return true;
     },&context);
@@ -589,7 +592,12 @@ LTRESULT ClientScene::State::place(HOBJECT object,const LTVector* position,const
     if (!moving && !rotation) return LT_OK;
     if (moving) object->SetPos(*position);
     if (rotation) object->m_Rotation=*rotation;
-    if (object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER) obj_RetransformWorldModel(object);
+    if (object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER) {
+        // An opening window's box-physics glass must rotate its collision
+        // extents along with its drawn geometry and attachment transform.
+        if (rotation) obj_RetransformWorldModelDims(object);
+        else obj_RetransformWorldModel(object);
+    }
     index.BumpObject(object,0); records.at(object).info.dirty|=1; follow(object); return LT_OK;
 }
 LTRESULT ClientScene::State::scale(HOBJECT object,LTVector scale) {

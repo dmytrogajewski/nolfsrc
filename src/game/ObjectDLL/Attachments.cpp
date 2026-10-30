@@ -1564,6 +1564,13 @@ CAttachmentPosition::~CAttachmentPosition()
 	}
 }
 
+void CAttachmentPosition::SetAttachmentName(HSTRING name)
+{
+	if (name == m_hstrAttachmentName) return;
+	FREE_HSTRING(m_hstrAttachmentName);
+	m_hstrAttachmentName = name;
+}
+
 // ----------------------------------------------------------------------- //
 //
 //	ROUTINE:	CAttachmentPosition::ObjectMessageFn
@@ -1631,6 +1638,8 @@ void CAttachmentPosition::Load(HMESSAGEREAD hRead)
 		m_pAttachment->Load(hRead);
 	}
 
+	// Player attachments already own their default name before restore.
+	FREE_HSTRING(m_hstrAttachmentName);
 	LOAD_HSTRING(m_hstrAttachmentName);
 }
 

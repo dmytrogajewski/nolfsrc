@@ -318,8 +318,15 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     }
     struct Object { MoveObjectReference reference; float distance; bool close,translucent,no_z,sprite,brush,sky,effect; };
     std::vector<Object> objects; objects.reserve(input.size()+maximum_sky_objects); std::set<HOBJECT,std::less<HOBJECT>> seen;
+    // Only these SDK object types use this bit. Reset even hidden objects,
+    // but leave other passes' objects alone (e.g. world water while drawing
+    // an interface model with RenderObjects).
+    const auto reset_drawn=[](LTObject* object) {
+        if (object->m_ObjectType==OT_POLYGRID || object->m_ObjectType==OT_PARTICLESYSTEM) object->m_Flags&=~FLAG_WASDRAWN;
+    };
     for (auto object : input) {
         if (!self->scene->contains(object)) throw std::invalid_argument("render pass received a foreign object");
+        reset_drawn(object);
         if (sky_members.contains(object)) continue;
         const bool brush=brush_stats && (object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER);
         const bool effect=effect_stats && effect_type(object->m_ObjectType);
@@ -342,6 +349,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     }
     for (const auto& entry : sky_objects) {
         if (!entry.guard.unchanged() || !self->scene->contains(entry.object)) continue;
+        reset_drawn(entry.object);
         const auto* object=entry.object;
         if (!(object->m_Flags&FLAG_VISIBLE) || (object->m_ChangeFlags&1)) continue;
         const bool sprite=object->m_ObjectType==OT_SPRITE,brush=object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER;
@@ -481,7 +489,14 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             };
             for (const auto& light : options.lights) point(light.position,light.radius,light.color,0,true);
             const auto& statics=world->Lights();
-            for (std::size_t i=0;i<statics.size();++i) point(statics[i].position,statics[i].radius,statics[i].color,i,false);
+            for (std::size_t i=0;i<statics.size();++i) {
+                const auto& light=statics[i];
+                const auto delta=caster.center-light.position;
+                // Keep a caster intersecting the cone even when its centre
+                // is outside; the receiver shader clips the cone precisely.
+                if (light.fov_cos>-1 && delta.Dot(light.direction)+caster.radius<light.fov_cos*delta.Mag()) continue;
+                point(light.position,light.radius,light.color,i,false);
+            }
             std::sort(candidates.begin(),candidates.end(),[](const Candidate& a,const Candidate& b) { return a.score>b.score; });
             int added=0,tested=0;
             for (const auto& candidate : candidates) {
@@ -498,10 +513,15 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                     }
                     if (!clear) continue;
                 }
-                added+=self->shadow_maps.add(shape,candidate.light,shadow_receivers);
+                auto light=candidate.light;
+                if (!candidate.dynamic && !light.sun) {
+                    light.cone=statics[candidate.index].fov_cos;
+                    light.direction=statics[candidate.index].direction;
+                }
+                added+=self->shadow_maps.add(shape,light,shadow_receivers);
             }
             // Nothing lights it: a light straight above, as the blob shadow.
-            if (!added && !caster.own) {
+            if (!added && !caster.own && !enhanced) {
                 ShadowLight above; above.position=caster.center+LTVector(0,caster.above,0); above.radius=caster.above*3; above.color={96,96,96};
                 self->shadow_maps.add(shape,above,shadow_receivers);
             }
@@ -568,7 +588,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                 const auto mesh=polygrid_mesh(grid,*object,view.position(),width,height,options.light_scale,world_options && world_options->saturate);
                 if (!view.visible(mesh.center,mesh.radius)) { ++report.culled; continue; }
                 const auto triangles=self->grid_draw.draw(mesh,texture,environment,visibility,draw_style);
-                if (triangles) { ++report.systems; ++report.polygrids; report.triangles+=triangles; }
+                if (triangles) { object->m_Flags|=FLAG_WASDRAWN; ++report.systems; ++report.polygrids; report.triangles+=triangles; }
                 continue;
             }
             if (object->m_ObjectType==OT_CANVAS) {
@@ -592,6 +612,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                 }
                 const auto vertices=particle_vertices(particles,*object,view,width,height,entry.close || entry.sky ? .01f : 7.f,options.light_scale);
                 drawn=self->effect_draw.draw(vertices,true,texture,visibility,style); report.particles+=drawn;
+                if (drawn) object->m_Flags|=FLAG_WASDRAWN;
             } else {
                 const auto lines=self->scene->effects().snapshot_lines(object); const auto vertices=line_vertices(lines,*object,view,options.light_scale);
                 drawn=self->effect_draw.draw(vertices,false,{},visibility,style); report.lines+=drawn;
@@ -782,7 +803,10 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
         // Chrome (DoModelDrawing): the camera's right and up rows, through
         // the NormalRef node's frame when the model has one.
         std::shared_ptr<const TextureResource> chrome;
-        if (options.chrome && !options.environment_map.empty() && (options.chrome_all || (hook.m_ObjectFlags&FLAG_ENVIRONMENTMAP))) chrome=self->skin(options.environment_map,options.time);
+        // Reflection maps are optional. A missing map must not abort the
+        // camera pass after drawing some of a character's attachments.
+        if (options.chrome && !options.environment_map.empty() && (options.chrome_all || (hook.m_ObjectFlags&FLAG_ENVIRONMENTMAP)) &&
+            self->assets && self->assets->contains(options.environment_map)) chrome=self->skin(options.environment_map,options.time);
         std::array<LTVector,2> chrome_rows{normal.right(),normal.up()};
         const auto& chrome_model=*pose->model;
         if (chrome && chrome_model.m_Unknown13c && chrome_model.m_n0f4>=0 && std::size_t(chrome_model.m_n0f4)<pose->nodes.size()) {
@@ -838,12 +862,6 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             const auto middle=(low+high)*.5f; const float extent=std::max((high-low).Mag()*.5f,1.f);
             const float strength=enhanced ? shadow_strength(object,middle) : 1.f;
             if (strength>0) casters.push_back({object,std::move(meshes),middle,extent,reach,above,{},nullptr,strength});
-            // Enhanced lighting keeps a fainter blob where a character meets
-            // the ground, which no light's map gives it.
-            if (enhanced && projected_caster && strength>0) {
-                auto contact=options.shadows; contact.alpha*=.45f*strength;
-                model_DrawShadow(*pose->model,object->m_Pos,shadow_receivers,normal.position(),contact);
-            }
         } else if (drawn && !entry.close && !entry.sky && (hook.m_ObjectFlags&FLAG_SHADOW) && !(mapped && projected_caster))
             model_DrawShadow(*pose->model,object->m_Pos,shadow_receivers,normal.position(),options.shadows);
     }

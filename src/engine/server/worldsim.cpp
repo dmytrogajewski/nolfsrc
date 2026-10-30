@@ -1213,6 +1213,12 @@ void ws_MovePoint(CMoveState* pMove, CBounceState* pState)
 		if (!pPoly)
 			return;
 
+        // Clipping the segment to a contact can return that same endpoint
+        // again. It is already resolved; applying the bounce forty more
+        // times cannot advance the point and corrupts its contact velocity.
+        if (i && vHit.DistSqr(pState->m_vPoint) <= WS_MOVE_EPSILON * WS_MOVE_EPSILON)
+            return;
+
 		ws_HandleImpact(g_pMoveState->m_pInfo, pState, pMove->m_pObject,
 		                g_pMoveState->m_hObject, g_pMoveState->m_pWorldBsp,
 		                pPoly, 1);
@@ -1670,6 +1676,12 @@ static void ws_MoveObjectStep(CMoveState* pIn, CBounceState* pState)
 	pState->m_vVelocityAdd.Init();
 	pState->m_nHits = 0;
 
+    // A separate visibility BSP contains no collision blocks. Moving brushes
+    // can encounter it in the spatial tree; only the physics BSP is solid.
+    if ((state.m_pWorldBsp->GetWorldFlags() & 0x20) &&
+        !(state.m_pWorldBsp->GetWorldFlags() & 0x10) &&
+        !state.m_pWorldBsp->PhysicsGrid().m_nRecords) return;
+
 	if (pIn->m_pObject->m_Flags & FLAG_POINTCOLLIDE)
 	{
 		ws_MovePoint(pIn, pState);
@@ -1754,12 +1766,15 @@ static void ws_MoveObjectStep(CMoveState* pIn, CBounceState* pState)
 
 	g_fBoxRadius = g_pMoveState->m_vDims.Mag() + 0.01f;
 
+    struct RetryState {
+        LTVector start,end,momentum,velocity;
+        int contacts;
+        std::array<WSContact,WS_MAX_CONTACTS> planes;
+    };
+    std::array<RetryState,4> retries;
 	for (nTries = 0; nTries < WS_MAX_MOVE_STEPS; nTries++)
 	{
 		nHits = pState->m_nHits;
-        const auto previous_start=g_vMoveStart,previous_end=g_vMoveEnd;
-        const auto previous_momentum=pState->m_vMomentum,previous_velocity=pState->m_vVelocityAdd;
-        const auto previous_contacts=g_nContacts;
 
 		if (ws_ShiftBox())
 		{
@@ -1775,14 +1790,25 @@ static void ws_MoveObjectStep(CMoveState* pIn, CBounceState* pState)
 		if (nHits == pState->m_nHits)
 			break;
 
-        // The first pass reports intersecting faces; its retry must be
-        // allowed to resolve them. A later pass that repeats every position,
-        // constraint and response cannot advance this static sweep. Treat
-        // that closed corner as blocked instead of processing the same hits
-        // forty times and reporting an infinite-recursion error.
+        // A closed corner can repeat a response or cycle among a few rounded
+        // positions (notably the sloped stair landing in m09s03). Preserve
+        // the complete constraints as well as position/velocity so a newly
+        // discovered face still gets its retry, but an exact cycle stops.
         const auto same=[](LTVector a,LTVector b) { return a.x==b.x && a.y==b.y && a.z==b.z; };
-        if (nTries && previous_contacts==g_nContacts && same(previous_start,g_vMoveStart) && same(previous_end,g_vMoveEnd) &&
-            same(previous_momentum,pState->m_vMomentum) && same(previous_velocity,pState->m_vVelocityAdd)) {
+        RetryState current{g_vMoveStart,g_vMoveEnd,pState->m_vMomentum,pState->m_vVelocityAdd,g_nContacts,{}};
+        std::copy_n(g_Contacts,g_nContacts,current.planes.begin());
+        bool cycle=false;
+        for (int i=0;i<std::min(nTries,int(retries.size())) && !cycle;++i) {
+            const auto& old=retries[i];
+            if (old.contacts!=current.contacts || !same(old.start,current.start) || !same(old.end,current.end) ||
+                !same(old.momentum,current.momentum) || !same(old.velocity,current.velocity)) continue;
+            cycle=true;
+            for (int c=0;c<current.contacts;++c)
+                if (old.planes[c].m_pObject!=current.planes[c].m_pObject || old.planes[c].m_Plane.m_Dist!=current.planes[c].m_Plane.m_Dist ||
+                    !same(old.planes[c].m_Plane.m_Normal,current.planes[c].m_Plane.m_Normal)) { cycle=false; break; }
+        }
+        retries[nTries%retries.size()]=current;
+        if (cycle) {
             g_vMoveEnd=g_vMoveStart;
             break;
         }

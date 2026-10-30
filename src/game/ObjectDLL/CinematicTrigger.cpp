@@ -581,9 +581,10 @@ LTBOOL CinematicTrigger::UpdateDialogue()
 		m_byLastReply = m_byDecision;
 		m_byDecision  = 0;
 
-		// Clear our speaker...
-
-        g_pLTServer->BreakInterObjectLink(m_hObject, m_hCurSpeaker);
+		// The last speaker is still used by HandleOff. Both handles share
+		// one engine link, so keep its removal notification until both clear.
+        if (m_hCurSpeaker != m_hLastSpeaker)
+            g_pLTServer->BreakInterObjectLink(m_hObject, m_hCurSpeaker);
         m_hCurSpeaker = LTNULL;
 
 		if(m_byLastReply)
@@ -663,6 +664,10 @@ uint32 CinematicTrigger::EngineMessageFn(uint32 messageID, void *pData, float fD
 
 		case MID_INITIALUPDATE:
 		{
+			// Children inherit properties during precreate, when this trigger
+			// has no engine handle yet. Register their lifetime links now.
+			if (m_hCamera) g_pLTServer->CreateInterObjectLink(m_hObject, m_hCamera);
+			if (m_hKeyFramer) g_pLTServer->CreateInterObjectLink(m_hObject, m_hKeyFramer);
 			if (fData != INITIALUPDATE_SAVEGAME)
 			{
 				if (m_bStartOn)
@@ -845,7 +850,7 @@ void CinematicTrigger::CreateCamera(ObjectCreateStruct *pStruct)
 	pCamera->ReadProps();
 
 	m_hCamera = pCamera->m_hObject;
-    g_pLTServer->CreateInterObjectLink(m_hObject, m_hCamera);
+	if (m_hObject) g_pLTServer->CreateInterObjectLink(m_hObject, m_hCamera);
 }
 
 
@@ -876,7 +881,7 @@ void CinematicTrigger::CreateKeyFramer(ObjectCreateStruct *pStruct)
 	pKeyFramer->ReadProps();
 
 	m_hKeyFramer = pKeyFramer->m_hObject;
-    g_pLTServer->CreateInterObjectLink(m_hObject, m_hKeyFramer);
+	if (m_hObject) g_pLTServer->CreateInterObjectLink(m_hObject, m_hKeyFramer);
 
 	// Make the keyframer's ObjectName that of the camera...
 

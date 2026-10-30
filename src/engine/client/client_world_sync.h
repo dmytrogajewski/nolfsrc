@@ -64,7 +64,13 @@ private:
     void attach_pending(std::uint16_t child);
     // Attachments made from server records, by parent, which the parent's
     // next list replaces.
-    std::map<std::uint16_t,std::vector<HATTACHMENT>> server_attachments_;
+    struct ServerAttachment {
+        HATTACHMENT handle=nullptr;
+        uint64 generation=0;
+        PendingAttachment source;
+    };
+    std::map<std::uint16_t,std::vector<ServerAttachment>> server_attachments_;
+    void retire_attachments(std::uint16_t id,bool refresh);
     void attach(std::uint16_t id,HOBJECT parent,HOBJECT child,std::uint32_t node,LTVector offset,LTRotation turn);
     std::shared_ptr<ClientScene> scene_;
     std::shared_ptr<const Resources> resources_;

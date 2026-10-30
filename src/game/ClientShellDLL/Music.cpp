@@ -8,17 +8,12 @@
 //
 // ----------------------------------------------------------------------- //
 
-#include "Stdafx.h"
-#include "engine/portable/string.h"
-#include "iltdirectmusic.h"
-#include "iltclient.h"
-#include "ClientServerShared.h"
-#include "MsgIDs.h"
-#include "CommonUtilities.h"
 #include "Music.h"
-#include "GameClientShell.h"
+#include "engine/portable/string.h"
+#include <cstdlib>
+#include <cstring>
 
-extern CGameClientShell* g_pGameClientShell;
+extern ILTClient* g_pLTClient;
 
 // ----------------------------------------------------------------------- //
 //
@@ -31,8 +26,8 @@ CMusic::CMusic( )
 {
     m_pClientDE = LTNULL;
 	m_pMusicMgr = NULL;
-	m_bMusicEnabled = TRUE;
-	m_bLevelInitialized = FALSE;
+	m_bMusicEnabled = LTTRUE;
+	m_bLevelInitialized = LTFALSE;
 
 	m_nMenuVolume	= 0;
 	m_nTriggerVolume	= 0;
@@ -53,8 +48,8 @@ LTBOOL CMusic::Init( ILTClient *pClientDE)
 
 	m_pClientDE = pClientDE;
 
-	m_bMusicEnabled = TRUE;
-	m_bLevelInitialized = FALSE;
+	m_bMusicEnabled = LTTRUE;
+	m_bLevelInitialized = LTFALSE;
 	m_pMusicMgr = NULL;
 
 	// get the musicenable console var
@@ -64,7 +59,7 @@ LTBOOL CMusic::Init( ILTClient *pClientDE)
 		// check if music is disabled
         if (((int)g_pLTClient->GetVarValueFloat(hVar)) != 0)
 		{
-			m_bMusicEnabled = FALSE;
+			m_bMusicEnabled = LTFALSE;
 		}
 	}
 
@@ -94,6 +89,10 @@ LTBOOL CMusic::Init( ILTClient *pClientDE)
 // ----------------------------------------------------------------------- //
 void CMusic::Term( )
 {
+    m_PendingMessages.clear();
+    m_bPlaying = LTFALSE;
+    m_bLevelInitialized = LTFALSE;
+    m_State.Clear();
 	if (m_pMusicMgr != NULL)
 	{
 		m_pMusicMgr->Term();
@@ -133,10 +132,15 @@ LTBOOL CMusic::InitLevel(char* pDirectory, char* pControlFile)
 	if (m_pMusicMgr->InitLevel(m_State.szDirectory, m_State.szControlFile) == LT_OK)
 	{
 		// set level initialized flag
-		m_bLevelInitialized = TRUE;
+		m_bLevelInitialized = LTTRUE;
 
 		// set the initial volume
 		SetTriggerVolume(m_pMusicMgr->GetInitialVolume());
+
+        std::vector<std::string> pending;
+        pending.swap(m_PendingMessages);
+        for (size_t i = 0; i < pending.size(); ++i)
+            ProcessMusicMessage(&pending[i][0]);
 
 		return LTTRUE;
 	}
@@ -154,6 +158,8 @@ LTBOOL CMusic::InitLevel(char* pDirectory, char* pControlFile)
 // ----------------------------------------------------------------------- //
 void CMusic::TermLevel()
 {
+    m_PendingMessages.clear();
+    m_bPlaying = LTFALSE;
 	// make sure mgrs are initialized
 	if (!IsInitialized()) return;
 	if (m_pMusicMgr == NULL) return;
@@ -172,7 +178,7 @@ void CMusic::TermLevel()
 	}
 
 	// set level initialized flag
-	m_bLevelInitialized = FALSE;
+	m_bLevelInitialized = LTFALSE;
 }
 
 // ----------------------------------------------------------------------- //
@@ -187,7 +193,6 @@ void CMusic::ProcessMusicMessage(HMESSAGEREAD hMessage)
 {
 	// make sure mgrs are initialized
 	if (!IsInitialized()) return;
-	if (!IsLevelInitialized()) return;
 	if (m_pMusicMgr == NULL) return;
 
 	// get the data from the message
@@ -213,8 +218,12 @@ void CMusic::ProcessMusicMessage(char* pMessage)
 	// Make sure mgrs are initialized
 	if (!pMessage || !pMessage[0]) return;
 	if (!IsInitialized()) return;
-	if (!IsLevelInitialized()) return;
 	if (m_pMusicMgr == NULL) return;
+    if (!IsLevelInitialized())
+    {
+        m_PendingMessages.push_back(pMessage);
+        return;
+    }
 
     ILTCommon* pCommon = g_pLTClient->Common();
 	ConParse parse;

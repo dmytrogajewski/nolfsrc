@@ -109,6 +109,15 @@ LTBOOL CAIPathMgr::FindPath(CAI* pAI, const LTVector& vPosDest, CAIPath* pPath)
 	return FindPath(pAI, pAI->GetPosition(), pVolumeSrc, vPosDest, pVolumeDest, pPath);
 }
 
+LTBOOL CAIPathMgr::CanReach(CAI* pAI, const LTVector& vPosDest)
+{
+    // Run the same search without building waypoints or modifying the AI's
+    // live path and door links. Cover on another disconnected deck is unusable.
+    auto* source=g_pAIVolumeMgr->FindContainingVolume(pAI->GetPosition(),pAI->GetDims().y*2.f);
+    auto* destination=g_pAIVolumeMgr->FindContainingVolume(vPosDest,pAI->GetDims().y*2.f);
+    return FindPath(pAI,pAI->GetPosition(),source,vPosDest,destination,LTNULL);
+}
+
 LTBOOL CAIPathMgr::FindPath(CAI* pAI, CAINode* pNodeDest, CAIPath* pPath)
 {
 	pPath->ClearWaypoints();
@@ -149,7 +158,7 @@ LTBOOL CAIPathMgr::FindPath(CAI* pAI, const LTVector& vPosSrc, CAIVolume* pVolum
 		CAIPathWaypoint waypt;
 		waypt.SetInstruction(CAIPathWaypoint::eInstructionMoveTo);
 		waypt.SetArgumentVector1(pAI->GetLastVolumePos());
-		pPath->AddWaypoint(waypt);
+		if (pPath) pPath->AddWaypoint(waypt);
 	}
 
 	if ( pVolumeSrc == pVolumeDest )
@@ -159,7 +168,7 @@ LTBOOL CAIPathMgr::FindPath(CAI* pAI, const LTVector& vPosSrc, CAIVolume* pVolum
 		CAIPathWaypoint waypt;
 		waypt.SetInstruction(CAIPathWaypoint::eInstructionMoveTo);
 		waypt.SetArgumentVector1(vPosDest);
-		pPath->AddWaypoint(waypt);
+		if (pPath) pPath->AddWaypoint(waypt);
 
 //		g_pLTServer->CPrint("pathfinding took 0 iterations");
 
@@ -276,6 +285,7 @@ LTBOOL CAIPathMgr::FindPath(CAI* pAI, const LTVector& vPosSrc, CAIVolume* pVolum
 	{
 		// Change Previous pointers to next pointers since we need to walk the path in forward order
 
+		if (!pPath) return LTTRUE;
 		ReversePath(pVolumeDest);
 
 		// Build the path

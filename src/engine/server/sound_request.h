@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+#include <cstddef>
 
+LTRESULT sound_NormalizeFilename(char*,std::size_t);
 LTRESULT sound_NormalizeRequest(PlaySoundInfo&);
 inline std::pair<uint16,uint8> sound_QuantizeRange(float outer, float inner) {
     if (!std::isfinite(outer) || outer <= 0) return {0,0};

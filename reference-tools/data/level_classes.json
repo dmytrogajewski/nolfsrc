@@ -1,0 +1,610 @@
+{
+ "classes": {
+  "AIGroup": {
+   "instances": 177,
+   "worlds": 39
+  },
+  "AINode": {
+   "instances": 4737,
+   "worlds": 55
+  },
+  "AIRegion": {
+   "instances": 209,
+   "worlds": 36
+  },
+  "AIVolume": {
+   "instances": 8238,
+   "worlds": 73
+  },
+  "AI_BAD_Baron": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_Baroness": {
+   "instances": 2,
+   "worlds": 2
+  },
+  "AI_BAD_Cosmonaut": {
+   "instances": 29,
+   "worlds": 2
+  },
+  "AI_BAD_DockGuard": {
+   "instances": 66,
+   "worlds": 8
+  },
+  "AI_BAD_Dog": {
+   "instances": 5,
+   "worlds": 3
+  },
+  "AI_BAD_EliteAsian": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_EliteBlack": {
+   "instances": 2,
+   "worlds": 1
+  },
+  "AI_BAD_EliteWhite": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_EuroAgent": {
+   "instances": 75,
+   "worlds": 6
+  },
+  "AI_BAD_FemaleBystander": {
+   "instances": 3,
+   "worlds": 1
+  },
+  "AI_BAD_Frogman": {
+   "instances": 10,
+   "worlds": 1
+  },
+  "AI_BAD_German": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_HARMGuard": {
+   "instances": 266,
+   "worlds": 18
+  },
+  "AI_BAD_Helicopter": {
+   "instances": 10,
+   "worlds": 4
+  },
+  "AI_BAD_MaleBystander": {
+   "instances": 49,
+   "worlds": 8
+  },
+  "AI_BAD_MoroccanAgent": {
+   "instances": 114,
+   "worlds": 4
+  },
+  "AI_BAD_OvercoatAgent": {
+   "instances": 23,
+   "worlds": 4
+  },
+  "AI_BAD_Paratrooper": {
+   "instances": 26,
+   "worlds": 2
+  },
+  "AI_BAD_Partner": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_Russian": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_STASIGuard": {
+   "instances": 83,
+   "worlds": 4
+  },
+  "AI_BAD_Scotsman": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_Shark": {
+   "instances": 4,
+   "worlds": 2
+  },
+  "AI_BAD_SubGuard": {
+   "instances": 16,
+   "worlds": 2
+  },
+  "AI_BAD_UNITYAgent": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_BAD_WinterGuard": {
+   "instances": 94,
+   "worlds": 7
+  },
+  "AI_BAD_WorkGuard": {
+   "instances": 127,
+   "worlds": 16
+  },
+  "AI_GOOD_Doctor": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_GOOD_FemaleBystander": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_GOOD_Hero": {
+   "instances": 7,
+   "worlds": 5
+  },
+  "AI_GOOD_MaleBystander": {
+   "instances": 23,
+   "worlds": 9
+  },
+  "AI_GOOD_Partner": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_GOOD_Shark": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_GOOD_UNITYAgent": {
+   "instances": 10,
+   "worlds": 4
+  },
+  "AI_GOOD_UNITYCouncil": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_NEUTRAL_Baron": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_NEUTRAL_Baroness": {
+   "instances": 6,
+   "worlds": 5
+  },
+  "AI_NEUTRAL_Butler": {
+   "instances": 10,
+   "worlds": 7
+  },
+  "AI_NEUTRAL_Cosmonaut": {
+   "instances": 10,
+   "worlds": 2
+  },
+  "AI_NEUTRAL_DockGuard": {
+   "instances": 4,
+   "worlds": 1
+  },
+  "AI_NEUTRAL_Doctor": {
+   "instances": 5,
+   "worlds": 4
+  },
+  "AI_NEUTRAL_EliteAsian": {
+   "instances": 3,
+   "worlds": 3
+  },
+  "AI_NEUTRAL_EliteBlack": {
+   "instances": 3,
+   "worlds": 3
+  },
+  "AI_NEUTRAL_EliteWhite": {
+   "instances": 3,
+   "worlds": 3
+  },
+  "AI_NEUTRAL_EuroAgent": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_NEUTRAL_FemaleBystander": {
+   "instances": 59,
+   "worlds": 17
+  },
+  "AI_NEUTRAL_German": {
+   "instances": 6,
+   "worlds": 6
+  },
+  "AI_NEUTRAL_HARMGuard": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_NEUTRAL_Helicopter": {
+   "instances": 9,
+   "worlds": 3
+  },
+  "AI_NEUTRAL_Hero": {
+   "instances": 91,
+   "worlds": 50
+  },
+  "AI_NEUTRAL_Maid": {
+   "instances": 4,
+   "worlds": 4
+  },
+  "AI_NEUTRAL_MaleBystander": {
+   "instances": 131,
+   "worlds": 33
+  },
+  "AI_NEUTRAL_Mentor": {
+   "instances": 5,
+   "worlds": 3
+  },
+  "AI_NEUTRAL_MoroccanAgent": {
+   "instances": 3,
+   "worlds": 2
+  },
+  "AI_NEUTRAL_OvercoatAgent": {
+   "instances": 13,
+   "worlds": 5
+  },
+  "AI_NEUTRAL_Paratrooper": {
+   "instances": 4,
+   "worlds": 2
+  },
+  "AI_NEUTRAL_Partner": {
+   "instances": 16,
+   "worlds": 13
+  },
+  "AI_NEUTRAL_Russian": {
+   "instances": 15,
+   "worlds": 9
+  },
+  "AI_NEUTRAL_Scotsman": {
+   "instances": 12,
+   "worlds": 10
+  },
+  "AI_NEUTRAL_SubGuard": {
+   "instances": 8,
+   "worlds": 3
+  },
+  "AI_NEUTRAL_UNITYAgent": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "AI_NEUTRAL_UNITYCouncil": {
+   "instances": 27,
+   "worlds": 14
+  },
+  "AI_NEUTRAL_WinterGuard": {
+   "instances": 9,
+   "worlds": 4
+  },
+  "AI_NEUTRAL_WorkGuard": {
+   "instances": 4,
+   "worlds": 4
+  },
+  "Alarm": {
+   "instances": 56,
+   "worlds": 12
+  },
+  "AmmoBox": {
+   "instances": 328,
+   "worlds": 60
+  },
+  "BaseClass": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "Breakable": {
+   "instances": 133,
+   "worlds": 22
+  },
+  "CinematicTrigger": {
+   "instances": 786,
+   "worlds": 65
+  },
+  "ClientLightFX": {
+   "instances": 115,
+   "worlds": 11
+  },
+  "Controller": {
+   "instances": 82,
+   "worlds": 10
+  },
+  "CorrosiveFluid": {
+   "instances": 25,
+   "worlds": 7
+  },
+  "DemoSkyWorldModel": {
+   "instances": 31,
+   "worlds": 31
+  },
+  "DestructableRotatingDoor": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "DirLight": {
+   "instances": 5025,
+   "worlds": 87
+  },
+  "DisplayMeter": {
+   "instances": 4,
+   "worlds": 4
+  },
+  "DisplayTimer": {
+   "instances": 7,
+   "worlds": 7
+  },
+  "Door": {
+   "instances": 2359,
+   "worlds": 93
+  },
+  "DoorKnob": {
+   "instances": 935,
+   "worlds": 45
+  },
+  "Electricity": {
+   "instances": 10,
+   "worlds": 5
+  },
+  "EndlessFall": {
+   "instances": 33,
+   "worlds": 18
+  },
+  "EventCounter": {
+   "instances": 8,
+   "worlds": 8
+  },
+  "ExitTrigger": {
+   "instances": 68,
+   "worlds": 68
+  },
+  "Explosion": {
+   "instances": 293,
+   "worlds": 42
+  },
+  "Filter": {
+   "instances": 178,
+   "worlds": 37
+  },
+  "Fire": {
+   "instances": 158,
+   "worlds": 28
+  },
+  "Flicker1WaveLightFX": {
+   "instances": 14,
+   "worlds": 8
+  },
+  "Flicker2WaveLightFX": {
+   "instances": 34,
+   "worlds": 8
+  },
+  "Flicker3WaveLightFX": {
+   "instances": 48,
+   "worlds": 11
+  },
+  "Flicker4WaveLightFX": {
+   "instances": 14,
+   "worlds": 1
+  },
+  "FlickerLight": {
+   "instances": 25,
+   "worlds": 9
+  },
+  "FreezingWater": {
+   "instances": 4,
+   "worlds": 1
+  },
+  "GameStartPoint": {
+   "instances": 624,
+   "worlds": 102
+  },
+  "GearItem": {
+   "instances": 820,
+   "worlds": 84
+  },
+  "GlowingLight": {
+   "instances": 11,
+   "worlds": 5
+  },
+  "Group": {
+   "instances": 110,
+   "worlds": 35
+  },
+  "HingedDoor": {
+   "instances": 752,
+   "worlds": 61
+  },
+  "InsideDef": {
+   "instances": 121,
+   "worlds": 53
+  },
+  "Intelligence": {
+   "instances": 426,
+   "worlds": 74
+  },
+  "Key": {
+   "instances": 3473,
+   "worlds": 69
+  },
+  "KeyFramer": {
+   "instances": 364,
+   "worlds": 49
+  },
+  "KeyPad": {
+   "instances": 29,
+   "worlds": 15
+  },
+  "KeyframerLight": {
+   "instances": 17,
+   "worlds": 7
+  },
+  "Ladder": {
+   "instances": 275,
+   "worlds": 53
+  },
+  "LaserTrigger": {
+   "instances": 24,
+   "worlds": 2
+  },
+  "Light": {
+   "instances": 21321,
+   "worlds": 97
+  },
+  "Lightning": {
+   "instances": 21,
+   "worlds": 5
+  },
+  "Lock": {
+   "instances": 50,
+   "worlds": 26
+  },
+  "Mine": {
+   "instances": 84,
+   "worlds": 3
+  },
+  "ModItem": {
+   "instances": 218,
+   "worlds": 40
+  },
+  "ObjectLight": {
+   "instances": 285,
+   "worlds": 44
+  },
+  "ObjectRemover": {
+   "instances": 122,
+   "worlds": 38
+  },
+  "OutsideDef": {
+   "instances": 83,
+   "worlds": 81
+  },
+  "ParticleSystem": {
+   "instances": 33,
+   "worlds": 7
+  },
+  "PlayerVehicle": {
+   "instances": 78,
+   "worlds": 19
+  },
+  "PoisonGas": {
+   "instances": 8,
+   "worlds": 3
+  },
+  "PolyGrid": {
+   "instances": 4,
+   "worlds": 4
+  },
+  "Prop": {
+   "instances": 1130,
+   "worlds": 50
+  },
+  "PropType": {
+   "instances": 4424,
+   "worlds": 90
+  },
+  "RotatingDoor": {
+   "instances": 127,
+   "worlds": 34
+  },
+  "RotatingWorldModel": {
+   "instances": 59,
+   "worlds": 20
+  },
+  "SafteyNet": {
+   "instances": 108,
+   "worlds": 20
+  },
+  "ScaleSprite": {
+   "instances": 5191,
+   "worlds": 85
+  },
+  "ScreenShake": {
+   "instances": 40,
+   "worlds": 25
+  },
+  "SearchLight": {
+   "instances": 43,
+   "worlds": 11
+  },
+  "SecurityCamera": {
+   "instances": 120,
+   "worlds": 22
+  },
+  "SkyPointer": {
+   "instances": 221,
+   "worlds": 86
+  },
+  "Sound": {
+   "instances": 3,
+   "worlds": 1
+  },
+  "SoundFX": {
+   "instances": 1295,
+   "worlds": 93
+  },
+  "Spawner": {
+   "instances": 24,
+   "worlds": 4
+  },
+  "Speaker": {
+   "instances": 42,
+   "worlds": 20
+  },
+  "Sprinkles": {
+   "instances": 1,
+   "worlds": 1
+  },
+  "StaticSunLight": {
+   "instances": 79,
+   "worlds": 77
+  },
+  "Steam": {
+   "instances": 429,
+   "worlds": 49
+  },
+  "StrobeWaveLightFX": {
+   "instances": 6,
+   "worlds": 3
+  },
+  "Switch": {
+   "instances": 255,
+   "worlds": 43
+  },
+  "TeleportPoint": {
+   "instances": 485,
+   "worlds": 61
+  },
+  "Terrain": {
+   "instances": 694,
+   "worlds": 42
+  },
+  "TranslucentWorldModel": {
+   "instances": 6605,
+   "worlds": 101
+  },
+  "Trigger": {
+   "instances": 1911,
+   "worlds": 78
+  },
+  "VolumeBrush": {
+   "instances": 48,
+   "worlds": 17
+  },
+  "Water": {
+   "instances": 100,
+   "worlds": 37
+  },
+  "WeaponItem": {
+   "instances": 1031,
+   "worlds": 67
+  },
+  "Weather": {
+   "instances": 160,
+   "worlds": 17
+  },
+  "Wind": {
+   "instances": 26,
+   "worlds": 4
+  },
+  "WorldProperties": {
+   "instances": 102,
+   "worlds": 102
+  },
+  "ZipHook": {
+   "instances": 199,
+   "worlds": 30
+  }
+ },
+ "source": "/tmp/claude-1000/-home-dmitriy-sources-nolfsrc/6d7ff391-8863-4e6a-bbdb-3c4510ecd02c/scratchpad/lightsurvey/out.txt",
+ "worlds": 102
+}

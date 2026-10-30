@@ -113,6 +113,16 @@ void polygrid_scene(nolf::platform::Desktop& desktop) {
     char* heights=nullptr; uint32 width=0,height=0; PGColor* palette=nullptr; effects.grid_info(object,heights,width,height,palette); for (unsigned i=0;i<256;++i) palette[i]={255,255,255,255};
     auto sample=[] { uint32 color=0; rd_ReadPixels(64,64,1,1,RD_PIX_BGRA,&color); return color; };
     clear(); auto stats=renderer.render(camera); near(sample(),0x804020); require(stats.effects.polygrids==1 && stats.effects.triangles==2 && !stats.pending_objects,"grid scene missed native prepared mesh");
+    require(object->m_Flags&FLAG_WASDRAWN,"drawn water did not enable game wave updates");
+    renderer.render_objects(camera,{});
+    require(object->m_Flags&FLAG_WASDRAWN,"unrelated interface pass disabled water updates");
+    require(scene->position(object,{0,0,-20},true)==LT_OK,"offscreen water move failed");
+    clear(); stats=renderer.render(camera); require(!stats.effects.polygrids && !(object->m_Flags&FLAG_WASDRAWN),"culled water retained previous draw flag");
+    require(scene->position(object,{0,0,20},true)==LT_OK,"water return failed");
+    object->m_Flags&=~FLAG_VISIBLE; clear(); renderer.render(camera);
+    require(!(object->m_Flags&FLAG_WASDRAWN),"hidden water retained previous draw flag");
+    object->m_Flags|=FLAG_VISIBLE; clear(); renderer.render(camera);
+    require(object->m_Flags&FLAG_WASDRAWN,"returning water did not resume game wave updates");
     require(scene->update(.5f)==LT_OK,"grid animation advance failed"); clear(); renderer.render(camera); near(sample(),0x204080);
     require(effects.grid_texture(object,"animated.spr")==LT_OK && effects.grid_environment(object,"other.dtx")==LT_OK,"grid environment setup failed");
     clear(); renderer.render(camera); near(sample(),0x101010);
@@ -204,6 +214,11 @@ void checks(nolf::platform::Desktop& desktop) {
     auto& triangle=instance->m_ModelOwner->m_Pieces[0]->m_Array10[0]; std::swap(triangle.indices[0],triangle.indices[1]);
     std::array<HOBJECT,1> list{object}; clear(); auto report=renderer->render_models(camera,list); near(pixel(),0x804020);
     require(report.models==1 && report.pieces==1 && report.triangles==1,"scene model pass did not dispatch canonical mesh");
+    instance->m_Flags|=FLAG_ENVIRONMENTMAP;
+    nolf::ModelRenderOptions missing_reflection; missing_reflection.chrome=true; missing_reflection.environment_map="missing.dtx";
+    clear(); report=renderer->render_models(camera,list,missing_reflection); near(pixel(),0x804020);
+    require(report.models==1 && report.triangles==1,"missing optional reflection map aborted character rendering");
+    instance->m_Flags&=~FLAG_ENVIRONMENTMAP;
     const auto skin=textures->load("color.dtx")->identity();
     require(scene->position(object,{1000,0,0},true)==LT_OK,"move model outside view failed"); clear(); report=renderer->render_models(camera,list); near(pixel(),0x0000ff);
     // Turning away and back must not read and upload the skin again.
@@ -307,6 +322,20 @@ void shadow_scene() {
     require(std::abs(brightness(0,56)-lit_left)<lit_left*.02,"a shadow darkened the side away from it");
     require(brightness(72,128)<lit_right*.99,"an enhanced shadow map did not darken the wall behind its caster");
     require(growing<lit_right*.999 && growing>brightness(72,128)+lit_right*.002,"an enhanced shadow did not grow in");
+    // An unlit object cannot manufacture an overhead light or an extra blob.
+    light->m_Flags&=~FLAG_VISIBLE;
+    frame(Mode::Off,false); const auto unlit=brightness(0,128);
+    frame(Mode::Enhanced,false,12); frame(Mode::Enhanced,false,12.5);
+    require(std::abs(brightness(0,128)-unlit)<unlit*.002,"unlit caster produced an artificial shadow");
+    auto& statics=const_cast<std::vector<WorldLight>&>(scene->world_data()->Lights());
+    const auto original_statics=statics;
+    WorldLight spot; spot.position=light->m_Pos; spot.radius=100; spot.color.Init(255,255,255);
+    spot.direction.Init(0,0,-1); spot.fov_cos=.9f; statics.push_back(spot);
+    frame(Mode::Off,false); const auto outside_spot=brightness(72,128);
+    frame(Mode::Enhanced,false,13); frame(Mode::Enhanced,false,13.5);
+    require(std::abs(brightness(72,128)-outside_spot)<outside_spot*.002,"spot light cast a shadow from outside its cone");
+    statics=original_statics;
+    light->m_Flags|=FLAG_VISIBLE;
     frame(Mode::Enhanced,false,20,.5f); frame(Mode::Enhanced,false,21,.5f);
     require(std::abs(brightness(72,128)-lit_right)<lit_right*.002,"a caster beyond the shadow distance cast");
     // The original's projected shadows: only a model asking for one casts it.
@@ -393,6 +422,10 @@ void sky_scene() {
     surface.m_nFlags|=16;
     auto sample=[] { uint32 color=0; rd_ReadPixels(64,64,1,1,RD_PIX_BGRA,&color); return color; };
     clear(); auto stats=renderer.render(camera); near(sample(),0x404008); require(stats.world.sky==1 && stats.sky.objects==1 && !stats.pending_objects,"sky aperture did not render ordered sky brush");
+    require(scene->position(object,{1000,2000,-3000},true)==LT_OK,"compressed sky brush position fixture failed");
+    clear(); stats=renderer.render(camera); near(sample(),0x404008);
+    require(stats.sky.objects==1,"replicated sky brush position displaced authored sky geometry");
+    require(scene->position(object,{0,0,0},true)==LT_OK,"sky brush position reset failed");
     surface.m_nFlags&=~16u; clear(); stats=renderer.render(camera); near(sample(),0x000020); require(!stats.sky.objects,"sky rendered without visible apertures");
     // Partial geometry covers the center while an aperture in the same PVS
     // still selects the sky. Background depth must preserve that foreground.

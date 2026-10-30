@@ -57,7 +57,7 @@
 
 SETUP_SERVERSHELL()
 
-CDialogueWindow		g_DialogueWindow;
+CDialogueWindow*		g_pDialogueWindow = NULL;
 CVarTrack			g_CanShowDimsTrack;
 CVarTrack			g_ShowDimsTrack;
 CVarTrack			g_ShowTimingTrack;
@@ -635,7 +635,7 @@ void CGameServerShell::PreStartWorld(LTBOOL bSwitchingWorlds)
 	m_TeamMgr.AddTeam(TEAM_2, "TEAM2");
 
 	m_charMgr.PreStartWorld();
-	g_DialogueWindow.Term();
+	if (g_pDialogueWindow) g_pDialogueWindow->Term();
 
 	// Tell the server app.
 	ServerAppPreStartWorld( );
@@ -657,7 +657,15 @@ void CGameServerShell::PreStartWorld(LTBOOL bSwitchingWorlds)
 void CGameServerShell::PostStartWorld()
 {
 	m_charMgr.PostStartWorld(m_nLastLGFlags);
-	g_DialogueWindow.Init();
+	// Lifetime links need a registered engine owner. A standalone C++
+	// global has no HOBJECT and never receives MID_LINKBROKEN.
+	if (!g_pDialogueWindow)
+	{
+		ObjectCreateStruct create;
+		INIT_OBJECTCREATESTRUCT(create);
+		g_pLTServer->CreateObject(g_pLTServer->GetClass("CDialogueWindow"), &create);
+	}
+	if (g_pDialogueWindow) g_pDialogueWindow->Init();
 
 	static CVarTrack cvResetAIReactions;
 	if (!cvResetAIReactions.IsInitted())
@@ -1371,7 +1379,7 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 		case CSM_DIALOGUE_DONE:
 		{
 			// Tell our global dialogue manager that the dialogue is done
-			g_DialogueWindow.Finished();
+			if (g_pDialogueWindow) g_pDialogueWindow->Finished();
 		}
 		break;
 
@@ -1380,13 +1388,13 @@ void CGameServerShell::OnMessage(HCLIENT hSender, uint8 messageID, HMESSAGEREAD 
 			// Tell our global dialogue manager that the dialogue is done
             unsigned char byDecision = g_pLTServer->ReadFromMessageByte(hMessage);
             uint32 dwID = g_pLTServer->ReadFromMessageDWord(hMessage);
-			g_DialogueWindow.Finished(byDecision,dwID);
+			if (g_pDialogueWindow) g_pDialogueWindow->Finished(byDecision,dwID);
 		}
 		break;
 
 		case CSM_DIALOGUE_STOP:
 		{
-			g_DialogueWindow.StopDialogue();
+			if (g_pDialogueWindow) g_pDialogueWindow->StopDialogue();
 		}
 		break;
 

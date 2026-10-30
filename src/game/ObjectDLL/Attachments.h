@@ -213,7 +213,7 @@ class CAttachmentPosition
 		const char* GetName() { return m_szName; }
 		void SetName(const char* szName) { m_szName = szName; }
 
-		void SetAttachmentName(HSTRING hstrAttachmentName) { m_hstrAttachmentName = hstrAttachmentName; }
+		void SetAttachmentName(HSTRING hstrAttachmentName);
 		HSTRING GetAttachmentName() { return m_hstrAttachmentName; }
 		LTBOOL HasAttachmentName() { return !!m_hstrAttachmentName; }
 

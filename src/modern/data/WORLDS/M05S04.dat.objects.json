@@ -1,0 +1,23 @@
+[
+  {
+    "class": "RotatingWorldModel",
+    "name": "RotatingWorldModel2",
+    "property": "BusySound",
+    "old": "Snd\\Amb|tunnelfan2.wav",
+    "new": "Snd\\Amb\\tunnelfan2.wav"
+  },
+  {
+    "class": "RotatingWorldModel",
+    "name": "RotatingWorldModel3",
+    "property": "BusySound",
+    "old": "Snd\\Amb|tunnelfan2.wav",
+    "new": "Snd\\Amb\\tunnelfan2.wav"
+  },
+  {
+    "class": "HingedDoor",
+    "name": "Hdoor0",
+    "property": "PortalName",
+    "old": "HD0brush",
+    "new": ""
+  }
+]

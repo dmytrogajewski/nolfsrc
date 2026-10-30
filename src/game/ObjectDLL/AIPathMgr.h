@@ -33,6 +33,7 @@ class CAIPathMgr
 		// Path finding methods
 
         LTBOOL FindPath(CAI* pAI, const LTVector& vPosDest, CAIPath* pPath);
+        LTBOOL CanReach(CAI* pAI, const LTVector& vPosDest);
         LTBOOL FindPath(CAI* pAI, CAINode* pNodeDest, CAIPath* pPath);
         LTBOOL FindPath(CAI* pAI, CAIVolume* pVolumeDest, CAIPath* pPath);
 

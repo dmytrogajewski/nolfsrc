@@ -237,6 +237,9 @@ void CCharacter::Reset()
 
 CCharacter::~CCharacter()
 {
+	// Scripted removal and restore replacement need the same registry cleanup
+	// as death/deactivation. The engine handle may already be retiring here.
+	if (g_pCharacterMgr) g_pCharacterMgr->Remove(this);
 	// This should be made an automatic data member to localize this
 	// object's memory allocation...
 
@@ -2099,13 +2102,14 @@ LTBOOL CCharacter::DoDialogueWindow(CinematicTrigger* pCinematic, DWORD dwID,
 		szTag = szCharOverride;
 	}
 
-	if (g_DialogueWindow.IsPlaying())
+	if (!g_pDialogueWindow) return LTFALSE;
+	if (g_pDialogueWindow->IsPlaying())
 	{
 		TRACE("ERROR - Dialogue window was already up when we tried to play dialogue!\n");
         return LTFALSE;
 	}
 
-	if (!g_DialogueWindow.PlayDialogue(dwID,bStayOpen,szTag,szDecisions,pCinematic))
+	if (!g_pDialogueWindow->PlayDialogue(dwID,bStayOpen,szTag,szDecisions,pCinematic))
 	{
 		TRACE("ERROR - Could not play dialogue ID: %d\n",dwID);
         return LTFALSE;

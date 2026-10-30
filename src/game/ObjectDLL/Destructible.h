@@ -162,6 +162,7 @@ class CDestructible : public IAggregate
         LTFLOAT     GetMaxHitPoints()       const;
         LTFLOAT     GetMaxArmorPoints()     const;
 		HOBJECT		GetLastDamager()		const { return m_hLastDamager; }
+		void	SetLastDamager(HOBJECT hDamager);
 
         LTFLOAT     GetStealthModifier();
         LTBOOL      HasAirSupply();
@@ -179,7 +180,6 @@ class CDestructible : public IAggregate
 		void	ProcessPlayerDeath(HOBJECT hDamager);			// This has nothing to do with PlayerDeathTriggerTarget/Message!!!
         LTBOOL  CanRagDoll(LTVector & vDir, DamageType eType);
         LTBOOL  ArmorCanAbsorb(DamageType eType);
-		void	SetLastDamager(HOBJECT hDamager);
 		void	HandleLinkBroken(HOBJECT hObj);
 
 		HOBJECT		m_hObject;			// The object I'm associated with

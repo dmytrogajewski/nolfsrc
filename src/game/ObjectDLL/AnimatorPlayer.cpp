@@ -43,7 +43,11 @@ void CAnimatorPlayer::RemovePlayerTrackers() {
     if (!m_bInitialized) return;
     for (const auto tracker : {m_eAniTrackerUpper,m_eAniTrackerLower,m_eAniTrackerPitchUp,m_eAniTrackerPitchDown}) {
         if (tracker <= eAniTrackerMain || tracker >= m_cAniTrackers) continue;
-        const auto result = g_pModelLT->RemoveTracker(m_hObject,m_aAniTrackers[tracker].m_pAnimTracker);
+        auto* animation = m_aAniTrackers[tracker].m_pAnimTracker;
+        // The engine detaches game-owned trackers before destroying the
+        // game object. Reset still removes trackers while the model is live.
+        if (!animation || !animation->GetModelInstance()) continue;
+        const auto result = g_pModelLT->RemoveTracker(m_hObject,animation);
         GAME_ASSERT(result == LT_OK);
     }
     m_bInitialized = LTFALSE;

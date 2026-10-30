@@ -20,12 +20,14 @@
 
 
 class CinematicTrigger;
+class CDialogueWindow;
+extern CDialogueWindow* g_pDialogueWindow;
 class CDialogueWindow : public CPrBase
 {
 	public:
 
 		CDialogueWindow();
-		~CDialogueWindow() { Term(); }
+		~CDialogueWindow() { Term(); if (g_pDialogueWindow == this) g_pDialogueWindow = NULL; }
 
 		BOOL				Init();
 		void				Term();
@@ -51,6 +53,7 @@ class CDialogueWindow : public CPrBase
 
 inline CDialogueWindow::CDialogueWindow()
 {
+	g_pDialogueWindow = this;
 	m_bInitialized = FALSE;
 	m_pCurSpeaker = NULL;
 	m_pCinematic = NULL;
@@ -71,7 +74,5 @@ inline BOOL CDialogueWindow::SendMessage(uint32 dwID, BOOL bStayOpen, const char
 	m_bPlaying = TRUE;
 	return TRUE;
 }
-
-extern CDialogueWindow g_DialogueWindow;
 
 #endif

@@ -207,13 +207,16 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
         for (unsigned row=0;row<4;++row) for (unsigned column=0;column<4;++column) if (!std::isfinite(matrix->m[row][column])) throw std::invalid_argument("nonfinite world model matrix");
         if (matrix->m[3][0]!=0 || matrix->m[3][1]!=0 || matrix->m[3][2]!=0 || matrix->m[3][3]!=1) throw std::invalid_argument("world model transform is not affine");
     }
-    const auto local_camera=transform(object.m_Transform230,camera.position());
+    // Sky brushes are compiled in sky-box coordinates and drawn as authored.
+    // Their replicated object positions can be compressed into the playable
+    // world's bounds, which need not contain the distant sky box at all.
+    const auto local_camera=sky ? camera.position() : transform(object.m_Transform230,camera.position());
     std::vector<const CWorldPart*> polygons; WorldRenderStats stats;
     if (terrain) { if (terrain->m_Array50.GetSize()) polygons.assign(terrain->m_Array50.GetArray(),terrain->m_Array50.GetArray()+terrain->m_Array50.GetSize()); }
     else if (model->m_nParts) polygons.assign(model->m_ppParts,model->m_ppParts+model->m_nParts);
     if (polygons.empty()) return stats;
     const auto flags=polygons.front()->m_pSurface->m_nFlags;
-    Style style; style.transform=&object.m_Transform1f0; style.color={object.m_ColorR,object.m_ColorG,object.m_ColorB,object.m_ColorA};
+    Style style; style.transform=sky ? nullptr : &object.m_Transform1f0; style.color={object.m_ColorR,object.m_ColorG,object.m_ColorB,object.m_ColorA};
     style.chroma=object.m_Flags2&FLAG2_CHROMAKEY;
     style.blend=((flags&0x80000) || (object.m_Flags2&FLAG2_ADDITIVE)) ? ObjectBlend::Additive : object.m_Flags2&FLAG2_MULTIPLY ? ObjectBlend::Multiply :
         ((flags&8) || object.m_ColorA<255) ? ObjectBlend::Alpha : ObjectBlend::Opaque;
@@ -236,9 +239,9 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
         if (terrain && static_already_drawn && state.static_polygons.contains(key)) return;
         if (polygon->m_pSurface->m_nFlags&4) return;
         if (!sky && (polygon->m_pSurface->m_nFlags&16)) { ++stats.sky; return; }
-        const auto center=transform(object.m_Transform1f0,polygon->m_vCentre); double radius=0;
+        const auto center=sky ? polygon->m_vCentre : transform(object.m_Transform1f0,polygon->m_vCentre); double radius=0;
         for (const auto& vertex : polygon->render_vertices(options.fix_tjunctions)) {
-            const auto point=transform(object.m_Transform1f0,*vertex.m_pPos);
+            const auto point=sky ? *vertex.m_pPos : transform(object.m_Transform1f0,*vertex.m_pPos);
             radius=std::max(radius,std::hypot(double(point.x)-center.x,double(point.y)-center.y,double(point.z)-center.z));
         }
         const bool backface=(style.blend==ObjectBlend::Opaque || sky) && options.cull && !facing(*polygon,local_camera);
@@ -260,7 +263,12 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
             if (visited.size()>maximum) throw std::invalid_argument("world model BSP traversal exceeds its nodes");
             const auto* plane=node->m_pOwner->m_pSurface->m_pPlane;
             const unsigned side=double(plane->m_Normal.x)*local_camera.x+double(plane->m_Normal.y)*local_camera.y+double(plane->m_Normal.z)*local_camera.z-plane->m_Dist>=0;
-            pending.push_back({node->m_Children[side],false}); pending.push_back({node,true}); pending.push_back({node->m_Children[!side],false});
+            pending.push_back({node->m_Children[side],false});
+            // Sky BSPs use node, far, near order (r_DrawSkyWorldModel),
+            // rather than a translucent brush's far, node, near traversal.
+            // Their depth writes are disabled, so this order is visible.
+            if (sky) { pending.push_back({node->m_Children[!side],false}); pending.push_back({node,true}); }
+            else { pending.push_back({node,true}); pending.push_back({node->m_Children[!side],false}); }
         }
         // Disconnected render polygons have no BSP ordering. Keep them
         // visible, using their center distance as the remaining ordering.

@@ -148,6 +148,15 @@ void requests_and_records() {
     std::strcpy(info.m_szSoundName,"sound.wav");
     require(sound_NormalizeRequest(info) == LT_OK && info.m_fPitchShift == 1 && info.m_nVolume == 100 && info.m_fOuterRadius == 0,
         "SDK zero-initialized request receives ignored-field defaults");
+    std::strcpy(info.m_szSoundName,"snd\\doors\\lockedlever.wav \t");
+    require(sound_NormalizeRequest(info)==LT_OK && std::string_view(info.m_szSoundName)=="snd\\doors\\lockedlever.wav",
+        "saved sound property retained trailing whitespace in its asset path");
+    std::strcpy(info.m_szSoundName,"Snd\\Amb|tunnelfan2.wav");
+    require(sound_NormalizeRequest(info)==LT_OK && std::string_view(info.m_szSoundName)=="Snd\\Amb\\tunnelfan2.wav",
+        "saved freighter fan path retained an invalid Windows separator");
+    std::strcpy(info.m_szSoundName," \t");
+    require(sound_NormalizeRequest(info)==LT_INVALIDPARAMS,"blank sound name accepted");
+    std::strcpy(info.m_szSoundName,"sound.wav");
     const auto nan = std::numeric_limits<float>::quiet_NaN();
     info.m_fPitchShift = nan; info.m_fOuterRadius = nan; info.m_vPosition.x = nan;
     require(sound_NormalizeRequest(info) == LT_OK && info.m_fPitchShift == 1 && info.m_vPosition.x == 0,

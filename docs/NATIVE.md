@@ -444,6 +444,8 @@ out/native-debug/nolf-sound-tests --data out/native-data
 out/native-debug/nolf-game-support-tests out/native-data
 out/native-debug/nolf-client-physics-tests out/native-data
 out/native-debug/nolf-client-scene-tests out/native-data
+# Chateau attic windows: attached glass collision rotates clear of the opening.
+out/native-debug/nolf-client-scene-tests out/native-data --chateau-window
 out/native-debug/nolf-client-message-tests out/native-data
 out/native-debug/nolf-texture-tests --data out/native-data --report out/native-textures.tsv
 out/native-debug/nolf-client-texture-tests out/native-data
@@ -486,6 +488,20 @@ out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so o
 # Original level simulation and local player entry fixtures:
 out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --frames 600
 out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --player-frames 120
+# Airplane cinematics: speaker removal and engine-owned dialogue window links.
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --cinematics
+# Dock cover paths immediately after teleport and AI/pickup restore ownership:
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --docks
+# Ship flooding: rising water, hatch-style pause/resume and final height.
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --flooding
+# Office cameras, manual saving and repeated restores without object-ID leaks:
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --save-restore
+# Repeated restore of an existing save, without modifying the file:
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --restore-save worlds/m07s01 /path/to/reload.sav
+# Game music triggers during preload and across world transitions:
+ctest --test-dir out/native-debug --output-on-failure -R '^native-game-music$'
+# Ambush combat backing and melody, isolated versus simultaneous track groups:
+out/native-debug/nolf-client-music-tests out/native-data-resources --ambush-groups
 # Native client physics over the original world corpus (no game shell):
 out/native-debug/nolf-client-physics-tests out/native-data
 # Optional focused collision regression:
@@ -595,15 +611,17 @@ sections, comments and `#ifdef` conditionals) and schedules segments exactly as
 the shipped manager's pending queue did: transitions, ordered segment lists,
 loop counts and follow-on intensities. The platform `MusicPerformance` adapter
 synthesizes segments, styles and DLS banks with GothicKit dmusic, rendered on
-demand into an independent output. The patches in `ext/patches/dmusic/` add
+demand into an independent output. The patches in `ext/patches/dmusic/` keep
+authored track groups separate, so a melody track cannot replace the combat
+backing (including Ambush's Seven/SaxLeads arrangement). They also add
 segment-end scheduling and playback progress, make the tempo independent of
 the render size, honour authored repeats, and fix its crashes, unbounded curve
 expansion and reference leaks on the original data; each level loads into its
 own resource scope because music directories reuse bank names for different
 instruments. All 6 original control files, 88 intensities and 775 transitions
 load, and every intensity renders finite, unclipped audio, leak-free under
-both sanitizers. Original levels only send intensity changes: secondary
-segments and motifs report `LT_ERROR`. Pause is a no-op, as shipped. How
+both sanitizers. Motifs play over the primary music; secondary segments report
+`LT_ERROR`. Pause is a no-op, as shipped. How
 closely dmusic's synthesis matches DirectMusic has not been compared against
 a reference recording.
 

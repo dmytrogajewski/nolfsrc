@@ -122,8 +122,9 @@ LTRESULT SPhysicsLT::SetObjectDims(HOBJECT hObj, LTVector* pNewDims, uint32 flag
     vDims = *pNewDims;
     for (uint32 axis = 0; axis < 3; ++axis) if (!std::isfinite(vDims[axis]) || vDims[axis] < 0) return LT_INVALIDPARAMS;
 
-	if (pNewDims->x > g_DebugMaxDims || pNewDims->y > g_DebugMaxDims ||
-	    pNewDims->z > g_DebugMaxDims)
+	// Polygrid bounds describe a visual water surface, not a collision body.
+	if (hObj->m_ObjectType != OT_POLYGRID &&
+	    (pNewDims->x > g_DebugMaxDims || pNewDims->y > g_DebugMaxDims || pNewDims->z > g_DebugMaxDims))
 	{
 		dsi_ServerError("ILTPhysics::SetObjectDims: dims larger than 'DebugMaxDims'");
 		dsi_ServerError("Object class: %s, dims (%.2f, %.2f, %.2f)",

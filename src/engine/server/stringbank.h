@@ -14,4 +14,5 @@ std::optional<std::string> sb_GetStringSnapshot(HSTRING);
 HSTRING sb_CreateString(char*);
 HSTRING sb_CreateStringRaw(char*);
 void sb_EnumStrings(void (*)(char*, void*), void*);
+void sb_EnumThreadStrings(void (*)(char*, void*), void*);
 extern char g_EmptyString[];

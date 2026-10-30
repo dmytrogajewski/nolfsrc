@@ -23,6 +23,7 @@
 #include "CVarTrack.h"
 #include "ServerButeMgr.h"
 #include "GameServerShell.h"
+#include <cmath>
 
 extern CServerButeMgr* g_pServerButeMgr;
 extern CGameServerShell* g_pGameServerShell;
@@ -358,7 +359,13 @@ void SecurityCamera::PostPropRead(ObjectCreateStruct *pStruct)
 
 	// YawSpeed was actually specified as time, so make it a rate
 
+#ifdef NOLFSRC_MODERN
+	// A zero scan time denotes a stationary camera (m07s01's Camera8).
+	// Dividing its zero yaw range by zero poisons the rotation and all saves.
+	m_fYawSpeed = m_fYawSpeed > 0.0f ? (m_fYaw2 - m_fYaw1)/m_fYawSpeed : 0.0f;
+#else
 	m_fYawSpeed = (m_fYaw2 - m_fYaw1)/m_fYawSpeed;
+#endif
 
 	// Adjust yaws based on initial pitch yaw roll
 
@@ -1184,6 +1191,10 @@ void SecurityCamera::Load(HMESSAGEREAD hRead)
     m_fYaw1             = g_pLTServer->ReadFromMessageFloat(hRead);
     m_fYaw2             = g_pLTServer->ReadFromMessageFloat(hRead);
     m_fYawSpeed         = g_pLTServer->ReadFromMessageFloat(hRead);
+#ifdef NOLFSRC_MODERN
+    // Startup autosaves from older builds can already contain 0/0 here.
+    if (!std::isfinite(m_fYawSpeed)) m_fYawSpeed = 0.0f;
+#endif
     m_fYaw1PauseTime    = g_pLTServer->ReadFromMessageFloat(hRead);
     m_fYaw2PauseTime    = g_pLTServer->ReadFromMessageFloat(hRead);
     m_fYawPauseTimer    = g_pLTServer->ReadFromMessageFloat(hRead);

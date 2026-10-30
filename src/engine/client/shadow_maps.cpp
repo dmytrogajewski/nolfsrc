@@ -78,6 +78,7 @@ uniform vec4 u_tile;
 uniform vec4 u_light;
 uniform vec4 u_caster;
 uniform vec3 u_color;
+uniform vec4 u_spot;
 uniform float u_strength;
 uniform float u_texel;
 uniform float u_soft;
@@ -92,6 +93,7 @@ void main() {
     if (u_light.w>0.0) {
         vec3 d=u_light.xyz-v_world; float distance=length(d); l=d/max(distance,0.001);
         atten=clamp(1.0-distance/u_light.w,0.0,1.0);
+        if (u_spot.w>-1.0 && dot(-l,u_spot.xyz)<u_spot.w) discard;
         along=dot(v_world-u_caster.xyz,-l);
     } else { l=-u_light.xyz; along=dot(v_world-u_caster.xyz,u_light.xyz); }
     float facing=dot(n,l);
@@ -109,7 +111,7 @@ void main() {
     seen/=9.0;
     if (seen<=0.001) discard;
     float k=seen*u_strength*(1.0-smoothstep(0.7,1.0,max(along,0.0)/max(u_caster.w,1.0)))*smoothstep(0.0,0.2,facing);
-    if (u_weighted>0.5) k*=0.45+0.55*clamp(atten*dot(u_color,vec3(0.299,0.587,0.114))*3.0,0.0,1.0);
+    if (u_weighted>0.5) k*=clamp(atten*atten*dot(u_color,vec3(0.299,0.587,0.114))*3.0,0.0,1.0);
     if (u_fog>0.5) k*=clamp((gl_Fog.end-gl_FogFragCoord)*gl_Fog.scale,0.0,1.0);
     gl_FragColor=vec4(vec3(1.0-clamp((1.0-lit)*k,0.0,0.9)),1.0);
 }
@@ -297,6 +299,7 @@ std::size_t ShadowMaps::draw(std::span<const ShadowReceiver> receivers,LTVector 
         else rd_Uniform4f(s.receiver.uniform("u_light"),light.position.x,light.position.y,light.position.z,std::max(light.radius,1.f));
         rd_Uniform4f(s.receiver.uniform("u_caster"),shadow.center.x,shadow.center.y,shadow.center.z,shadow.radius+shadow.reach);
         rd_Uniform3f(s.receiver.uniform("u_color"),light.color.x/255,light.color.y/255,light.color.z/255);
+        rd_Uniform4f(s.receiver.uniform("u_spot"),light.direction.x,light.direction.y,light.direction.z,light.cone);
         for (const auto& receiver : receivers) {
             found.clear(); seen.clear();
             collect(receiver,shadow.center,end,shadow.radius*spread,found,seen);

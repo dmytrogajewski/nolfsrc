@@ -13,6 +13,7 @@ struct ShadowLight {
     LTVector position{0,0,0},direction{0,-1,0};
     float radius=0;
     LTVector color{0,0,0};           // 0..255
+    float cone=-1;                 // spot direction cosine; -1 is a point light
 };
 // A model's drawn triangles, world space.
 struct ShadowCasterMesh { const ModelPieceData* data=nullptr; std::span<const LTVector> positions; };

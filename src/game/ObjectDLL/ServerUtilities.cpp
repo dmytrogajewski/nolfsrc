@@ -298,6 +298,7 @@ void SendTriggerMsgToObject(LPBASECLASS pSender, HOBJECT hObj, LTBOOL, const cha
 
 LTBOOL IsPlayer( HOBJECT hObject )
 {
+	if (!hObject) return LTFALSE;
     const HCLASS hPlayerTest = g_pLTServer->GetClass( "CPlayerObj" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hPlayerTest ));
@@ -315,6 +316,7 @@ LTBOOL IsPlayer( HOBJECT hObject )
 
 LTBOOL IsAI( HOBJECT hObject )
 {
+	if (!hObject) return LTFALSE;
     const HCLASS hTest  = g_pLTServer->GetClass( "CAI" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hTest ));
@@ -332,6 +334,7 @@ LTBOOL IsAI( HOBJECT hObject )
 
 LTBOOL IsDog ( HOBJECT hObject )
 {
+	if (!hObject) return LTFALSE;
     const HCLASS hTest  = g_pLTServer->GetClass( "AI_Dog" );
     HCLASS hClass = g_pLTServer->GetObjectClass(hObject);
     return g_pLTServer->IsKindOf(hClass, hTest);
@@ -366,6 +369,7 @@ LTBOOL IsVehicle( HOBJECT hObject )
 
 LTBOOL IsCharacter( HOBJECT hObject )
 {
+	if (!hObject) return LTFALSE;
     const HCLASS hCharacterTest = g_pLTServer->GetClass( "CCharacter" );
     HCLASS hClass = g_pLTServer->GetObjectClass( hObject );
     return ( g_pLTServer->IsKindOf( hClass, hCharacterTest ));

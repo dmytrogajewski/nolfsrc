@@ -56,15 +56,38 @@ ClientWorldSync::~ClientWorldSync() { while (!tracked_.empty()) stop(tracked_.be
 void ClientWorldSync::reset() { while (!tracked_.empty()) stop(tracked_.begin()->first); objects_.clear(); pending_attachments_.clear(); server_attachments_.clear(); server_time_=0; }
 void ClientWorldSync::attach_pending(std::uint16_t child) {
     std::vector<PendingAttachment> ready;
-    std::erase_if(pending_attachments_,[&](const PendingAttachment& pending) { if (pending.child!=child) return false; ready.push_back(pending); return true; });
+    std::erase_if(pending_attachments_,[&](const PendingAttachment& pending) { if (pending.child!=child && pending.parent!=child) return false; ready.push_back(pending); return true; });
     for (const auto& pending : ready) {
         const auto parent=object(pending.parent),target=object(pending.child);
         if (parent && target) attach(pending.parent,parent,target,pending.node,pending.offset,pending.turn);
+        else pending_attachments_.push_back(pending);
     }
 }
 void ClientWorldSync::attach(std::uint16_t id,HOBJECT parent,HOBJECT child,std::uint32_t node,LTVector offset,LTRotation turn) {
     HATTACHMENT handle=nullptr;
-    if (scene_->attach(parent,child,int(node),offset,turn,handle)==LT_OK && handle) server_attachments_[id].push_back(handle);
+    const auto child_id=scene_->server_id(child);
+    if (!child_id) return;
+    const PendingAttachment source{id,*child_id,node,offset,turn};
+    if (scene_->attach(parent,child,int(node),offset,turn,handle)==LT_OK && handle)
+        server_attachments_[id].push_back({handle,reinterpret_cast<Attachment*>(handle)->m_Generation,source});
+}
+void ClientWorldSync::retire_attachments(std::uint16_t id,bool refresh) {
+    // A full object refresh retires its native handle, including incoming
+    // attachments. Keep their server IDs until the replacement is ready.
+    // Removal packets also hide objects outside the client's visible set.
+    // Their incoming links still belong to the parent's last server list.
+    std::erase_if(pending_attachments_,[&](const PendingAttachment& pending) {
+        return !refresh && pending.parent==id;
+    });
+    for (auto it=server_attachments_.begin();it!=server_attachments_.end();) {
+        std::erase_if(it->second,[&](const ServerAttachment& attachment) {
+            if (attachment.source.parent!=id && attachment.source.child!=id) return false;
+            if ((refresh || attachment.source.parent!=id) && pending_attachments_.size()<4096)
+                pending_attachments_.push_back(attachment.source);
+            return true;
+        });
+        if (it->second.empty()) it=server_attachments_.erase(it); else ++it;
+    }
 }
 HOBJECT ClientWorldSync::object(std::uint16_t id) const {
     const auto found=objects_.find(id); return found!=objects_.end() && scene_->contains(found->second.object) ? found->second.object : nullptr;
@@ -121,8 +144,11 @@ void ClientWorldSync::object_record(LMessageImpl& message,std::uint16_t flags,co
     const auto id=input.u16();
     HOBJECT object=nullptr; std::vector<std::byte> effect; std::uint8_t type=0; std::vector<TrackerRecord> trackers;
     if (flags&new_object) {
-        if (const auto old=objects_.find(id); old!=objects_.end()) { if (scene_->contains(old->second.object)) scene_->remove(old->second.object); objects_.erase(old); }
-        server_attachments_.erase(id);
+        retire_attachments(id,true);
+        if (const auto old=objects_.find(id); old!=objects_.end()) {
+            const auto previous=old->second.object; objects_.erase(old);
+            if (scene_->contains(previous)) scene_->remove(previous);
+        }
         const auto info=input.u8(); type=std::uint8_t(info&0x1f);
         if (info&0x40) effect=input.bytes(info&0x80 ? input.u16() : input.u8());
         ObjectCreateStruct create; create.m_ObjectType=type;
@@ -147,7 +173,7 @@ void ClientWorldSync::object_record(LMessageImpl& message,std::uint16_t flags,co
                 platform::log("client","cannot create server object "+std::to_string(id)+" type "+std::to_string(type)+" \""+create.m_Filename+"\": error "+std::to_string(created));
                 object=nullptr;
             }
-            else { scene_->server_id(object,id); objects_[id]={object,type}; attach_pending(id); }
+            else { scene_->server_id(object,id); objects_[id]={object,type}; }
         }
         flags|=force_position;
     } else {
@@ -197,7 +223,9 @@ void ClientWorldSync::object_record(LMessageImpl& message,std::uint16_t flags,co
         if (const auto previous=server_attachments_.find(id); previous!=server_attachments_.end()) {
             std::vector<HATTACHMENT> current;
             if (object) for (auto* attachment=object->m_pAttachments; attachment; attachment=attachment->m_pNext)
-                if (std::ranges::find(previous->second,reinterpret_cast<HATTACHMENT>(attachment))!=previous->second.end()) current.push_back(reinterpret_cast<HATTACHMENT>(attachment));
+                    if (std::ranges::any_of(previous->second,[&](const ServerAttachment& owned) {
+                        return owned.handle==reinterpret_cast<HATTACHMENT>(attachment) && owned.generation==attachment->m_Generation;
+                    })) current.push_back(reinterpret_cast<HATTACHMENT>(attachment));
             for (auto* attachment : current) scene_->detach(attachment);
             server_attachments_.erase(previous);
         }
@@ -227,6 +255,7 @@ void ClientWorldSync::object_record(LMessageImpl& message,std::uint16_t flags,co
         // The effect may have added the trackers these records describe.
         if (type==OT_MODEL && !trackers.empty()) apply(object,trackers,true);
     }
+    if (object && (flags&new_object)) attach_pending(id);
 }
 // One record per server tracker, applied in list order to the trackers the
 // client game added for them (the main tracker first). Unguaranteed updates
@@ -339,7 +368,7 @@ void ClientWorldSync::removed(LMessageImpl& message) {
     while (input.remaining()) {
         const auto id=input.u16();
         stop(id);
-        std::erase_if(pending_attachments_,[&](const PendingAttachment& pending) { return pending.parent==id; }); server_attachments_.erase(id);
+        retire_attachments(id,false);
         if (const auto found=objects_.find(id); found!=objects_.end()) {
             const auto object=found->second.object; objects_.erase(found);
             if (scene_->contains(object)) scene_->remove(object);

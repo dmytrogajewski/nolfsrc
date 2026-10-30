@@ -1,4 +1,7 @@
 #include "engine/client/client_music.h"
+#include <dmusic.h>
+#include <array>
+#include <cstdio>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -97,6 +100,89 @@ struct Fixture {
     }
 };
 using Names=std::vector<std::string>;
+using Bytes=std::vector<std::byte>;
+std::uint32_t dword(const Bytes& bytes,std::size_t at) {
+    require(at+4<=bytes.size(),"truncated music fixture chunk");
+    std::uint32_t value=0; for (unsigned i=0;i<4;++i) value|=std::to_integer<std::uint32_t>(bytes[at+i])<<(i*8); return value;
+}
+void dword(Bytes& bytes,std::size_t at,std::uint32_t value) {
+    for (unsigned i=0;i<4;++i) bytes.at(at+i)=std::byte(value>>(i*8));
+}
+bool fourcc(const Bytes& bytes,std::size_t at,std::string_view id) {
+    return at+id.size()<=bytes.size() && std::equal(id.begin(),id.end(),bytes.begin()+at,[](char a,std::byte b) { return std::byte(a)==b; });
+}
+// Retain one authored track group and remap it to the primary group. This
+// lets us compare the complete battle arrangement against its separate parts.
+Bytes only_group(const Bytes& bytes,std::uint32_t mask) {
+    Bytes result;
+    for (std::size_t at=0;at+8<=bytes.size();) {
+        const auto length=dword(bytes,at+4); require(at+8+length<=bytes.size(),"invalid music fixture chunk");
+        Bytes chunk(bytes.begin()+at,bytes.begin()+at+8+length); at+=8+length+(length%2);
+        if (fourcc(chunk,0,"RIFF") || fourcc(chunk,0,"LIST")) {
+            if (fourcc(chunk,8,"DMTK")) {
+                bool keep=false;
+                for (std::size_t pos=12;pos+8<=chunk.size();) {
+                    if (fourcc(chunk,pos,"trkh")) { keep=(dword(chunk,pos+8+20)&mask)!=0; dword(chunk,pos+8+20,1); }
+                    pos+=8+dword(chunk,pos+4)+(dword(chunk,pos+4)%2);
+                }
+                if (!keep) continue;
+            } else {
+                const auto children=only_group(Bytes(chunk.begin()+12,chunk.end()),mask);
+                chunk.resize(12); chunk.insert(chunk.end(),children.begin(),children.end()); dword(chunk,4,std::uint32_t(chunk.size()-8));
+            }
+        }
+        result.insert(result.end(),chunk.begin(),chunk.end()); if (chunk.size()%2) result.push_back(std::byte{});
+    }
+    return result;
+}
+void ambush_groups(const char* data) {
+    nolf::Assets assets; assets.mount_game(data);
+    // A constant RNG selects the same authored pattern/variation in each
+    // render, independent of how many other groups also need random choices.
+    struct Reset { ~Reset() { Dm_setRandomNumberGenerator(nullptr,nullptr); Dm_setLoggerDefault(DmLogLevel_ERROR); } } reset;
+    Dm_setRandomNumberGenerator([](void*) -> std::uint32_t { return 0; },nullptr);
+    for (const char* name : {"sevenC1to24.sgt","sevenCinD.sgt","amb2seven.sgt"}) {
+        const auto original=assets.read(std::string("music/ambush/")+name);
+        const auto render=[&](std::uint32_t mask) {
+            struct Render { std::vector<float> samples; std::map<unsigned,unsigned> notes; } result;
+            Dm_setLogger(DmLogLevel_TRACE,[](void* context,DmLogLevel,const char* message) {
+                unsigned time,channel;
+                if (std::sscanf(message,"DmPerformance(Message): time=%u type=note-on channel=%u",&time,&channel)==2) ++static_cast<Render*>(context)->notes[channel];
+            },&result);
+            const auto segment=mask ? only_group(original,mask) : original;
+            auto music=nolf::platform::make_dmusic_performance([&](std::string_view file) -> std::optional<Bytes> {
+                if (file==name) return segment;
+                const auto path=std::string("music/ambush/")+std::string(file); if (!assets.contains(path)) return {}; return assets.read(path);
+            },rate);
+            const auto loaded=music->load(name); require(bool(loaded),"battle arrangement failed to load"); music->volume(.3f); music->play(loaded,MusicTiming::Instant);
+            auto& samples=result.samples; samples.resize(rate*2*24);
+            for (std::size_t at=0;at<samples.size();at+=960) music->render(std::span(samples).subspan(at,960));
+            Dm_setLoggerDefault(DmLogLevel_ERROR);
+            music->play(nullptr,MusicTiming::Instant); std::array<float,960> stopped{}; music->render(stopped);
+            require(!music->playback().playing,"grouped battle arrangement did not stop");
+            music->volume(.3f); music->play(loaded,MusicTiming::Instant);
+            // The transition and sax lead deliberately begin with several silent measures.
+            std::vector<float> restarted(rate*2*12); music->render(restarted);
+            require(std::any_of(restarted.begin(),restarted.end(),[](float value) { return std::abs(value)>1e-4f; }),"track groups did not restart after stopping");
+            return result;
+        };
+        const auto backing=render(1),melody=render(2),together=render(0);
+        const auto energy=[](const auto& render) {
+            double total=0;
+            for (const auto value : render.samples) {
+                require(std::isfinite(value) && std::abs(value)<1,"battle arrangement rendered non-finite or clipped samples"); total+=double(value)*value;
+            }
+            return total;
+        };
+        require(energy(backing)>1e-3 && energy(melody)>1e-3 && energy(together)>1e-3,"battle arrangement fixture lacks an audible group");
+        auto expected=backing.notes; for (auto [channel,count] : melody.notes) expected[channel]+=count;
+        for (auto [channel,count] : expected) {
+            const auto found=together.notes.find(channel); const unsigned actual=found==together.notes.end() ? 0 : found->second;
+            std::cout<<"Battle groups "<<name<<" channel "<<channel<<": expected "<<count<<", actual "<<actual<<'\n';
+            require(actual+2>=count && actual<=count+2,"battle backing or melody was replaced by another track group");
+        }
+    }
+}
 constexpr char control[]=
     "NUMINTENSITIES 5\nINITIALINTENSITY 1\nINITIALVOLUME -300\n"
     "INTENSITY 1 -1 0 A.sgt, B.sgt\nINTENSITY 2 0 3 C.sgt D.sgt\nINTENSITY 3 2 0 E.sgt\nINTENSITY 4 -1 0 Missing.sgt A.sgt\nINTENSITY 5 -1 0 Missing.sgt\n"
@@ -211,6 +297,15 @@ void corpus(const char* data,const char* demo) {
         // A segment whose band names a missing collection, or whose style
         // track has an entry without a style, still plays what it has.
         if (!failed.empty()) throw std::runtime_error("original music segment failed to load: "+directory+failed.front());
+        if (directory=="music/badedum/") {
+            require(music.Play()==LT_OK && music.ChangeIntensity(5,LTDMEnactNextMeasure)==LT_OK,"club startup failed");
+            device->samples.clear();
+            for (int step=0;step<60;++step) { device->queued=0; music.pump(); }
+            double energy=0; for (auto sample : device->samples) energy+=double(sample)*sample;
+            require(energy>1e-3,"club startup intensity was silent");
+            require(music.TermLevel()==LT_OK && music.InitLevel(directory.c_str(),control.c_str(),nullptr,nullptr,nullptr)==LT_OK,
+                "club startup fixture did not reset");
+        }
         for (int intensity=1;intensity<=music.GetNumIntensities();++intensity) {
             device->samples.clear(); require(music.ChangeIntensity(intensity,LTDMEnactImmediatly)==LT_OK || music.GetCurIntensity()==intensity,"original intensity change failed");
             for (int step=0;step<60;++step) { device->queued=0; music.pump(); }
@@ -243,4 +338,4 @@ void corpus(const char* data,const char* demo) {
     std::cout<<"Native music demo: "<<device->samples.size()/2/48000<<" s written to "<<demo<<'\n';
 }
 }
-int main(int argc,char** argv) { try { checks(); if (argc>1) corpus(argv[1],argc>2 ? argv[2] : nullptr); std::cout<<"Native music scheduling, transitions, loops, volume and lifetime passed\n"; return 0; } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; } }
+int main(int argc,char** argv) { try { checks(); if (argc>2 && std::string_view(argv[2])=="--ambush-groups") ambush_groups(argv[1]); else if (argc>1) { ambush_groups(argv[1]); corpus(argv[1],argc>2 ? argv[2] : nullptr); } std::cout<<"Native music scheduling, transitions, loops, volume and lifetime passed\n"; return 0; } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; } }

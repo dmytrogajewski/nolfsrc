@@ -161,7 +161,12 @@ LTRESULT apply(CServerMgr& manager,const SavedGame& document,uint32 parameter,ui
             require(creates[i].m_ObjectType == document.objects[i].type,LT_CANTRESTOREOBJECT,"restore precreate changed object type");
             const auto result = sm_CreateObjectInWorld(&manager,game,definitions[i],&creates[i],0xffff,PRECREATE_SAVEGAME,&object);
             require(operation.server.unchanged(),LT_ERROR,"world changed during restored object creation");
-            require(result == LT_OK && object, result != LT_OK ? result : LT_CANTRESTOREOBJECT,"restored object creation failed");
+            if (result != LT_OK || !object) {
+                const auto& saved = document.objects[i];
+                throw Failure(result != LT_OK ? result : LT_CANTRESTOREOBJECT,
+                    ("restored object creation failed: " + saved.class_name + " " + saved.name +
+                     " (" + saved.filename + ", result " + std::to_string(result) + ")").c_str());
+            }
         } catch (...) {
             if (operation.server.unchanged() && !object) manager.m_ClassMgr.destroy(game);
             throw;
@@ -179,7 +184,11 @@ LTRESULT apply(CServerMgr& manager,const SavedGame& document,uint32 parameter,ui
         sm_SetObjectState(&manager,object,saved.change_flags & 0x38);
         require(operation.server.unchanged(),LT_ERROR,"world changed while restoring activation");
         if (!actor.guard.same_data()) continue;
-        object->m_ChangeFlags = (saved.change_flags & ~uint32(0x80)) | (object->m_ChangeFlags & 1u) | 4u;
+        // Save callbacks can queue actors for deletion (KeyFramer removes its
+        // authored keys). The flag alone would leave an actor that every
+        // normal visit skips, but no deletion queue ever retires.
+        object->m_ChangeFlags = (saved.change_flags & ~uint32(0x81)) | (object->m_ChangeFlags & 1u) | 4u;
+        if (saved.change_flags & 1u) sm_RemoveObject(&manager,object);
         if (!actor.guard.unchanged()) continue;
         wm_MoveObject(&movement,vector(saved.position),0x0a);
         require(operation.server.unchanged(),LT_ERROR,"world changed while restoring position");

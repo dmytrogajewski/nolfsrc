@@ -1,0 +1,46 @@
+--- a/ATTRIBUTES/SERVERSND.txt
++++ b/ATTRIBUTES/SERVERSND.txt
+@@ -241,7 +241,6 @@
+ Backup6				= "Chars\Snd\Germanic\Backup7.wav"
+ Backup7				= "Chars\Snd\Germanic\Backup8.wav"
+ Backup8				= "Chars\Snd\Germanic\Backup9.wav"
+-Backup9				= "Chars\Snd\Germanic\Backup10.wav"
+ 
+ CombAggr0			= "Chars\Snd\Germanic\CombAggr1.wav"
+ CombAggr1			= "Chars\Snd\Germanic\CombAggr2.wav"
+@@ -560,8 +559,6 @@
+ 
+ //DeathQuiet0		= "x"
+ //Backup0			= "x"
+-CombAggr0			= "x"
+-CombDef0			= "x"
+ //Disturb0			= "x"
+ //GaveUp0			= "x"
+ //Search0			= "x"
+@@ -578,26 +575,6 @@
+ Pain1				= "Chars\Snd\Frogman\Pain2.wav"
+ Pain2				= "Chars\Snd\Frogman\Pain3.wav"
+ 
+-DeathQuiet0			= "x"
+-Backup0				= "x"
+-CombAggr0			= "x"
+-CombDef0			= "x"
+-Disturb0			= "x"
+-GaveUp0				= "x"
+-Search0				= "x"
+-SeeBody0			= "x"
+-Tail0				= "x"
+ 
+ [Animal] ///////////////////////////////////////////////////////////////////////
+ 
+-Death0				= "x"
+-Pain0				= "x"
+-DeathQuiet0			= "x"
+-Backup0				= "x"
+-CombAggr0			= "x"
+-CombDef0			= "x"
+-Disturb0			= "x"
+-GaveUp0				= "x"
+-Search0				= "x"
+-SeeBody0			= "x"
+-Tail0				= "x"

@@ -213,6 +213,7 @@ void obj_UnlinkTrackersB(LTObject*);
 void obj_SetStandingOn(LTObject*, LTObject*, WorldPoly*);
 void obj_DetachAll(CUnknown390*, LTObject*);
 void obj_RetransformWorldModel(LTObject*);
+void obj_RetransformWorldModelDims(LTObject*);
 void obj_UpdateTransform(LTObject*);
 void wm_BuildTransforms(LTVector*, LTVector*, LTRotation*, LTMatrix*, LTMatrix*);
 void wm_Transform(LTObject*, LTMatrix*, int);

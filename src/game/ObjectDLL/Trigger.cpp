@@ -596,7 +596,7 @@ void Trigger::DoTrigger(HOBJECT hObj, LTBOOL bTouchNotify)
 
 	// Make sure we don't create links with ourself...
 
-	if (m_hObject != m_hTouchObject)
+	if (m_hTouchObject && m_hObject != m_hTouchObject)
 	{
         g_pLTServer->CreateInterObjectLink(m_hObject, m_hTouchObject);
 	}

@@ -19,10 +19,14 @@ struct Files {
     const std::filesystem::path root=std::filesystem::temp_directory_path()/("nolf-gl-world-"+std::to_string(nolf::platform::monotonic_nanoseconds()));
     std::shared_ptr<nolf::Assets> assets=std::make_shared<nolf::Assets>();
     Files() {
-        std::vector<std::byte> bytes(168); nolf::wire::store(bytes.data()+4,int32(-5));
-        for (unsigned offset : {8u,10u,12u}) nolf::wire::store(bytes.data()+offset,uint16(1));
-        bytes[26]=std::byte{3}; nolf::wire::store(bytes.data()+164,uint32(0x00804020));
-        nolf::platform::atomic_write(root/"color.dtx",bytes); assets->mount_directory(root);
+        const auto write=[&](const char* name,uint32 flags,uint32 texel) {
+            std::vector<std::byte> bytes(168); nolf::wire::store(bytes.data()+4,int32(-5));
+            for (unsigned offset : {8u,10u,12u}) nolf::wire::store(bytes.data()+offset,uint16(1));
+            nolf::wire::store(bytes.data()+16,flags); bytes[26]=std::byte{3}; nolf::wire::store(bytes.data()+164,texel);
+            nolf::platform::atomic_write(root/name,bytes);
+        };
+        write("color.dtx",0,0x00804020); write("gloss.dtx",0x80,0x20804020); write("keyed.dtx",0x80,0x00804020);
+        assets->mount_directory(root);
     }
     ~Files() { std::error_code error; std::filesystem::remove_all(root,error); }
 };
@@ -68,10 +72,23 @@ void checks(nolf::platform::Desktop& desktop) {
         brush.m_pWorldBsp=nullptr;
     }
     nolf::WorldRenderOptions options; options.lightmaps=false; clear(); stats=draw(options); require(!stats.lightmapped,"disabled lightmaps still submitted"); near(pixel(),0x404008);
+    // A light short of every vertex lights a vertex-lit polygon where it
+    // reaches, and only there.
+    options.lights={nolf::DynamicWorldLight::from({0,0,9},5,{255,255,255},false,true)};
+    clear(); draw(options); const auto lit=pixel(); uint32 corner=0; rd_ReadPixels(8,8,1,1,RD_PIX_BGRA,&corner);
+    for (unsigned shift : {8u,16u}) require((lit>>shift&255)>(0x404008u>>shift&255)+8,"a light between a polygon's vertices left it unlit");
+    near(corner,0x404008); options.lights.clear();
     options.lightmaps=true; options.saturate=true; clear(); draw(options); near(pixel(),0x000040);
     options.saturate=false; options.light_scale.Init(.5,1,1); clear(); draw(options); near(pixel(),0x000020);
     world->m_Anims[1].m_iFrames[0]=world->m_Anims[1].m_iFrames[1]=0; clear(); draw(); near(pixel(),0x800020);
     auto& bsp=*world->m_Worlds[0]->m_pWorldBsp; auto& surface=bsp.m_pTree[0];
+    // DTX 0x80 alone cuts nothing out: a solid texture's alpha is a gloss
+    // mask (m02s01's curtained windows). Only colour-keyed texels fall away.
+    {
+        auto& name=static_cast<char**>(bsp.m_pbc)[surface.m_n3e]; char* const color=name; char gloss[]="gloss.dtx",keyed[]="keyed.dtx";
+        name=gloss; clear(); draw(); near(pixel(),0x800020);
+        name=keyed; clear(); draw(); near(pixel(),0x00ff00); name=color;
+    }
     surface.m_nFlags|=4; clear(); require(!draw().polygons,"invisible world surface drew"); near(pixel(),0x00ff00); surface.m_nFlags&=~4u;
     surface.m_nFlags|=16; clear(); require(draw().sky==1,"sky aperture not identified"); near(pixel(),0x00ff00); surface.m_nFlags&=~16u;
     surface.m_pPlane->m_Normal.z=1; surface.m_pPlane->m_Dist=10;

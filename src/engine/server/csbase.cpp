@@ -124,7 +124,7 @@ LTRESULT ILTCSBase::WriteToMessageHMessageWrite(HMESSAGEWRITE hMessage, HMESSAGE
 	if (!hMessage)
 		RETURN_ERROR(2, "ILTCSBase::WriteToMessageHMessageWrite", LT_INVALIDPARAMS);
 
-	return hMessage->WriteMessage(*hDataMessage);
+	return hDataMessage ? hMessage->WriteMessage(*hDataMessage) : hMessage->WriteWord(0xffff);
 }
 
 LTRESULT ILTCSBase::WriteToMessageHMessageRead(HMESSAGEWRITE hMessage, HMESSAGEREAD hDataMessage)
@@ -132,7 +132,9 @@ LTRESULT ILTCSBase::WriteToMessageHMessageRead(HMESSAGEWRITE hMessage, HMESSAGER
 	if (!hMessage)
 		RETURN_ERROR(2, "ILTCSBase::WriteToMessageHMessageRead", LT_INVALIDPARAMS);
 
-	return hMessage->WriteMessage(*hDataMessage);
+	// A player may have no client save payload (e.g. a server autosave).
+	// Nested messages reserve 0xffff for this absent-message value.
+	return hDataMessage ? hMessage->WriteMessage(*hDataMessage) : hMessage->WriteWord(0xffff);
 }
 
 // The one vararg in the set, so the one that is not a thiscall: `this` comes

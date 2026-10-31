@@ -12,6 +12,8 @@
 #include "SFXMsgIds.h"
 #include "NodeLine.h"
 #include "AIUtils.h"
+#include "AI.h"
+#include "AIPathMgr.h"
 
 // Globals
 
@@ -496,8 +498,9 @@ CAINode* CAINodeMgr::FindNearestCover(const LTVector& vPos)
 //
 // ----------------------------------------------------------------------- //
 
-CAINode* CAINodeMgr::FindNearestCoverFromThreat(const LTVector& vPos, HOBJECT hThreat)
+CAINode* CAINodeMgr::FindNearestCoverFromThreat(CAI* pAI, HOBJECT hThreat)
 {
+    const auto& vPos=pAI->GetPosition();
     LTFLOAT  fMinDistanceSqr = (float)INT_MAX;
     CAINode *pClosestNode = LTNULL;
 
@@ -509,7 +512,8 @@ CAINode* CAINodeMgr::FindNearestCoverFromThreat(const LTVector& vPos, HOBJECT hT
 
 			if ( (fDistanceSqr < fMinDistanceSqr) && (fDistanceSqr < m_apNode[iNode]->GetCoverRadiusSqr()) )
 			{
-				if ( eCoverStatusOk == m_apNode[iNode]->GetCoverStatus(vPos, hThreat) )
+				if ( eCoverStatusOk == m_apNode[iNode]->GetCoverStatus(vPos, hThreat) &&
+                     g_pAIPathMgr->CanReach(pAI,m_apNode[iNode]->GetPos()) )
 				{
 					fMinDistanceSqr = fDistanceSqr;
 					pClosestNode = m_apNode[iNode];

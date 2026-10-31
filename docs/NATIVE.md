@@ -350,8 +350,23 @@ The scene renderer follows the original renderer (port reference:
   world's static lights that are not `FastLightObjects`, against bind-pose
   normals (and a `NormalRef` node's frame). `Saturate`/`ModelSaturation` scale
   them; `FLAG_NOLIGHT` is fullbright.
+- A brush the game moves (`OnObjectMove` on a solid one) pushes and carries
+  the player as it goes: the client knows no blocking priorities, so a brush
+  ranks above what it pushes, and the brushes attached to it (a car's doors,
+  windows and wheel arches) are redrawn where they follow it.
+- The world cuts out texels only in chromakey brushes and in textures
+  DTXUtil colour keyed (alpha 0, the static world's grates and fences). A
+  solid texture's alpha is a gloss or envmap mask: m02s01's curtained windows
+  stay whole instead of opening onto the void behind them.
+- A model's skin stays loaded for a while after the model leaves the view, so
+  turning back does not read, decode and upload it again.
 - Dynamic lights reach lightmaps (`WorldLightmaps::update`, `LightSaturate`,
-  solid and front-only lights), vertex-lit polygons and sprites.
+  solid and front-only lights), vertex-lit polygons and sprites. On an opaque
+  vertex-lit polygon a light that only brightens is drawn per pixel, as a
+  lightmap texel would take it, in a second added pass (with the cloud
+  shadow and fog): at the vertices alone, a fire whose radius flickers across
+  one corner of a large terrain triangle lit or unlit the whole fan of
+  triangles around that corner. Without shaders the vertices take it.
 - `Saturate` doubles the lightmap and vertex colours; the global light scale
   multiplies the finished view and the camera's light add (`LightAddPoly`)
   adds to it.
@@ -387,6 +402,17 @@ programmable extension (GLSL 1.20 programs and depth targets, `rdev.h`):
   that reach it, as deep as each light is bright where the shadow falls, for
   the `MaxShadowCasters` nearest models, `ShadowMapRes` texels across.
   Characters keep a fainter blob where they meet the ground.
+- The eight nearest brushes the size of furniture, doors and crates cast
+  from their strongest light too (the lightmaps hold no brush's shadow).
+- A shadow falls only on the world its light reaches: each shadow map has a
+  second, of the drawn world and the brushes as the light sees them (glass
+  aside, and the casting brush itself), and a surface takes the shadow where
+  it is the nearest of them. Things on a table shadow the table top, not the
+  floor beneath it; nothing shadows through a wall or a door. Static world
+  geometry (a table built into the level) casts only what its lightmaps hold.
+
+Shadows (both modes) fall on the world as drawn and meet it in tests of
+sight and the sky (`WORLDINFO_MAINWORLD`), not the visibility BSP.
 
 ## Import locally owned data
 
@@ -418,6 +444,8 @@ out/native-debug/nolf-sound-tests --data out/native-data
 out/native-debug/nolf-game-support-tests out/native-data
 out/native-debug/nolf-client-physics-tests out/native-data
 out/native-debug/nolf-client-scene-tests out/native-data
+# Chateau attic windows: attached glass collision rotates clear of the opening.
+out/native-debug/nolf-client-scene-tests out/native-data --chateau-window
 out/native-debug/nolf-client-message-tests out/native-data
 out/native-debug/nolf-texture-tests --data out/native-data --report out/native-textures.tsv
 out/native-debug/nolf-client-texture-tests out/native-data
@@ -460,6 +488,20 @@ out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so o
 # Original level simulation and local player entry fixtures:
 out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --frames 600
 out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --player-frames 120
+# Airplane cinematics: speaker removal and engine-owned dialogue window links.
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --cinematics
+# Dock cover paths immediately after teleport and AI/pickup restore ownership:
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --docks
+# Ship flooding: rising water, hatch-style pause/resume and final height.
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --flooding
+# Office cameras, manual saving and repeated restores without object-ID leaks:
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --save-restore
+# Repeated restore of an existing save, without modifying the file:
+out/native-debug/nolf-original-server-tests out/native-debug/libnolf_object.so out/native-data --restore-save worlds/m07s01 /path/to/reload.sav
+# Game music triggers during preload and across world transitions:
+ctest --test-dir out/native-debug --output-on-failure -R '^native-game-music$'
+# Ambush combat backing and melody, isolated versus simultaneous track groups:
+out/native-debug/nolf-client-music-tests out/native-data-resources --ambush-groups
 # Native client physics over the original world corpus (no game shell):
 out/native-debug/nolf-client-physics-tests out/native-data
 # Optional focused collision regression:
@@ -569,15 +611,17 @@ sections, comments and `#ifdef` conditionals) and schedules segments exactly as
 the shipped manager's pending queue did: transitions, ordered segment lists,
 loop counts and follow-on intensities. The platform `MusicPerformance` adapter
 synthesizes segments, styles and DLS banks with GothicKit dmusic, rendered on
-demand into an independent output. The patches in `ext/patches/dmusic/` add
+demand into an independent output. The patches in `ext/patches/dmusic/` keep
+authored track groups separate, so a melody track cannot replace the combat
+backing (including Ambush's Seven/SaxLeads arrangement). They also add
 segment-end scheduling and playback progress, make the tempo independent of
 the render size, honour authored repeats, and fix its crashes, unbounded curve
 expansion and reference leaks on the original data; each level loads into its
 own resource scope because music directories reuse bank names for different
 instruments. All 6 original control files, 88 intensities and 775 transitions
 load, and every intensity renders finite, unclipped audio, leak-free under
-both sanitizers. Original levels only send intensity changes: secondary
-segments and motifs report `LT_ERROR`. Pause is a no-op, as shipped. How
+both sanitizers. Motifs play over the primary music; secondary segments report
+`LT_ERROR`. Pause is a no-op, as shipped. How
 closely dmusic's synthesis matches DirectMusic has not been compared against
 a reference recording.
 

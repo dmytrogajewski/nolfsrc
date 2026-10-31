@@ -2954,7 +2954,10 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 			}
 		}
 
-		if (!(pObj->m_Flags & FLAG_NOSLIDING))
+		// An exact face contact has no separation to normalize. A move
+		// parallel to the selected face cannot be backtracked either.
+		if (!(pObj->m_Flags & FLAG_NOSLIDING) || vSep.MagSqr() < 1e-12f ||
+		    std::abs(vSlide.Dot(vSep)) < 1e-8f)
 		{
 			// m_Pos on the LEFT, same by-value operand rule as above. The
 			// function is byte-identical on server.dll with this order; the
@@ -3054,7 +3057,8 @@ WM_CINLINE int wm_PushWithBox(WMMoveState* pState, LTObject* pObj, LTVector* pOr
 		}
 	}
 
-	if (!(pState->m_pObj->m_Flags & FLAG_NOSLIDING))
+	if (!(pState->m_pObj->m_Flags & FLAG_NOSLIDING) || vSep.MagSqr() < 1e-12f ||
+	    std::abs(vSlide.Dot(vSep)) < 1e-8f)
 	{
 		*pNewPos += vSep;
 	}

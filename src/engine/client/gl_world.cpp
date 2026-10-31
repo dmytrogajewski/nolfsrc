@@ -1,4 +1,5 @@
 #include "engine/client/gl_world.h"
+#include "engine/client/gl_programs.h"
 #include "engine/client/texture_link.h"
 #include "engine/client/gl_lightmaps.h"
 #include "engine/client/client_sprites.h"
@@ -42,6 +43,46 @@ uint8 channel(double value) { return static_cast<uint8>(std::clamp(value,0.,255.
 LTVector transform(const LTMatrix& matrix,LTVector source) {
     return world_TransformPoint(matrix,source);
 }
+// A dynamic light on a vertex-lit polygon per pixel: the add r_LightData
+// gives a lightmap texel, over the texture as the vertex colour takes it
+// (and the cloud shadow where one is), added onto the polygon drawn without
+// it. Unquantised, the pool is as smooth as the pixels.
+constexpr const char* light_vertex=R"(#version 120
+varying vec3 v_local;
+varying vec2 v_uv;
+varying vec2 v_pan;
+void main() {
+    v_local=gl_Vertex.xyz; v_uv=gl_MultiTexCoord0.xy; v_pan=gl_MultiTexCoord1.xy;
+    vec4 eye=gl_ModelViewMatrix*gl_Vertex;
+    gl_FogFragCoord=abs(eye.z);
+    gl_Position=gl_ProjectionMatrix*eye;
+}
+)";
+constexpr const char* light_fragment=R"(#version 120
+uniform sampler2D u_texture;
+uniform sampler2D u_pan;
+uniform vec4 u_light;
+uniform vec3 u_add;
+uniform vec3 u_scale;
+uniform float u_saturate;
+uniform float u_textured;
+uniform float u_alpha_test;
+uniform float u_panned;
+uniform float u_fog;
+varying vec3 v_local;
+varying vec2 v_uv;
+varying vec2 v_pan;
+void main() {
+    vec3 d=v_local-u_light.xyz; float falloff=1.0-dot(d,d)/(u_light.w*u_light.w);
+    if (falloff<=0.0) discard;
+    vec4 texel=u_textured>0.5 ? texture2D(u_texture,v_uv) : vec4(1.0);
+    if (u_alpha_test>0.5 && texel.a<=0.1666) discard;
+    vec3 c=texel.rgb*u_add*min(1.0,falloff*u_saturate)*u_scale;
+    if (u_panned>0.0) c*=texture2D(u_pan,v_pan).rgb*u_panned;
+    if (u_fog>0.5) c*=clamp((gl_Fog.end-gl_FogFragCoord)*gl_Fog.scale,0.0,1.0);
+    gl_FragColor=vec4(c,1.0);
+}
+)";
 bool facing(const CWorldPart& polygon,LTVector eye) {
     const auto* plane=polygon.m_pSurface->m_pPlane;
     return !plane || double(plane->m_Normal.x)*eye.x+double(plane->m_Normal.y)*eye.y+double(plane->m_Normal.z)*eye.z-plane->m_Dist>.01;
@@ -62,6 +103,7 @@ struct GlWorld::State {
     std::unordered_set<std::string> missing;
     std::unordered_set<uint32> static_polygons;
     uint64 lighting_render=0;
+    GlProgram light_program{"world light",light_vertex,light_fragment};
     void draw(std::span<const Entry>,const CameraView&,ClientTextures::Render&,const WorldRenderOptions&,WorldRenderStats&,const Style&);
     State(std::shared_ptr<const CServerWorld> level,std::shared_ptr<ClientTextures> images,std::shared_ptr<const Assets> source,GlTextures& device)
         : world(std::move(level)),textures(std::move(images)),assets(std::move(source)),gpu(device),sprites(assets),
@@ -165,13 +207,16 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
         for (unsigned row=0;row<4;++row) for (unsigned column=0;column<4;++column) if (!std::isfinite(matrix->m[row][column])) throw std::invalid_argument("nonfinite world model matrix");
         if (matrix->m[3][0]!=0 || matrix->m[3][1]!=0 || matrix->m[3][2]!=0 || matrix->m[3][3]!=1) throw std::invalid_argument("world model transform is not affine");
     }
-    const auto local_camera=transform(object.m_Transform230,camera.position());
+    // Sky brushes are compiled in sky-box coordinates and drawn as authored.
+    // Their replicated object positions can be compressed into the playable
+    // world's bounds, which need not contain the distant sky box at all.
+    const auto local_camera=sky ? camera.position() : transform(object.m_Transform230,camera.position());
     std::vector<const CWorldPart*> polygons; WorldRenderStats stats;
     if (terrain) { if (terrain->m_Array50.GetSize()) polygons.assign(terrain->m_Array50.GetArray(),terrain->m_Array50.GetArray()+terrain->m_Array50.GetSize()); }
     else if (model->m_nParts) polygons.assign(model->m_ppParts,model->m_ppParts+model->m_nParts);
     if (polygons.empty()) return stats;
     const auto flags=polygons.front()->m_pSurface->m_nFlags;
-    Style style; style.transform=&object.m_Transform1f0; style.color={object.m_ColorR,object.m_ColorG,object.m_ColorB,object.m_ColorA};
+    Style style; style.transform=sky ? nullptr : &object.m_Transform1f0; style.color={object.m_ColorR,object.m_ColorG,object.m_ColorB,object.m_ColorA};
     style.chroma=object.m_Flags2&FLAG2_CHROMAKEY;
     style.blend=((flags&0x80000) || (object.m_Flags2&FLAG2_ADDITIVE)) ? ObjectBlend::Additive : object.m_Flags2&FLAG2_MULTIPLY ? ObjectBlend::Multiply :
         ((flags&8) || object.m_ColorA<255) ? ObjectBlend::Alpha : ObjectBlend::Opaque;
@@ -194,9 +239,9 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
         if (terrain && static_already_drawn && state.static_polygons.contains(key)) return;
         if (polygon->m_pSurface->m_nFlags&4) return;
         if (!sky && (polygon->m_pSurface->m_nFlags&16)) { ++stats.sky; return; }
-        const auto center=transform(object.m_Transform1f0,polygon->m_vCentre); double radius=0;
+        const auto center=sky ? polygon->m_vCentre : transform(object.m_Transform1f0,polygon->m_vCentre); double radius=0;
         for (const auto& vertex : polygon->render_vertices(options.fix_tjunctions)) {
-            const auto point=transform(object.m_Transform1f0,*vertex.m_pPos);
+            const auto point=sky ? *vertex.m_pPos : transform(object.m_Transform1f0,*vertex.m_pPos);
             radius=std::max(radius,std::hypot(double(point.x)-center.x,double(point.y)-center.y,double(point.z)-center.z));
         }
         const bool backface=(style.blend==ObjectBlend::Opaque || sky) && options.cull && !facing(*polygon,local_camera);
@@ -218,7 +263,12 @@ WorldRenderStats GlWorld::draw_brush(const CObjWorldModel& object,const CameraVi
             if (visited.size()>maximum) throw std::invalid_argument("world model BSP traversal exceeds its nodes");
             const auto* plane=node->m_pOwner->m_pSurface->m_pPlane;
             const unsigned side=double(plane->m_Normal.x)*local_camera.x+double(plane->m_Normal.y)*local_camera.y+double(plane->m_Normal.z)*local_camera.z-plane->m_Dist>=0;
-            pending.push_back({node->m_Children[side],false}); pending.push_back({node,true}); pending.push_back({node->m_Children[!side],false});
+            pending.push_back({node->m_Children[side],false});
+            // Sky BSPs use node, far, near order (r_DrawSkyWorldModel),
+            // rather than a translucent brush's far, node, near traversal.
+            // Their depth writes are disabled, so this order is visible.
+            if (sky) { pending.push_back({node->m_Children[!side],false}); pending.push_back({node,true}); }
+            else { pending.push_back({node,true}); pending.push_back({node->m_Children[!side],false}); }
         }
         // Disconnected render polygons have no BSP ordering. Keep them
         // visible, using their center distance as the remaining ordering.
@@ -240,7 +290,9 @@ void GlWorld::State::draw(std::span<const Entry> queue,const CameraView& camera,
         const auto& m=*style.transform; const LTVector d=light.position-LTVector(m.m[0][3],m.m[1][3],m.m[2][3]);
         light.position={m.m[0][0]*d.x+m.m[1][0]*d.y+m.m[2][0]*d.z,m.m[0][1]*d.x+m.m[1][1]*d.y+m.m[2][1]*d.z,m.m[0][2]*d.x+m.m[1][2]*d.y+m.m[2][2]*d.z};
     }
-    std::vector<const DynamicWorldLight*> reaching;
+    std::vector<const DynamicWorldLight*> reaching,per_pixel;
+    // Only an opaque polygon can take a light as a second, added pass.
+    const bool pixel_lights=style.blend==ObjectBlend::Opaque && !style.sky && g_RDCaps.bShaders;
     Frame frame(camera);
     if (style.transform) {
         std::array<float,16> matrix; for (unsigned row=0;row<4;++row) for (unsigned column=0;column<4;++column) matrix[column*4+row]=style.transform->m[row][column];
@@ -275,6 +327,11 @@ void GlWorld::State::draw(std::span<const Entry> queue,const CameraView& camera,
         const auto pixels=texture ? texture->snapshot() : nullptr;
         const auto flags=pixels ? pixels->texture.header.flags : 0;
         const bool fullbright=flags&1;
+        // d3d.ren tests alpha only in the chromakey sets: a solid world
+        // texture's alpha (window glass, light fixtures) is a gloss mask. The
+        // static world's grates and fences were colour keyed instead, and
+        // their cleared texels are cut out.
+        const bool cutout=!style.sky && (style.chroma || ((flags&0x80) && pixels->keyed));
         const auto location=options.lightmaps && !fullbright && g_RDCaps.nTextureUnits>=2 ? state.atlas->find(entry.key) : std::nullopt;
         const auto scale=pixels ? float(1u<<(pixels->texture.header.extra[4]&15)) : 1.f;
         const float u=pixels ? scale/pixels->texture.mips[0].width() : 0,v=pixels ? scale/pixels->texture.mips[0].height() : 0;
@@ -303,6 +360,14 @@ void GlWorld::State::draw(std::span<const Entry> queue,const CameraView& camera,
         reaching.clear();
         if (!location && !fullbright && polygon.m_pSurface->m_pPlane) for (const auto& light : local_lights)
             if (light.touches(polygon.m_pSurface->m_pPlane->m_Normal,polygon.m_pSurface->m_pPlane->m_Dist,polygon.m_vCentre,polygon.m_fRadius)) reaching.push_back(&light);
+        // A light that only brightens goes on per pixel, as a lightmap takes
+        // it: at the vertices alone, a light whose radius flickers across one
+        // corner of a large polygon (terrain) lights or unlights all of it.
+        per_pixel.clear();
+        if (pixel_lights) std::erase_if(reaching,[&](const DynamicWorldLight* light) {
+            if (light->solid || light->add[0]<0 || light->add[1]<0 || light->add[2]<0) return false;
+            per_pixel.push_back(light); return true;
+        });
         for (const auto& vertex : source) {
             if (!vertex.m_pPos || !finite(*vertex.m_pPos) || !std::isfinite(vertex.m_fU) || !std::isfinite(vertex.m_fV)) throw std::invalid_argument("invalid native world render vertex");
             // The lightmap unit doubles under Saturate, so the cloud shadow's
@@ -337,7 +402,7 @@ void GlWorld::State::draw(std::span<const Entry> queue,const CameraView& camera,
         }
         else rd_Disable(RD_TEXTURE_2D);
         rd_TexEnv(RD_ENV_MODULATE);
-        if (!style.sky && ((flags&0x80) || style.chroma)) { rd_Enable(RD_ALPHA_TEST); rd_AlphaGreater(.1666f); } else rd_Disable(RD_ALPHA_TEST);
+        if (cutout) { rd_Enable(RD_ALPHA_TEST); rd_AlphaGreater(.1666f); } else rd_Disable(RD_ALPHA_TEST);
         if (three) {
             if (second) {
                 auto sampling=options.sampling; sampling.alpha=false;
@@ -368,6 +433,31 @@ void GlWorld::State::draw(std::span<const Entry> queue,const CameraView& camera,
             rd_Vertex3f(vertex.point.x,vertex.point.y,vertex.point.z);
         }
         rd_End(); ++stats.polygons; stats.triangles+=vertices.size()-2; if (location) ++stats.lightmapped;
+        if (!per_pixel.empty() && state.light_program.use()) {
+            FixedPipeline fixed; auto& program=state.light_program;
+            const double saturation=options.saturate && !pan ? 2 : 1;
+            rd_Uniform1i(program.uniform("u_texture"),0); rd_Uniform1i(program.uniform("u_pan"),lightmap_unit);
+            rd_Uniform1f(program.uniform("u_textured"),texture ? 1.f : 0.f);
+            rd_Uniform1f(program.uniform("u_alpha_test"),cutout ? 1.f : 0.f);
+            rd_Uniform1f(program.uniform("u_panned"),pan ? (options.saturate ? 2.f : 1.f) : 0.f);
+            rd_Uniform1f(program.uniform("u_saturate"),options.light_saturate); rd_Uniform1f(program.uniform("u_fog"),options.fog ? 1.f : 0.f);
+            // The add lands in the vertex colour, which light scale,
+            // Saturate and the object's colour then scale, as 0..255 of 255.
+            rd_Uniform3f(program.uniform("u_scale"),float(options.light_scale.x*saturation*style.color[0]/(255.*255)),
+                float(options.light_scale.y*saturation*style.color[1]/(255.*255)),float(options.light_scale.z*saturation*style.color[2]/(255.*255)));
+            rd_Enable(RD_BLEND); rd_BlendFunc(RD_ONE,RD_ONE); rd_DepthMask(false);
+            for (const auto* light : per_pixel) {
+                rd_Uniform4f(program.uniform("u_light"),light->position.x,light->position.y,light->position.z,light->radius);
+                rd_Uniform3f(program.uniform("u_add"),light->add[0],light->add[1],light->add[2]);
+                rd_Begin(RD_TRIANGLE_FAN);
+                for (const auto& vertex : vertices) {
+                    rd_TexCoord2f(vertex.u,vertex.v); if (pan) rd_MultiTexCoord2f(1,vertex.light[0],vertex.light[1]);
+                    rd_Vertex3f(vertex.point.x,vertex.point.y,vertex.point.z);
+                }
+                rd_End();
+            }
+            rd_DepthMask(true); rd_Disable(RD_BLEND);
+        }
     }
 
 }

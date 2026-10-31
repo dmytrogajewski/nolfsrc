@@ -90,6 +90,9 @@ class CServerMgr;
 inline LTRESULT sm_SetObjectChangeFlag(CServerMgr* pServerMgr, LTObject* pObj,
                                 uint32 dwFlag)
 {
+	// Removal is already queued. Animator teardown may still change trackers,
+	// but no subsequent state belongs in the client's removal notification.
+	if (pObj->m_ChangeFlags & 1) return LT_OBJECTNOTINWORLD;
 	// Bit 2 of the object's flag word is "in the world"; smgr.cpp's update
 	// sweep tests the same bit the same way.
 	if (!(pObj->m_ChangeFlags & 4))

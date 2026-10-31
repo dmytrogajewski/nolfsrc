@@ -601,7 +601,9 @@ void CServerMgr::Term()
 	m_ClassMgr.Term();
 
 	cc_TermState(&m_ConsoleState);
-	sb_EnumStrings([](char* text, void*) { sm_ErrorHook(text); }, nullptr);
+	// The in-process client still owns its UI strings on another thread.
+	// Only report allocations belonging to this server's engine thread.
+	sb_EnumThreadStrings([](char* text, void*) { sm_ErrorHook(text); }, nullptr);
 
 	fs_Term(&m_FileMgr);
 
@@ -2975,7 +2977,8 @@ HOBJECT si_ObjectToHandle(LPBASECLASS pObject)
 
 LPBASECLASS si_HandleToObject(LTObject* hObject)
 {
-	if (!hObject)
+	if (!g_pServerMgr || !hObject ||
+        !g_pServerMgr->m_Unknown390.m_Allocated.contains(hObject) || !hObject->m_pSData)
 		return LTNULL;
 
 	return hObject->m_pSData->m_pBaseClass;
@@ -3305,9 +3308,11 @@ LTBOOL si_IsKindOf(HCLASS hClass, HCLASS hTest)
 
 LTRESULT si_GetPortalFlags(char* pPortalName, uint32* pFlags)
 {
+	if (!pPortalName || !pFlags) return LT_INVALIDPARAMS;
+	*pFlags=0;
 	WorldPortal* pPortal = w_FindPortal(&g_pServerMgr->m_World, pPortalName, 0, 0);
 	if (!pPortal)
-		RETURN_ERROR(1, "ILTPhysics::GetPortalFlags", LT_NOTFOUND);
+		return LT_NOTFOUND;
 
 	*pFlags = pPortal->m_Flags;
 	return LT_OK;
@@ -4017,6 +4022,14 @@ LTRESULT sm_CacheFile(CServerMgr* pMgr, uint32 fileType, char* pFilename)
 
 	if (!pFilename)
 		RETURN_ERROR(1, "ILTServer::CacheFile", LT_ERROR);
+	// Optional game properties may be present but empty. Nothing to preload.
+	if (!pFilename[0]) return LT_OK;
+    std::string sound_name;
+    if (fileType==FT_SOUND) {
+        sound_name=pFilename; sound_name.push_back('\0');
+        if (sound_NormalizeFilename(sound_name.data(),sound_name.size())!=LT_OK) return LT_INVALIDPARAMS;
+        pFilename=sound_name.data();
+    }
 
 	switch (fileType)
 	{
@@ -4932,6 +4945,14 @@ LPBASECLASS CServerMgr::CreateObjectWithProperties(HCLASS hClass, ObjectCreateSt
     try {
         const auto accepted = m_ClassMgr.message(game,MID_PRECREATE,&create,reason);
         if (!server.unchanged()) return nullptr;
+        if (accepted && reason == PRECREATE_WORLDFILE &&
+            (create.m_ObjectType == OT_WORLDMODEL || create.m_ObjectType == OT_CONTAINER) &&
+            !m_World.FindWorldModel(create.m_Filename)) {
+            // The editor retains objects for brushes removed by the world
+            // compiler (m03s01's walllightlowpoly). They have no runtime BSP.
+            m_ClassMgr.destroy(game);
+            return nullptr;
+        }
         if (accepted) {
             LTObject* object = nullptr;
             if (sm_CreateObjectInWorld(this,game,definition,&create,0xffff,reason,&object) == LT_OK && server.unchanged()) return game;

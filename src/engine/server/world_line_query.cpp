@@ -44,6 +44,10 @@ int bspq_IntersectLineRec(BSPNode* node, CLineQuery* query, LTVector start, LTVe
             const float difference = last - first;
             if (difference != 0 && (first < -.01f || first > .01f)) {
                 const float fraction = -first / difference;
+                // The epsilon slab can put both ends on the same side.
+                // Such a segment never reaches the plane; extrapolating it
+                // creates contacts and light blockers beyond its endpoint.
+                if (fraction < 0 || fraction > 1) { node=node->m_pChild[side]; continue; }
                 const auto middle = (end - start) * fraction + start;
                 pending.push_back({node, middle, end, side, fraction});
                 node = node->m_pChild[side]; end = middle;

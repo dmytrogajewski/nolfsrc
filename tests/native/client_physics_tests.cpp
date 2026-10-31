@@ -122,6 +122,39 @@ void floor_and_threads(std::barrier<>* rendezvous=nullptr,int identity=0) {
             "native client floor contact did not preserve object/polygon identity");
     }
 }
+void point_collisions() {
+    TestPhysicsWorld geometry(true); World world;
+    auto* floor=world.create(OT_WORLDMODEL); floor->SetWorldBsp(&geometry,&geometry); floor->SetDims({1000,1024,1000}); floor->m_BlockingPriority=255;
+    world.index.BumpObject(floor,0);
+    auto* point=world.create(OT_NORMAL,{0,200,0});
+    point->m_Flags=FLAG_SOLID|FLAG_POINTCOLLIDE|FLAG_TOUCH_NOTIFY;
+    point->m_Velocity.Init(0,-100,0); point->m_ForceIgnoreLimitSqr=0;
+    CollisionInfo info{};
+    CMoveState move{}; move.m_pHost=&world.mover_service; move.m_pInfo=&info;
+    move.m_pWorldBsp=&geometry; move.m_hObject=floor; move.m_pObject=point;
+    move.m_vStart=point->m_Pos; move.m_vEnd.Init(0,-800,0);
+    CBounceState result{}; ws_MoveObject(&move,&result);
+    require(std::abs(result.m_vPoint.y+300)<.01f,
+        "point projectile failed to stop at the first floor contact");
+    require(result.m_nHits==1 && std::isfinite(result.m_vVelocityAdd.y),"point contact repeated a bounce or corrupted velocity");
+    LTVector from{0,-299.98f,0},end{0,-299.995f,0},hit; LTPlane plane;
+    require(!bsp_IntersectLine(geometry.GetRoot(),&from,&end,&hit,&plane),"line query extrapolated past a nearby endpoint");
+}
+void nonsliding_face_contact() {
+    for (bool push_other : {false,true}) {
+        World world;
+        auto* body=world.create(OT_NORMAL,{-10,0,0}); body->SetDims({2,2,2});
+        auto* blocker=world.create(); blocker->SetDims({2,5,5});
+        (push_other ? blocker : body)->m_Flags|=FLAG_NOSLIDING;
+        (push_other ? body : blocker)->m_BlockingPriority=255;
+        world.index.BumpObject(body,0); world.index.BumpObject(blocker,0);
+        LTVector target{-4,0,0};
+        require(world.physics.MoveObject(body,&target,0)==LT_OK,"nonsliding face contact failed");
+        for (auto* object : {body,blocker})
+            require(std::isfinite(object->m_Pos.x) && std::isfinite(object->m_Pos.y) && std::isfinite(object->m_Pos.z),
+                "nonsliding exact face contact normalized a zero separation");
+    }
+}
 void restricted_callbacks() {
     World world; auto* body=world.create(OT_NORMAL,{-100,0,0}); body->m_BlockingPriority=200;
     std::vector<HOBJECT> named;
@@ -203,7 +236,7 @@ void original_worlds(const char* data,std::string_view filter={}) {
 int main(int argc,char** argv) {
     nolf::platform::set_log_sink(diagnostic);
     struct ResetLog { ~ResetLog() { nolf::platform::set_log_sink(nullptr); } } reset;
-    try { properties(); collisions(); floor_and_threads(); restricted_callbacks();
+    try { properties(); collisions(); floor_and_threads(); point_collisions(); nonsliding_face_contact(); restricted_callbacks();
         std::barrier rendezvous(2);
         auto a=std::async(std::launch::async,[&] { floor_and_threads(&rendezvous,17); });
         auto b=std::async(std::launch::async,[&] { floor_and_threads(&rendezvous,31); }); a.get(); b.get();

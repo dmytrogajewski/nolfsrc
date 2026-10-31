@@ -221,6 +221,12 @@ LTBOOL CPolyGridFX::Update()
 	if(m_bWantRemove)
         return LTFALSE;
 
+	// Movement must reach the visual surface even while it is hidden or
+	// outside the view. Otherwise rising water can stay below the floor,
+	// never get drawn, and never become eligible for the animation update.
+	LTVector vPos;
+	m_pClientDE->GetObjectPos(m_hServerObject, &vPos);
+	m_pClientDE->SetObjectPos(m_hObject, &vPos);
 
 	// Set the flags of the polygrid based on the the server object...
 
@@ -246,14 +252,6 @@ LTBOOL CPolyGridFX::Update()
 	{
         return LTTRUE;
 	}
-
-
-	// Update the position of the polygrid to reflect the position of the
-	// server object...
-
-    LTVector vPos;
-	m_pClientDE->GetObjectPos(m_hServerObject, &vPos);
-	m_pClientDE->SetObjectPos(m_hObject, &vPos);
 
 
 	// If we're not using polygrids (or special fx are set to the lowest

@@ -1,0 +1,22 @@
+--- a/ATTRIBUTES/SURFACE.txt
++++ b/ATTRIBUTES/SURFACE.txt
+@@ -1130,7 +1130,7 @@
+ RtFootSnd2					= "Chars\Snd\Footsteps\wood2a.wav"
+ LtFootSnd2					= "Chars\Snd\Footsteps\wood2b.wav"
+ MotorcycleSnd1				= "Snd\Vehicle\motorcycle\crosswood1.wav"
+-MotorcycleSnd2				= "Snd\Vehicle\motorcycle\crosswood2.wav"
++MotorcycleSnd2				= "Snd\Vehicle\motorcycle\crosswood1.wav"
+ SnowmobileSnd1				= ""
+ SnowmobileSnd2				= ""
+ BodyFallSnd					= "Surface\Snd\BodyFall\wood.wav"
+@@ -1346,8 +1346,8 @@
+ BulletImpactSnd2			= "Guns\Snd\impacts\snow\impact2.wav"
+ ProjectileImpactSnd1		= "Guns\Snd\impacts\projectile\cloth\impact1.wav"
+ ProjectileImpactSnd2		= "Guns\Snd\impacts\projectile\cloth\impact2.wav"
+-MeleeImpactSnd1				= "Guns\Snd\impacts\hand\snow\impact1.wav"
+-MeleeImpactSnd2				= "Guns\Snd\impacts\hand\snow\impact2.wav"
++MeleeImpactSnd1				= "Guns\Snd\impacts\hand\gen\impact1.wav"
++MeleeImpactSnd2				= "Guns\Snd\impacts\hand\gen\impact2.wav"
+ ShellImpactSnd1				= "Guns\Snd\Shells\dirt.wav"
+ ShellSndRadius				= 200.0
+ GrenadeImpactSnd			= "Guns\Snd\Grenade\dirt.wav"

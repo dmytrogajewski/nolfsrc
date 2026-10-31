@@ -104,24 +104,11 @@ void CCharacterMgr::Add(CCharacter* pChar)
 
 void CCharacterMgr::Remove(CCharacter* pChar)
 {
-	if (!pChar || !pChar->m_hObject || IsKindOf(pChar->m_hObject, "Speaker")) return;
-
-	if (IsPlayer(pChar->m_hObject))
-	{
-		m_playerList.Remove(pChar);
-	}
-	else
-	{
-		// Start at 1 since we already checked against player
-
-		for ( int iCharacterList = 1 ; iCharacterList < s_kCharacterLists ; iCharacterList++ )
-		{
-			if ( pChar->GetCharacterClass() == s_aCharacterClasses[iCharacterList] )
-			{
-				s_aCharacterLists[iCharacterList]->Remove(pChar);
-			}
-		}
-	}
+	if (!pChar) return;
+	// Membership is by character identity, including during destruction when
+	// engine class queries are no longer valid. Remove every registration.
+	for (int i=0;i<s_kCharacterLists;++i)
+		while (s_aCharacterLists[i]->Remove(pChar)) {}
 }
 
 

@@ -130,6 +130,9 @@ CString CGameSoundMgr::GetSoundFilenameFromId(const char* pPathAttribute, uint32
 {
 	CString strRet;
 	if (!pPathAttribute || dwId < SMGR_BASE_SOUND_ID) return strRet;
+	// These dialogue resources are text-only decisions (ellipsis/questions),
+	// with no recorded voice. Keep their windows without requesting a WAV.
+	if (!strcmp(pPathAttribute, "Dialogue") && dwId >= 9000 && dwId < 10000) return strRet;
 
 	// Set up the path...
 

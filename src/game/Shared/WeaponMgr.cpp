@@ -1196,7 +1196,8 @@ void WEAPON::Cache(CWeaponMgr* pWeaponMgr)
         g_pLTServer->CacheFile(FT_MODEL, szPVModel);
 	}
 
-	if (szPVSkin[0])
+	// "Hands" selects the player's style at runtime; it is not a texture.
+	if (szPVSkin[0] && strcmp(szPVSkin, "Hands") != 0)
 	{
         g_pLTServer->CacheFile(FT_TEXTURE, szPVSkin);
 	}

@@ -1,8 +1,23 @@
 #include "sound_request.h"
 #include <cstring>
 
+LTRESULT sound_NormalizeFilename(char* name,std::size_t capacity) {
+    if (!name) return LT_INVALIDPARAMS;
+    const auto* end=static_cast<const char*>(std::memchr(name,0,capacity));
+    if (!end) return LT_INVALIDPARAMS;
+    // Old savegames retain authored trailing blanks even after the level's
+    // sound property is corrected. They are not part of the asset filename.
+    auto length=std::size_t(end-name);
+    while (length && (name[length-1]==' ' || name[length-1]=='\t')) --length;
+    name[length]=0;
+    if (!length) return LT_INVALIDPARAMS;
+    // The freighter fans use '|' where the original Windows asset path
+    // requires a separator. Normalize restored copies as well as fresh data.
+    std::replace(name,name+length,'|','\\');
+    return LT_OK;
+}
 LTRESULT sound_NormalizeRequest(PlaySoundInfo& info) {
-    if (!info.m_szSoundName[0] || !std::memchr(info.m_szSoundName,0,sizeof(info.m_szSoundName))) return LT_INVALIDPARAMS;
+    if (sound_NormalizeFilename(info.m_szSoundName,sizeof(info.m_szSoundName))!=LT_OK) return LT_INVALIDPARAMS;
     const bool spatial = (info.m_dwFlags & (PLAYSOUND_AMBIENT | PLAYSOUND_3D)) != 0;
     if (spatial && (!std::isfinite(info.m_fOuterRadius) || !std::isfinite(info.m_fInnerRadius))) return LT_INVALIDPARAMS;
     if (spatial && !(info.m_dwFlags & PLAYSOUND_ATTACHED) &&

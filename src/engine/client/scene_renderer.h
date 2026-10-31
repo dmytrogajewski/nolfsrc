@@ -46,6 +46,8 @@ struct ModelRenderOptions {
     // shadow_lights strongest lights, as deep as each light is bright).
     enum class ShadowMapMode { Off,Projected,Enhanced } shadow_maps=ShadowMapMode::Off;
     int shadow_resolution=128,shadow_casters=8,shadow_lights=1;
+    // Enhanced shadows fade out over the last quarter of this distance.
+    float shadow_distance=1536;
     // Chrome: the EnvMap texture under FLAG_ENVIRONMENTMAP models
     // (EnvMapEnable; EnvMapAll for every model, alone), EnvScale, EnvPanSpeed.
     std::string environment_map;

@@ -53,7 +53,9 @@ LTRESULT CommonModelLT::GetSocket(HOBJECT hObj, char* pSocketName, HMODELSOCKET&
 	if (pModel->FindSocket(pSocketName, &hSocket))
 		return LT_OK;
 
-	RETURN_ERROR(1, "ILTModel::GetSocket", LT_NOTFOUND);
+	// Socket lookup is also the SDK's capability query (melee models, for
+	// example, have no Breach socket). Absence is a normal lookup result.
+	return LT_NOTFOUND;
 }
 
 LTRESULT CommonModelLT::GetNode(HOBJECT hObj, char* pNodeName, HMODELNODE& hNode)

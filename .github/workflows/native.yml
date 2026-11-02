@@ -12,6 +12,8 @@ jobs:
         sanitizer: [OFF, ON]
     steps:
       - uses: actions/checkout@v4
+      - name: Initialize data tools
+        run: git -c submodule.tools.url=https://github.com/dmytrogajewski/tools.git submodule update --init tools
       - name: Install native build dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build flex bison pkg-config libfreetype6-dev libfontconfig1-dev fonts-liberation libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libgl-dev libegl-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libwayland-dev libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev libudev-dev xvfb xauth weston
       - name: Configure
@@ -34,6 +36,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Initialize data tools
+        run: git -c submodule.tools.url=https://github.com/dmytrogajewski/tools.git submodule update --init tools
       - run: sudo apt-get update && sudo apt-get install -y ninja-build flex bison
       - run: cmake --preset native-headless
       - run: cmake --build --preset native-headless --parallel 4
@@ -42,6 +46,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Initialize data tools
+        run: git -c submodule.tools.url=https://github.com/dmytrogajewski/tools.git submodule update --init tools
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Install pinned native parser generators
         shell: pwsh

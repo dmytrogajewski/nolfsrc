@@ -643,6 +643,10 @@ void PickupItem::Load(HMESSAGEREAD hRead, uint32 dwLoadFlags)
     m_bBounce                   = g_pLTServer->ReadFromMessageByte(hRead);
     m_dwUserFlags               = g_pLTServer->ReadFromMessageDWord(hRead);
     m_dwFlags                   = g_pLTServer->ReadFromMessageDWord(hRead);
+    FREE_HSTRING(m_hstrPickupTriggerTarget);
+    FREE_HSTRING(m_hstrPickupTriggerMessage);
+    FREE_HSTRING(m_hstrSoundFile);
+    FREE_HSTRING(m_hstrRespawnSoundFile);
     m_hstrPickupTriggerTarget   = g_pLTServer->ReadFromMessageHString(hRead);
     m_hstrPickupTriggerMessage  = g_pLTServer->ReadFromMessageHString(hRead);
     m_hstrSoundFile             = g_pLTServer->ReadFromMessageHString(hRead);

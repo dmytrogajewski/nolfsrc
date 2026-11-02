@@ -9,6 +9,9 @@ namespace nolf {
 struct TexturePixels {
     Texture texture;
     std::vector<std::uint8_t> bumpmap;
+    // Some top-level texel is fully clear: DTXUtil's ColorKey cut it out.
+    // Otherwise alpha is a gloss or envmap mask and the surface is solid.
+    bool keyed=false;
 };
 // Renderer and SDK share this identity, never a reconstructed SharedTexture
 // layout. A snapshot remains valid across edits, release and cache retirement.

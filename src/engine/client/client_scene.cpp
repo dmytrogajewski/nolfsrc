@@ -51,7 +51,10 @@ bool finite(LTVector v) {
 bool valid_rotation(const LTRotation& value) {
     double norm=0;
     for (float part : value.m_Quat) { if (!std::isfinite(part)) return false; norm+=double(part)*part; }
-    return std::abs(norm-1)<.001;
+    // Keyframers add component offsets to their keys, so valid authored
+    // rotations need not have unit length. Quaternion consumers normalize
+    // when building a matrix; preserve the raw values for later offsets.
+    return norm>0;
 }
 template<std::size_t N> std::string text(const char (&value)[N]) {
     const auto end=std::find(std::begin(value),std::end(value),'\0');
@@ -295,8 +298,15 @@ struct ClientScene::State final : ClientPhysicsWorld, std::enable_shared_from_th
         }
         void Detach(LTObject* object) override { owner.container_links.erase(object); }
         void UpdateAttachments(WMMoveState* state) override { if (state && owner.owns(state->m_pObj)) owner.follow(state->m_pObj); }
+        // Blocking priorities stay on the server (a door's is set there), so
+        // a client copy of a brush ranks no higher than the player standing
+        // on it: a brush moves what is in its way, as the server's lift
+        // does the player, or the lift is held back and the player sinks
+        // through its floor. Nothing else pushes a brush or another brush.
         int ObjectBlocks(WMMoveState* state,LTObject*,LTObject* other) override {
-            return owner.owns(other) && state->m_nUnknown0C>other->m_BlockingPriority && other->_v30();
+            const auto brush=[](const LTObject* object) { return object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER; };
+            return owner.owns(other) && other->_v30() &&
+                (state->m_nUnknown0C>other->m_BlockingPriority || (brush(state->m_pObj) && !brush(other)));
         }
         uint32 Crush(LTObject*,void*) override { return 0; } // Crushing is decided by the authoritative server.
         void CheckMaxPos(WMMoveState*,LTVector* value) override { check(value && finite(*value),LT_INVALIDPARAMS,"invalid client movement position"); }
@@ -418,7 +428,7 @@ LTRESULT ClientScene::State::create(const ObjectCreateStruct& input,HOBJECT& out
             check(record.geometry->AttachWorldModel(object,create.m_Filename)!=0,LT_MISSINGWORLDMODEL,"missing native brush model");
             auto* bsp=object->m_pWorldBsp;
             if (!bsp->IsBusy()) { object->SetPos(static_cast<CWorldBsp*>(bsp)->m_ve8); object->SetDims((bsp->m_vBoxMax-bsp->m_vBoxMin)*.5f); }
-            obj_RetransformWorldModel(object);
+            obj_RetransformWorldModelDims(object);
         }
         record.camera.rectangle={0,0,int(viewport_width),int(viewport_height)};
         records.emplace(object,std::move(record));
@@ -507,7 +517,15 @@ void ClientScene::State::follow(HOBJECT object) {
         child.m_Rotation=transform.m_Rot;
         WMMoveState move; move.Init(&self.index,&self.movement,&child,child.m_BlockingPriority);
         wm_MoveObject(&move,transform.m_Pos,0x0d);
-        return self.live() && context.parent.unchanged();
+        if (!self.live() || !context.parent.unchanged()) return false;
+        // A brush is drawn and hit through its transform, which the move
+        // rebuilds only on its collision path: a non-solid one (a car's
+        // windows and panels while it drives) or a turn alone leaves it where
+        // it was. As the original client places any world model.
+        if (child_guard.unchanged() && (child.m_ObjectType==OT_WORLDMODEL || child.m_ObjectType==OT_CONTAINER)) {
+            obj_RetransformWorldModelDims(&child); self.index.BumpObject(&child,0); self.records.at(&child).info.dirty|=1;
+        }
+        return true;
     },&context);
     }
 }
@@ -574,7 +592,12 @@ LTRESULT ClientScene::State::place(HOBJECT object,const LTVector* position,const
     if (!moving && !rotation) return LT_OK;
     if (moving) object->SetPos(*position);
     if (rotation) object->m_Rotation=*rotation;
-    if (object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER) obj_RetransformWorldModel(object);
+    if (object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER) {
+        // An opening window's box-physics glass must rotate its collision
+        // extents along with its drawn geometry and attachment transform.
+        if (rotation) obj_RetransformWorldModelDims(object);
+        else obj_RetransformWorldModel(object);
+    }
     index.BumpObject(object,0); records.at(object).info.dirty|=1; follow(object); return LT_OK;
 }
 LTRESULT ClientScene::State::scale(HOBJECT object,LTVector scale) {

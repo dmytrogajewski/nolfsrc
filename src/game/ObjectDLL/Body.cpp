@@ -488,6 +488,9 @@ void Body::Init(const BODYINITSTRUCT& bi)
 
 	LTFLOAT fHitPts = pDest->GetMaxHitPoints();
 	m_damage.Reset(fHitPts, 0.0f);
+	// Death reactions query the corpse after the original character is gone.
+	// Keep its attacker, including the normal removal link and save support.
+	m_damage.SetLastDamager(bi.pCharacter->GetLastDamager());
 	m_damage.SetHitPoints(fHitPts);
 	m_damage.SetMaxHitPoints(fHitPts);
 	m_damage.SetArmorPoints(0.0f);

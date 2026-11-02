@@ -395,7 +395,7 @@ LTBOOL CInterfaceResMgr::InitFonts()
 
         // ************* Title font
 		g_pLayoutMgr->GetTitleFont(g_szFontName,sizeof(g_szFontName));
-		if (!SetupFont(m_pTitleFont))
+		if (!SetupFont(m_pTitleFont,LTTRUE,LTF_INCLUDE_ALL,LTFALSE))
 		{
 			if (!SetupFont(m_pTitleFont,LTFALSE))
 			{
@@ -431,7 +431,7 @@ LTBOOL CInterfaceResMgr::InitFonts()
 		// M-P3-19: blended like the other bitmap fonts (no black boxes); the
 		// retail image is made for colour keying and cannot be split up for
 		// blending, so it falls back to that (M-P4-10 is about the images)
-        if (!SetupFont(m_pAirFont,LTTRUE,dwFlags) && !SetupFont(m_pAirFont,LTFALSE,dwFlags))
+        if (!SetupFont(m_pAirFont,LTTRUE,dwFlags,LTFALSE) && !SetupFont(m_pAirFont,LTFALSE,dwFlags))
 		{
 			debug_delete(m_pAirFont);
             m_pAirFont=LTNULL;
@@ -442,7 +442,7 @@ LTBOOL CInterfaceResMgr::InitFonts()
 		g_pLayoutMgr->GetChooserFont(g_szFontName,sizeof(g_szFontName));
 		// M-P3-19: blended like the other bitmap fonts, falling back to colour
 		// keying for an image made for it (see the air font)
-		if (!SetupFont(m_pChooserFont,LTTRUE) && !SetupFont(m_pChooserFont,LTFALSE))
+		if (!SetupFont(m_pChooserFont,LTTRUE,LTF_INCLUDE_ALL,LTFALSE) && !SetupFont(m_pChooserFont,LTFALSE))
 		{
 			debug_delete(m_pChooserFont);
             m_pChooserFont=LTNULL;
@@ -776,7 +776,7 @@ HSURFACE CInterfaceResMgr::CreateSurfaceFromString(CLTGUIFont *pFont, char *lpsz
 
 
 
-LTBOOL CInterfaceResMgr::SetupFont(CLTGUIFont *pFont, LTBOOL bBlend, uint32 dwFlags)
+LTBOOL CInterfaceResMgr::SetupFont(CLTGUIFont *pFont, LTBOOL bBlend, uint32 dwFlags, LTBOOL reportFailure)
 {
 
 	LITHFONTCREATESTRUCT lithFont;
@@ -794,6 +794,7 @@ LTBOOL CInterfaceResMgr::SetupFont(CLTGUIFont *pFont, LTBOOL bBlend, uint32 dwFl
 	}
     if ( !pFont->Init(g_pLTClient, &lithFont) )
 	{
+		if (!reportFailure) return LTFALSE;
 		char szString[512];
 		sprintf(szString, "Cannot load font: %s", g_szFontName);
         g_pLTClient->CPrint(szString);

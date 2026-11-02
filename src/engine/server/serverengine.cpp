@@ -581,7 +581,8 @@ LTRESULT se_InitModel(CServerMgr* manager, LTObject* object, ObjectCreateStruct*
     char* filename = create->m_Filename;
     void* model_file = nullptr;
     std::array<void*,MAX_MODEL_TEXTURES> skins{};
-    if (!se_LoadFile(&manager->m_FileMgr,filename,0,&model_file)) {
+    // Empty hand-held models deliberately use the engine's default model.
+    if (!filename[0] || !se_LoadFile(&manager->m_FileMgr,filename,0,&model_file)) {
         filename = const_cast<char*>("models/default.abc");
         if (!se_LoadFile(&manager->m_FileMgr,filename,0,&model_file)) return LT_MISSINGFILE;
     }

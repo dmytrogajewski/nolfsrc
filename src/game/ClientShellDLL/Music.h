@@ -14,6 +14,8 @@
 #include "ltbasedefs.h"
 #include "iltclient.h"
 #include "iltdirectmusic.h"
+#include <string>
+#include <vector>
 
 class CPlayerObj;
 
@@ -170,6 +172,9 @@ class CMusic
 
 		// Playing?
 		LTBOOL				m_bPlaying;
+
+        // Server triggers can arrive while the client's world is preloading.
+        std::vector<std::string> m_PendingMessages;
 };
 
 #endif // __MUSIC_H__

@@ -602,12 +602,13 @@ void CInterfaceMgr::OnExitWorld()
 		CLTDecisionWnd*	pDecWnd = m_DialogueWnd.GetDecisionWnd();
 		if (pDecWnd && pDecWnd->IsVisible())
 		{
-			g_pLTClient->CPrint("ERROR: Decision window should not be visible on level exit.");
 			pDecWnd->ShowWindow(LTFALSE,LTFALSE,LTFALSE);
 		}
 
-		g_pLTClient->CPrint("ERROR: Dialogue window should not be visible on level exit.");
+		// Disconnecting or loading a save can end a world during a decision.
+		// Retire that world's window as part of normal interface teardown.
 		m_DialogueWnd.ShowWindow(LTFALSE,LTFALSE,LTFALSE);
+		m_DialogueWnd.Reset();
 	}
 
 	if (m_MenuWnd.IsVisible()) m_MenuWnd.ShowWindow(LTFALSE,LTFALSE,LTFALSE);

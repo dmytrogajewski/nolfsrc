@@ -1352,10 +1352,8 @@ void Door::SetOpening()
 		if (pName)
 		{
             uint32 dwFlags = 0;
-            g_pLTServer->GetPortalFlags(pName, &dwFlags);
-
-			dwFlags |= PORTAL_OPEN;
-            g_pLTServer->SetPortalFlags(pName, dwFlags);
+            if (g_pLTServer->GetPortalFlags(pName, &dwFlags)==LT_OK)
+                g_pLTServer->SetPortalFlags(pName, dwFlags | PORTAL_OPEN);
 		}
 	}
 
@@ -1555,10 +1553,8 @@ void Door::SetClosed(LTBOOL bInitialize)
 		if (pName)
 		{
             uint32 dwFlags = 0;
-            g_pLTServer->GetPortalFlags(pName, &dwFlags);
-
-			dwFlags &= ~PORTAL_OPEN;
-            g_pLTServer->SetPortalFlags(pName, dwFlags);
+            if (g_pLTServer->GetPortalFlags(pName, &dwFlags)==LT_OK)
+                g_pLTServer->SetPortalFlags(pName, dwFlags & ~PORTAL_OPEN);
 		}
 	}
 

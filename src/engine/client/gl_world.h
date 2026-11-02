@@ -26,6 +26,9 @@ struct WorldRenderOptions {
     TextureSampling sampling;
     double time=0;
     bool lightmaps=true,saturate=false,fix_tjunctions=true,cull=true,draw_all=false,environment_add=false;
+    // The scene's fog is on for what is drawn: passes the world draws with
+    // its own program fade as fixed-function fog would.
+    bool fog=false;
 };
 struct WorldRenderStats {
     std::size_t regions=0,candidates=0,polygons=0,triangles=0,lightmapped=0,culled=0,sky=0,missing_materials=0;

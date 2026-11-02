@@ -1,0 +1,35 @@
+[
+  {
+    "class": "RotatingDoor",
+    "name": "officedr1",
+    "property": "LockedSound",
+    "old": "snd\\doors\\lockedlever.wav ",
+    "new": "snd\\doors\\lockedlever.wav"
+  },
+  {
+    "class": "ScaleSprite",
+    "name": "ScaleSprite66",
+    "remove": true
+  },
+  {
+    "class": "SoundFX",
+    "name": "waterlap1",
+    "property": "Sound",
+    "old": "Snd\\Amb\\Water2ap1.wav",
+    "new": "Snd\\Amb\\WaterLap1.wav"
+  },
+  {
+    "class": "SoundFX",
+    "name": "waterlap3",
+    "property": "Sound",
+    "old": "Snd\\Amb\\Water2ap1.wav",
+    "new": "Snd\\Amb\\WaterLap1.wav"
+  },
+  {
+    "class": "SoundFX",
+    "name": "waterlap5",
+    "property": "Sound",
+    "old": "Snd\\Amb\\Water2ap1.wav",
+    "new": "Snd\\Amb\\WaterLap1.wav"
+  }
+]

@@ -8,6 +8,7 @@
 #include "engine/client/texture_link.h"
 #include "engine/client/client_sprites.h"
 #include "engine/client/shadow_maps.h"
+#include "engine/server/world_polygon_geometry.h"
 #include "engine/client/pixel_lighting.h"
 #include "engine/server/model_callback.h"
 #include "engine/server/world_state.h"
@@ -123,13 +124,21 @@ struct SceneRenderer::State {
     std::shared_ptr<const CServerWorld> rendered_world;
     uint64 world_generation=0;
     std::unique_ptr<GlWorld> world_renderer;
-    struct Material { std::shared_ptr<const TextureResource> texture; bool used=false; };
+    // A skin stays loaded a while after its model leaves the view: turning
+    // brings it straight back, and reloading means reading, decoding and
+    // uploading it again.
+    struct Material { std::shared_ptr<const TextureResource> texture; uint64 used=0; };
+    uint64 frames=0;
     // How much of each model sees the sun, worked out once where it was
     // (d3d.ren keeps it on the instance) and again only for a
     // FLAG2_DYNAMICDIRLIGHT model that has moved. An entry is the object's
     // own while its lifetime token is.
     struct SunCache { std::weak_ptr<bool> lifetime; LTVector position{0,0,0}; float amount=0; };
     std::unordered_map<const LTObject*,SunCache> sun_cache;
+    // How far each enhanced shadow has grown in since its caster began to
+    // cast, so that one starting in view does not appear all at once.
+    struct ShadowFade { std::weak_ptr<bool> lifetime; double seen=0; float amount=0; };
+    std::unordered_map<const LTObject*,ShadowFade> shadow_fades;
     std::shared_ptr<const CServerWorld> sun_world;
     ShadowMaps shadow_maps;
     PixelLightingProgram pixel_lighting;
@@ -152,8 +161,8 @@ struct SceneRenderer::State {
     }
     std::shared_ptr<const TextureResource> material(std::string_view filename) {
         const auto name=platform::asset_key(filename); const auto found=materials.find(name);
-        if (found!=materials.end()) { found->second.used=true; return found->second.texture; }
-        auto texture=textures->load(name); materials.emplace(name,Material{texture,true}); return texture;
+        if (found!=materials.end()) { found->second.used=frames; return found->second.texture; }
+        auto texture=textures->load(name); materials.emplace(name,Material{texture,frames}); return texture;
     }
     std::shared_ptr<const TextureResource> skin(std::string_view name,double time) {
         if (name.empty()) return {};
@@ -169,12 +178,29 @@ struct SceneRenderer::State {
     }
 };
 namespace {
+// Brushes that cast shadows in enhanced lighting, a frame.
+constexpr std::size_t brush_casters_max=8;
+// Seconds an enhanced shadow takes to grow in, and that its caster may
+// stop casting without starting over.
+constexpr double shadow_fade_in=.4;
+// Frames an unused skin stays loaded.
+constexpr uint64 material_frames=3600;
+// The world as drawn (WORLDINFO_MAINWORLD, the physics BSP): what lights,
+// the sky and shadows meet. The visibility BSP only answers what is seen.
+CWorldBsp* drawn_world(const CServerWorld& world) {
+    CWorldBsp* physics=nullptr;
+    for (auto* record : std::span(world.m_Worlds.GetArray(),world.m_Worlds.GetSize())) {
+        if (record->m_pWorldBsp->m_nUnknown48&4) return record->m_pWorldBsp;
+        if (!physics && (record->m_pWorldBsp->m_nUnknown48&0x10)) physics=record->m_pWorldBsp;
+    }
+    return physics;
+}
 // Does a ray from a point reach a sky polygon of the drawn world first
 // (d3d.ren's segment test through the BSP)?
 bool sees_sky(const CServerWorld& world,LTVector from,LTVector ray) {
     constexpr uint32 surface_sky=0x10;
-    for (auto* record : std::span(world.m_Worlds.GetArray(),world.m_Worlds.GetSize())) if (record->m_pWorldBsp->m_nUnknown48&0x20) {
-        auto* root=record->m_pWorldBsp->GetRoot(); if (!root) return false;
+    if (auto* bsp=drawn_world(world)) {
+        auto* root=bsp->GetRoot(); if (!root) return false;
         auto to=from+ray; LTVector hit; LTPlane plane;
         const auto* polygon=bsp_IntersectLine(root,&from,&to,&hit,&plane);
         return polygon && polygon->m_pOwner && polygon->m_pOwner->m_pSurface && (polygon->m_pOwner->m_pSurface->m_nFlags&surface_sky);
@@ -205,8 +231,8 @@ float sun_amount(const CServerWorld& world,LTVector position,LTVector right,floa
 // clear of both ends -- past the fixture, short of the model's own extent --
 // counts.
 bool light_reaches(const CServerWorld& world,LTVector light,LTVector model,float extent) {
-    for (auto* record : std::span(world.m_Worlds.GetArray(),world.m_Worlds.GetSize())) if (record->m_pWorldBsp->m_nUnknown48&0x20) {
-        auto* root=record->m_pWorldBsp->GetRoot(); if (!root) return true;
+    if (auto* bsp=drawn_world(world)) {
+        auto* root=bsp->GetRoot(); if (!root) return true;
         const auto span=model-light; const auto length=span.Mag(); if (length<=64+extent) return true;
         auto from=light+span*(48/length),to=model-span*(extent/length);
         LTVector hit; LTPlane plane;
@@ -281,6 +307,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     if (self->sun_world!=world) { self->sun_cache.clear(); self->light_sight.clear(); self->sun_world=world; }
     if (self->sun_cache.size()>4096) std::erase_if(self->sun_cache,[](const auto& item) { return item.second.lifetime.expired(); });
     if (self->light_sight.size()>16384) std::erase_if(self->light_sight,[](const auto& item) { return item.second.lifetime.expired(); });
+    if (self->shadow_fades.size()>4096) std::erase_if(self->shadow_fades,[&](const auto& item) { return item.second.lifetime.expired() || options.time-item.second.seen>shadow_fade_in; });
     std::optional<CameraView> sky_camera; std::vector<MoveObjectReference> sky_objects;
     std::set<HOBJECT,std::less<HOBJECT>> sky_members;
     if (world && draw_world && sky_stats) {
@@ -291,8 +318,15 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     }
     struct Object { MoveObjectReference reference; float distance; bool close,translucent,no_z,sprite,brush,sky,effect; };
     std::vector<Object> objects; objects.reserve(input.size()+maximum_sky_objects); std::set<HOBJECT,std::less<HOBJECT>> seen;
+    // Only these SDK object types use this bit. Reset even hidden objects,
+    // but leave other passes' objects alone (e.g. world water while drawing
+    // an interface model with RenderObjects).
+    const auto reset_drawn=[](LTObject* object) {
+        if (object->m_ObjectType==OT_POLYGRID || object->m_ObjectType==OT_PARTICLESYSTEM) object->m_Flags&=~FLAG_WASDRAWN;
+    };
     for (auto object : input) {
         if (!self->scene->contains(object)) throw std::invalid_argument("render pass received a foreign object");
+        reset_drawn(object);
         if (sky_members.contains(object)) continue;
         const bool brush=brush_stats && (object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER);
         const bool effect=effect_stats && effect_type(object->m_ObjectType);
@@ -315,6 +349,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     }
     for (const auto& entry : sky_objects) {
         if (!entry.guard.unchanged() || !self->scene->contains(entry.object)) continue;
+        reset_drawn(entry.object);
         const auto* object=entry.object;
         if (!(object->m_Flags&FLAG_VISIBLE) || (object->m_ChangeFlags&1)) continue;
         const bool sprite=object->m_ObjectType==OT_SPRITE,brush=object->m_ObjectType==OT_WORLDMODEL || object->m_ObjectType==OT_CONTAINER;
@@ -334,15 +369,14 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
         return a.translucent ? a.distance>b.distance : a.distance<b.distance;
     });
     self->rendering=true;
-    for (auto& [name,material] : self->materials) material.used=false;
-    struct Reset { State& state; ~Reset() { std::erase_if(state.materials,[](const auto& item) { return !item.second.used; }); state.rendering=false; } } reset{*self};
+    ++self->frames;
+    struct Reset { State& state; ~Reset() { std::erase_if(state.materials,[&](const auto& item) { return state.frames-item.second.used>material_frames; }); state.rendering=false; } } reset{*self};
     Frame frame(normal); auto visibility=self->textures->begin_render(); ModelRenderStats stats;
     bool fog_sky=false,fog_on=apply_fog(options.fog,false);
     // What model shadows fall on: the drawn world, and the visible brushes.
     std::vector<ShadowReceiver> shadow_receivers;
     if (world && (options.shadows.max>0 || options.shadow_maps!=ModelRenderOptions::ShadowMapMode::Off)) {
-        for (auto* record : std::span(world->m_Worlds.GetArray(),world->m_Worlds.GetSize()))
-            if (record->m_pWorldBsp->m_nUnknown48&0x20) shadow_receivers.push_back({record->m_pWorldBsp});
+        if (auto* bsp=drawn_world(*world)) shadow_receivers.push_back({bsp});
         for (const auto& entry : objects) if (entry.brush && !entry.sky && (entry.reference.object->m_Flags&FLAG_VISIBLE)) {
             auto* brush=static_cast<CObjWorldModel*>(entry.reference.object);
             if (brush->m_pWorldBsp) shadow_receivers.push_back({brush->m_pWorldBsp,&brush->m_Transform1f0,&brush->m_Transform230});
@@ -367,6 +401,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             auto renderer=std::make_unique<GlWorld>(world,self->textures,self->assets,self->gpu);
             self->world_renderer=std::move(renderer); self->rendered_world=world; self->world_generation=world->lighting_generation();
         }
+        world_style.fog=fog_on;
         if (draw_world) *world_stats=self->world_renderer->render_static(normal,visibility,world_style);
     }
     // Shadow maps: the solid models that cast them, drawn into their maps and
@@ -376,19 +411,64 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
     if (world && options.shadow_maps!=ModelRenderOptions::ShadowMapMode::Off) {
         ShadowSettings settings; settings.weighted=enhanced;
         settings.tile=std::clamp(options.shadow_resolution,32,2048);
-        settings.tiles=std::clamp(options.shadow_casters,1,64)*std::clamp(options.shadow_lights,1,4);
+        settings.tiles=std::clamp(options.shadow_casters,1,64)*std::clamp(options.shadow_lights,1,4)+(enhanced ? brush_casters_max : 0);
         settings.strength=enhanced ? .85f : std::clamp(options.shadows.alpha,0.f,255.f)/255*.65f;
         mapped=self->shadow_maps.begin(settings);
     }
-    struct Caster { const LTObject* object; std::vector<DrawnMesh> meshes; LTVector center; float radius,reach,above; };
-    std::vector<Caster> casters;
+    struct Caster { const LTObject* object; std::vector<DrawnMesh> meshes; LTVector center; float radius,reach,above; std::vector<LTVector> triangles; const IWorldBsp* own=nullptr; float strength=1; };
+    // An enhanced shadow's depth: grown in since its caster began to cast,
+    // and fading over the last quarter of the shadow distance.
+    const auto shadow_strength=[&](const LTObject* object,LTVector center) {
+        const float far=std::max(options.shadow_distance,1.f),distance=center.Dist(normal.position());
+        if (!(distance<far)) return 0.f;
+        auto& fade=self->shadow_fades[object];
+        if (fade.lifetime.lock()!=object->m_Lifetime || !(options.time>=fade.seen) || options.time-fade.seen>shadow_fade_in) fade={object->m_Lifetime,options.time,0};
+        fade.amount=std::min(1.f,fade.amount+float((options.time-fade.seen)/shadow_fade_in)); fade.seen=options.time;
+        const float t=std::clamp((distance-far*.75f)/(far*.25f),0.f,1.f);
+        return fade.amount*(1-t*t*(3-2*t));
+    };
+    std::vector<Caster> casters,brush_casters;
+    // Enhanced lighting: the nearest brushes the size of furniture, doors
+    // and crates cast too, each from its strongest light. The lightmaps
+    // hold no brush's shadow.
+    if (mapped && enhanced) {
+        for (const auto& entry : objects) {
+            if (!entry.brush || entry.sky || entry.translucent || !(entry.reference.object->m_Flags&FLAG_VISIBLE)) continue;
+            const auto* brush=static_cast<const CObjWorldModel*>(entry.reference.object); const auto* bsp=static_cast<const CWorldBsp*>(brush->m_pWorldBsp);
+            if (!bsp || !bsp->m_nParts || bsp->m_nParts>512) continue;
+            const auto center=(brush->m_BBoxMin+brush->m_BBoxMax)*.5f; const float radius=(brush->m_BBoxMax-brush->m_BBoxMin).Mag()*.5f;
+            if (!(radius>=4 && radius<=384) || !(center.Dist(normal.position())<options.shadow_distance)) continue;
+            Caster caster{brush,{},center,radius,std::max(radius*2,160.f),0,{},bsp};
+            for (uint32 i=0;i<bsp->m_nParts;++i) {
+                const auto* polygon=bsp->m_ppParts[i]; if (!polygon || !polygon->m_pSurface || (polygon->m_pSurface->m_nFlags&(0x4|0x8|0x10))) continue;
+                const auto count=uint32(polygon->m_nVerts); if (count<3) continue;
+                const auto corner=[&](uint32 v) { return world_TransformPoint(brush->m_Transform1f0,*polygon->m_Verts[v].m_pPos); };
+                const auto first=corner(0);
+                for (uint32 v=1;v+1<count;++v) { caster.triangles.push_back(first); caster.triangles.push_back(corner(v)); caster.triangles.push_back(corner(v+1)); }
+            }
+            if (!caster.triangles.empty()) brush_casters.push_back(std::move(caster));
+        }
+        std::sort(brush_casters.begin(),brush_casters.end(),[&](const Caster& a,const Caster& b) { return a.center.DistSqr(normal.position())<b.center.DistSqr(normal.position()); });
+        if (brush_casters.size()>brush_casters_max) brush_casters.resize(brush_casters_max);
+        for (auto& caster : brush_casters) caster.strength=shadow_strength(caster.object,caster.center);
+        std::erase_if(brush_casters,[](const Caster& caster) { return !(caster.strength>0); });
+        // The sun reaches a brush as it does a model: where its middle sees the sky.
+        if (options.apply_sun && luminance(options.sun_color)>0) for (const auto& caster : brush_casters) {
+            auto& cached=self->sun_cache[caster.object];
+            if (cached.lifetime.lock()!=caster.object->m_Lifetime || cached.position.Dist(caster.center)>16)
+                cached={caster.object->m_Lifetime,caster.center,sun_amount(*world,caster.center,{1,0,0},caster.radius,options.sun_direction,0)};
+        }
+    }
     bool shadowed=false;
     const auto shadow_pass=[&] {
         if (shadowed || !mapped) return; shadowed=true;
-        if (casters.empty()) return;
-        for (const auto& caster : casters) {
+        if (casters.empty() && brush_casters.empty()) return;
+        std::vector<const Caster*> all; for (const auto* list : {&casters,&brush_casters}) for (const auto& caster : *list) all.push_back(&caster);
+        for (const auto* each : all) {
+            const auto& caster=*each;
             ShadowCaster shape; shape.center=caster.center; shape.radius=caster.radius; shape.reach=caster.reach;
             for (const auto& mesh : caster.meshes) shape.meshes.push_back({mesh.data,mesh.positions});
+            shape.triangles=caster.triangles; shape.own=caster.own; shape.strength=caster.strength;
             // The caster's strongest lights that reach it through the world:
             // the sun where it sees the sky, the frame's lights, the world's.
             struct Candidate { ShadowLight light; float score; std::size_t index; bool dynamic; };
@@ -409,11 +489,18 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
             };
             for (const auto& light : options.lights) point(light.position,light.radius,light.color,0,true);
             const auto& statics=world->Lights();
-            for (std::size_t i=0;i<statics.size();++i) point(statics[i].position,statics[i].radius,statics[i].color,i,false);
+            for (std::size_t i=0;i<statics.size();++i) {
+                const auto& light=statics[i];
+                const auto delta=caster.center-light.position;
+                // Keep a caster intersecting the cone even when its centre
+                // is outside; the receiver shader clips the cone precisely.
+                if (light.fov_cos>-1 && delta.Dot(light.direction)+caster.radius<light.fov_cos*delta.Mag()) continue;
+                point(light.position,light.radius,light.color,i,false);
+            }
             std::sort(candidates.begin(),candidates.end(),[](const Candidate& a,const Candidate& b) { return a.score>b.score; });
             int added=0,tested=0;
             for (const auto& candidate : candidates) {
-                if (added>=std::clamp(options.shadow_lights,1,4) || tested>=8) break;
+                if (added>=(caster.own ? 1 : std::clamp(options.shadow_lights,1,4)) || tested>=8) break;
                 if (!candidate.light.sun) {
                     bool clear;
                     if (candidate.dynamic) { ++tested; clear=light_reaches(*world,candidate.light.position,caster.center,caster.radius*.5f); }
@@ -426,12 +513,17 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                     }
                     if (!clear) continue;
                 }
-                added+=self->shadow_maps.add(shape,candidate.light);
+                auto light=candidate.light;
+                if (!candidate.dynamic && !light.sun) {
+                    light.cone=statics[candidate.index].fov_cos;
+                    light.direction=statics[candidate.index].direction;
+                }
+                added+=self->shadow_maps.add(shape,light,shadow_receivers);
             }
             // Nothing lights it: a light straight above, as the blob shadow.
-            if (!added) {
+            if (!added && !caster.own && !enhanced) {
                 ShadowLight above; above.position=caster.center+LTVector(0,caster.above,0); above.radius=caster.above*3; above.color={96,96,96};
-                self->shadow_maps.add(shape,above);
+                self->shadow_maps.add(shape,above,shadow_receivers);
             }
         }
         Frame::load(normal); rd_DepthRange(.1f,1);
@@ -450,7 +542,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
         rd_DepthRange(entry.sky ? 1.f : .1f,1);
         if (entry.brush) {
             if (!self->world_renderer || !world) { ++brush_stats->culled; continue; }
-            auto style=world_style; style.time=options.time;
+            auto style=world_style; style.time=options.time; style.fog=fog_on && !entry.sky && !object_fog.disabled;
             const auto result=entry.sky ? self->world_renderer->render_sky_brush(*static_cast<CObjWorldModel*>(entry.reference.object),base,visibility,style) :
                 self->world_renderer->render_brush(*static_cast<CObjWorldModel*>(entry.reference.object),base,visibility,style,draw_world);
             auto& report=entry.sky ? *sky_stats : *brush_stats;
@@ -496,7 +588,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                 const auto mesh=polygrid_mesh(grid,*object,view.position(),width,height,options.light_scale,world_options && world_options->saturate);
                 if (!view.visible(mesh.center,mesh.radius)) { ++report.culled; continue; }
                 const auto triangles=self->grid_draw.draw(mesh,texture,environment,visibility,draw_style);
-                if (triangles) { ++report.systems; ++report.polygrids; report.triangles+=triangles; }
+                if (triangles) { object->m_Flags|=FLAG_WASDRAWN; ++report.systems; ++report.polygrids; report.triangles+=triangles; }
                 continue;
             }
             if (object->m_ObjectType==OT_CANVAS) {
@@ -520,6 +612,7 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                 }
                 const auto vertices=particle_vertices(particles,*object,view,width,height,entry.close || entry.sky ? .01f : 7.f,options.light_scale);
                 drawn=self->effect_draw.draw(vertices,true,texture,visibility,style); report.particles+=drawn;
+                if (drawn) object->m_Flags|=FLAG_WASDRAWN;
             } else {
                 const auto lines=self->scene->effects().snapshot_lines(object); const auto vertices=line_vertices(lines,*object,view,options.light_scale);
                 drawn=self->effect_draw.draw(vertices,false,{},visibility,style); report.lines+=drawn;
@@ -710,7 +803,10 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
         // Chrome (DoModelDrawing): the camera's right and up rows, through
         // the NormalRef node's frame when the model has one.
         std::shared_ptr<const TextureResource> chrome;
-        if (options.chrome && !options.environment_map.empty() && (options.chrome_all || (hook.m_ObjectFlags&FLAG_ENVIRONMENTMAP))) chrome=self->skin(options.environment_map,options.time);
+        // Reflection maps are optional. A missing map must not abort the
+        // camera pass after drawing some of a character's attachments.
+        if (options.chrome && !options.environment_map.empty() && (options.chrome_all || (hook.m_ObjectFlags&FLAG_ENVIRONMENTMAP)) &&
+            self->assets && self->assets->contains(options.environment_map)) chrome=self->skin(options.environment_map,options.time);
         std::array<LTVector,2> chrome_rows{normal.right(),normal.up()};
         const auto& chrome_model=*pose->model;
         if (chrome && chrome_model.m_Unknown13c && chrome_model.m_n0f4>=0 && std::size_t(chrome_model.m_n0f4)<pose->nodes.size()) {
@@ -764,13 +860,8 @@ ModelRenderStats SceneRenderer::draw_objects(HOBJECT camera,std::span<HOBJECT co
                 for (unsigned axis=0;axis<3;++axis) { low[axis]=std::min(low[axis],point[axis]); high[axis]=std::max(high[axis],point[axis]); }
             }
             const auto middle=(low+high)*.5f; const float extent=std::max((high-low).Mag()*.5f,1.f);
-            casters.push_back({object,std::move(meshes),middle,extent,reach,above});
-            // Enhanced lighting keeps a fainter blob where a character meets
-            // the ground, which no light's map gives it.
-            if (enhanced && projected_caster) {
-                auto contact=options.shadows; contact.alpha*=.45f;
-                model_DrawShadow(*pose->model,object->m_Pos,shadow_receivers,normal.position(),contact);
-            }
+            const float strength=enhanced ? shadow_strength(object,middle) : 1.f;
+            if (strength>0) casters.push_back({object,std::move(meshes),middle,extent,reach,above,{},nullptr,strength});
         } else if (drawn && !entry.close && !entry.sky && (hook.m_ObjectFlags&FLAG_SHADOW) && !(mapped && projected_caster))
             model_DrawShadow(*pose->model,object->m_Pos,shadow_receivers,normal.position(),options.shadows);
     }

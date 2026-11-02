@@ -5,12 +5,14 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <thread>
 
 namespace {
 struct StringRecord {
     explicit StringRecord(const char* text) : value(text) {}
     std::atomic<uint32> references{1};
     std::string value;
+    std::thread::id creator = std::this_thread::get_id();
 };
 std::mutex bankMutex;
 std::unordered_set<StringRecord*> strings;
@@ -64,6 +66,16 @@ void sb_EnumStrings(void (*callback)(char*, void*), void* user) {
     {
         std::lock_guard lock(bankMutex);
         for (const auto* item : strings) snapshot.push_back(item->value);
+    }
+    for (auto& text : snapshot) callback(text.data(), user);
+}
+void sb_EnumThreadStrings(void (*callback)(char*, void*), void* user) {
+    if (!callback) return;
+    std::vector<std::string> snapshot;
+    {
+        std::lock_guard lock(bankMutex);
+        for (const auto* item : strings)
+            if (item->creator == std::this_thread::get_id()) snapshot.push_back(item->value);
     }
     for (auto& text : snapshot) callback(text.data(), user);
 }

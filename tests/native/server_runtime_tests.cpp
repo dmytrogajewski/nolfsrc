@@ -125,6 +125,18 @@ void actors(const char* module_path) {
     require(game && alive() == 1 && game->m_hObject->m_pSData->m_pBaseClass == game,"real actor creation publishes the actual game class");
     auto* object = game->m_hObject;
     auto* api = server.m_pUnknown928;
+    uint32 portal_flags=123;
+    char missing_portal[]="UncompiledPortal";
+    require(api->GetPortalFlags(missing_portal,&portal_flags)==LT_NOTFOUND && !portal_flags,
+        "absent optional visibility portal retained undefined flags");
+    auto* absent=api->StartHMessageWrite();
+    require(absent && api->WriteToMessageHMessageRead(absent,nullptr)==LT_OK,"optional nested message serialization failed");
+    absent->ResetPos();
+    uint32 absent_status=0;
+    require(absent->ReadWord()==0xffff && absent->GetStatus(absent_status)==LT_OK && !absent_status,"optional nested message lost its null sentinel");
+    absent->Release();
+    require(api->HandleToObject(object)==game && !api->HandleToObject(nullptr) &&
+        !api->HandleToObject(reinterpret_cast<HOBJECT>(std::uintptr_t(1))),"SDK handle lookup must validate object ownership before dereferencing it");
     auto send_trigger = [&](const char* text) {
         auto* message = api->StartMessageToObject(game, object, 1000);
         require(message && WriteTriggerMessage(message, text) == LT_OK, "owned trigger encodes");
@@ -153,6 +165,7 @@ void actors(const char* module_path) {
     require(document.objects.size() == 1 && document.objects[0].name == "SaveActor" && document.objects[0].position == nolf::SavedVector{10,20,30},"real actor engine fields captured");
     ObjectCallbackGuard original(*object);
     require(sm_RemoveObjectFromWorld(&server,game) == LT_OK && !original.alive() && alive() == 0 && !server.m_pChangedObjects,"real actor removal releases both game and native identities");
+    require(!api->HandleToObject(object),"SDK handle lookup dereferenced a retired cinematic speaker");
     require(output.SeekTo(0) == LT_OK && sav_RestoreObjects(&server,&output,93,0) == LT_OK,"real actor restore crosses native creation and physics");
     require(server.m_Unknown390.m_Allocated.size() == 1 && alive() == 1,"real actor restore owns one native and game object");
     auto* restored = server.m_Unknown390.m_Allocated.begin()->first;
@@ -176,6 +189,21 @@ void actors(const char* module_path) {
         require(sav_RestoreFile(&server,outside.c_str(),93,0) != LT_OK,"host restore path accepted");
     }
     require(sm_RemoveObjectFromWorld(&server,restored->m_pSData->m_pBaseClass) == LT_OK,"remove restored actor");
+    {
+        auto pending = document;
+        pending.objects[0].change_flags |= 1;
+        const auto ids = server.m_Unknown8bc;
+        for (unsigned round=0;round<3;++round) {
+            nolf::MemoryStream saved_pending(nolf::EncodeSavedGame(pending));
+            require(sav_RestoreObjects(&server,&saved_pending,93,0) == LT_OK,"restore an actor queued for deletion by a save callback");
+            require(!server.m_Link83c.IsTiedOff(),"restored pending deletion has an actual queue entry");
+            ObjectCallbackGuard queued(*server.m_Unknown390.m_Allocated.begin()->first);
+            sm_DrainObjectQueue(&server);
+            require(!queued.alive() && alive() == 0 && server.m_Unknown390.m_Allocated.empty() && server.m_Link83c.IsTiedOff(),
+                "restored pending deletion retires native and game identities");
+            require(server.m_Unknown8bc == ids,"repeated restore reuses deleted object IDs");
+        }
+    }
     for (auto message : {MID_ACTIVATING,MID_INITIALUPDATE}) for (bool drain : {false,true}) {
         engine_hook = [&](BaseClass* self,uint32 current,void*,float) {
             if (current != uint32(message)) return;
@@ -665,6 +693,9 @@ void checks() {
     for (uint16 id = 0; id < 257; ++id)
         require(server.m_CachedFiles[id].file_id == id && server.m_CachedFiles[id].type == id % 4,"file-cache growth preserves every typed entry");
     require(sm_StartWorldA(&server,1) == LT_OK && server.m_CachedFiles.empty(),"new world caching pass clears the prior inventory");
+    char optional[]="";
+    for (auto type : {FT_MODEL,FT_SPRITE,FT_TEXTURE,FT_SOUND})
+        require(sdk->CacheFile(type,optional)==LT_OK && server.m_CachedFiles.empty(),"empty optional preload registered an invalid asset");
     ObjectList empty{nullptr,0};
     con_SetVar(&server.m_ConsoleState,"SaveProbe","a; b \" c % d");
     server.m_Time = 25.5f; server.m_Unknown6c0 = 30;

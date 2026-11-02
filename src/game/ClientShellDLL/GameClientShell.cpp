@@ -1473,6 +1473,10 @@ LTRESULT CGameClientShell::OnTouchNotify(HOBJECT hMain, CollisionInfo *pInfo, fl
 
 void CGameClientShell::PreLoadWorld(char *pWorldName)
 {
+    // Defer this world's music triggers until its control file is loaded,
+    // including when the previous world or the menus already had music.
+    m_Music.TermLevel();
+
 	if (IsMainWindowMinimized())
 	{
 //		NetStart_RestoreMainWnd();

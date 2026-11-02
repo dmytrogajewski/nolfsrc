@@ -20,6 +20,8 @@
 #include <limits>
 #include <stdexcept>
 #include <set>
+#include <span>
+#include <vector>
 
 namespace {
 void require(bool value,const char* why) { if (!value) throw std::runtime_error(why); }
@@ -223,6 +225,15 @@ void sdk_objects(Files& files) {
         LTVector actual; api.GetObjectPos(object,&actual); require(near(actual,position),"SDK object transform did not reach the native instance");
         auto invalid=rotation; invalid.m_Quat[0]=std::numeric_limits<float>::quiet_NaN(); LTVector rejected{40,50,60}; api.SetObjectPosAndRotation(object,&rejected,&invalid);
         require(near(object->m_Pos,position),"SDK combined transform partially committed invalid rotation");
+        // m03s01's camera keyframer adds quaternion component offsets. The
+        // resulting non-unit rotation must survive both server and SDK moves.
+        LTRotation keyframed(.053f,-.731f,.058f,.680f);
+        require(scene.rotation(object,keyframed)==LT_OK && object->m_Rotation==keyframed,"keyframer rotation rejected or normalized before its offsets could be reused");
+        auto next=keyframed; next.m_Quat[3]+=.002f;
+        api.SetObjectPosAndRotation(object,&rejected,&next);
+        require(near(object->m_Pos,rejected) && object->m_Rotation==next,"SDK combined transform rejected a non-unit keyframer rotation");
+        invalid.Init(0,0,0,0);
+        require(scene.rotation(object,invalid)==LT_INVALIDPARAMS && object->m_Rotation==next,"zero quaternion replaced a valid rotation");
         api.SetObjectColor(object,-1,.5f,2,1); float green=0,alpha=0; api.GetObjectColor(object,nullptr,&green,nullptr,&alpha);
         require(std::fabs(green-127/255.f)<.0001f && alpha==1,"SDK color conversion/null optional outputs");
         require(api.SetObjectUserFlags(object,0xfedcba98)==LT_OK && scene.server_id(object,3)==LT_OK && api.SetObjectUserFlags(object,7)==LT_ERROR,"SDK allowed changing server-owned user flags");
@@ -259,9 +270,54 @@ void sdk_objects(Files& files) {
     }
     require(!*lifetime && code.expired(),"retired scene retained objects/code after its final SDK callback scope");
 }
+void chateau_window(const char* path) {
+    auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(path);
+    nolf::ClientScene scene(assets);
+    require(scene.load_world("worlds/m06s02.dat")==LT_OK,"chateau fixture world load");
+    struct Window { const char* frame; const char* pane; LTVector hinge; float opening; };
+    const Window windows[]{
+        {"RotatingDoor0","Door0",{-500,184,0},-1},
+        {"RotatingDoor1","Door1",{-780,312,640},1},
+        {"RotatingDoor4","Door10",{-3860,376,-64},1},
+        {"RotatingDoor5","Door11",{-3860,376,1088},1}
+    };
+    for (const auto& window : windows) {
+        ObjectCreateStruct input; input.m_ObjectType=OT_WORLDMODEL; input.m_Flags=FLAG_SOLID;
+        std::strcpy(input.m_Filename,window.frame); HOBJECT frame=nullptr,pane=nullptr;
+        require(scene.create(input,frame)==LT_OK,"chateau window frame creation");
+        input.m_Flags|=FLAG_BOXPHYSICS; std::strcpy(input.m_Filename,window.pane);
+        require(scene.create(input,pane)==LT_OK,"chateau window glass creation");
+        const auto closed=pane->m_Dims,closed_position=pane->m_Pos;
+        ObjectCreateStruct player_input; player_input.m_Flags=FLAG_SOLID;
+        player_input.m_Pos=closed_position+LTVector(window.opening*160,0,0); HOBJECT player=nullptr;
+        require(scene.create(player_input,player)==LT_OK,"chateau player collision fixture creation");
+        LTVector crouched{24,31,24};
+        require(scene.physics().SetObjectDims(player,&crouched,0)==LT_OK,"chateau crouched dimensions");
+        auto inside=closed_position-LTVector(window.opening*64,0,0);
+        HOBJECT glass[]{pane};
+        require(scene.physics().MovePushObjects(player,inside,glass,1)==LT_OK &&
+            (player->m_Pos.x-closed_position.x)*window.opening>0,"closed chateau glass did not block entry");
+        LTRotation identity; identity.Init(); HATTACHMENT link=nullptr;
+        require(scene.attach(frame,pane,-1,pane->m_Pos-frame->m_Pos,identity,link)==LT_OK,"chateau glass attachment");
+        const float quarter=std::sqrt(.5f);
+        require(scene.rotation(frame,{0,0,window.opening*quarter,quarter})==LT_OK,"chateau window opening rotation");
+        const auto offset=frame->m_Pos-window.hinge;
+        require(scene.position(frame,window.hinge+LTVector(-window.opening*offset.y,window.opening*offset.x,offset.z),true)==LT_OK,
+            "chateau window opening pivot");
+        require(std::fabs(pane->m_Dims.x-closed.y)<.01f && std::fabs(pane->m_Dims.y-closed.x)<.01f,
+            "opened chateau window retained its closed glass collision bounds");
+        require(scene.position(player,player_input.m_Pos,true)==LT_OK &&
+            scene.physics().MovePushObjects(player,inside,glass,1)==LT_OK && near(player->m_Pos,inside),
+            "open chateau glass blocked crouched entry below the raised pane");
+        require(scene.detach(link)==LT_OK && scene.rotation(pane,identity)==LT_OK && near(pane->m_Dims,closed),
+            "direct window rotation left stale collision extents");
+        require(scene.remove(player)==LT_OK && scene.remove(pane)==LT_OK && scene.remove(frame)==LT_OK,"chateau window fixture release");
+        std::cout<<"Chateau "<<window.frame<<": closed glass blocks, raised glass clears crouched entry; collision bounds follow attached and direct rotations\n";
+    }
+}
 void original_assets(const char* path) {
     auto assets=std::make_shared<nolf::Assets>(); assets->mount_game(path); nolf::ClientScene scene(assets);
-    auto* camera=create(scene,OT_CAMERA); unsigned worlds=0,models=0,starts=0,sweeps=0,contacts=0,visibility_rejections=0,light_animations=0,portals_set=0;
+    auto* camera=create(scene,OT_CAMERA); unsigned worlds=0,models=0,starts=0,sweeps=0,contacts=0,visibility_rejections=0,light_animations=0,portals_set=0,brushes_followed=0,lifts_ridden=0;
     for (const auto& name : assets->names()) {
         if (name.ends_with(".abc")) {
             auto* object=create(scene,OT_MODEL,name.c_str()); LTAnimTracker* tracker=nullptr;
@@ -345,6 +401,38 @@ void original_assets(const char* path) {
                 }
             }
             for (auto* probe : probes) require(scene.remove(probe)==LT_OK,"visibility probe release");
+            // A brush attached to a brush, as a car's panels to its body:
+            // non-solid, so its moves take the placement shortcut, and still
+            // drawn where its parent takes it.
+            // m02s01's lift carries the player standing in it: the game pushes
+            // the player with each move the server sends.
+            if (name=="worlds/m02s01.dat") {
+                char lift_name[]="elevator"; ObjectCreateStruct lift_input; lift_input.m_ObjectType=OT_WORLDMODEL; lift_input.m_Flags=FLAG_SOLID; std::strcpy(lift_input.m_Filename,lift_name);
+                HOBJECT lift=nullptr; require(scene.create(lift_input,lift,nolf::ClientObjectLifetime::World)==LT_OK,"m02s01 lift creation");
+                ObjectCreateStruct rider_input; rider_input.m_Pos={416,117,736}; rider_input.m_Flags=FLAG_SOLID; HOBJECT rider=nullptr;
+                require(scene.create(rider_input,rider,nolf::ClientObjectLifetime::World)==LT_OK,"lift rider creation");
+                LTVector rider_dims{16,53,16}; require(scene.physics().SetObjectDims(rider,&rider_dims,0)==LT_OK,"lift rider dimensions");
+                for (int step=1;step<=20;++step) {
+                    auto up=lift->m_Pos+LTVector(0,2,0); HOBJECT pushed[]{rider};
+                    require(scene.physics().MovePushObjects(lift,up,pushed,1)==LT_OK,"lift move");
+                }
+                require(std::fabs(rider->m_Pos.y-157)<1 && std::fabs(lift->m_Pos.y-160-40)<.01f,"the client's lift did not carry the player standing in it");
+                require(scene.remove(rider)==LT_OK && scene.remove(lift)==LT_OK,"lift release"); ++lifts_ridden;
+            }
+            if (!brushes_followed) {
+                std::vector<const char*> names;
+                for (auto* record : std::span(data->m_Worlds.GetArray(),data->m_Worlds.GetSize()))
+                    if (!(record->m_pWorldBsp->m_nUnknown48&(4|8|0x10|0x20)) && record->m_pWorldBsp->m_nParts && names.size()<2) names.push_back(record->m_pWorldBsp->m_Name);
+                if (names.size()==2) {
+                    auto* body=create(scene,OT_WORLDMODEL,names[0]); auto* panel=create(scene,OT_WORLDMODEL,names[1]);
+                    LTRotation identity; identity.Init(); HATTACHMENT link=nullptr;
+                    require(scene.attach(body,panel,-1,{0,10,0},identity,link)==LT_OK && link,"brush attachment setup");
+                    const auto& drawn=static_cast<CObjWorldModel*>(panel)->m_Transform1f0; const auto x=drawn.m[0][3];
+                    require(scene.position(body,body->m_Pos+LTVector(100,0,0),true)==LT_OK && near(panel->m_Pos,body->m_Pos+LTVector(0,10,0)),"attached brush did not follow its parent");
+                    require(std::fabs(drawn.m[0][3]-x-100)<.01f,"attached non-solid brush moved without its transform");
+                    require(scene.remove(panel)==LT_OK && scene.remove(body)==LT_OK,"brush attachment release"); ++brushes_followed;
+                }
+            }
             auto* network=create(scene); require(scene.server_id(network,1)==LT_OK,"world lifetime network identity setup");
             scene.client_flags(network,CF_NOTIFYREMOVE); nolf::ClientSceneEvents events;
             events.removed=[&](HOBJECT) { require(scene.server_id(camera,2)==LT_NOTINITIALIZED,"world unload callback converted persistent camera into a missed world object"); };
@@ -354,14 +442,14 @@ void original_assets(const char* path) {
             scene.events({});
         }
     }
-    require(models && worlds && sweeps && visibility_rejections && light_animations && portals_set && scene.size()==1,"original scene corpus was empty, unfiltered, unlit or leaked objects");
-    std::cout << "Original native client scene: " << models << " ABC models, " << worlds << " worlds, " << starts << " starts, " << sweeps << " sweeps, " << contacts << " supporting polygons, " << visibility_rejections << " PVS rejections, " << light_animations << " light animations, " << portals_set << " portal updates; persistent camera retained\n";
+    require(models && worlds && sweeps && visibility_rejections && light_animations && portals_set && brushes_followed && lifts_ridden && scene.size()==1,"original scene corpus was empty, unfiltered, unlit or leaked objects");
+    std::cout << "Original native client scene: " << models << " ABC models, " << worlds << " worlds, " << starts << " starts, " << sweeps << " sweeps, " << contacts << " supporting polygons, " << visibility_rejections << " PVS rejections, " << light_animations << " light animations, " << portals_set << " portal updates, " << brushes_followed << " attached brush, " << lifts_ridden << " lift ride; persistent camera retained\n";
 }
 }
 int main(int argc,char** argv) {
     nolf::platform::set_log_sink(diagnostic);
     struct ResetLog { ~ResetLog() { nolf::platform::set_log_sink(nullptr); } } reset;
-    try { Files files; objects_and_cameras(); callbacks(); attachments(); models(files); node_callbacks(files); sdk_objects(files); if (argc==2) original_assets(argv[1]);
+    try { if (argc==3 && std::string_view(argv[2])=="--chateau-window") { chateau_window(argv[1]); return 0; } Files files; objects_and_cameras(); callbacks(); attachments(); models(files); node_callbacks(files); sdk_objects(files); if (argc==2) original_assets(argv[1]);
         require(!solver_errors,"production client scene movement emitted solver errors");
         std::cout << "Native client scene objects, cameras, SDK model/common interfaces, callbacks and retirement passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
